@@ -1,0 +1,26 @@
+@import "tailwindcss";
+@source "../../../public";
+
+@theme {
+  --color-cream: #fff8ef;
+  --color-ink: #2b2340;
+  --color-coral: #ff7a59;
+  --color-coral-dark: #e25c3b;
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Noto Sans Ethiopic", "Nyala", sans-serif;
+}
+
+@layer components {
+  .btn { @apply inline-flex items-center gap-1.5 rounded-full bg-coral px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-coral-dark disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-soft { @apply inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-4 py-2 font-semibold text-ink transition hover:bg-violet-200 disabled:opacity-50; }
+  .btn-danger { @apply inline-flex items-center gap-1.5 rounded-full bg-red-100 px-4 py-2 font-semibold text-red-700 transition hover:bg-red-200; }
+  .card { @apply mb-4 rounded-2xl border border-orange-100 bg-white p-5 shadow-sm; }
+  .field { @apply w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-ink focus:border-violet-400; }
+  .label { @apply mb-1 block text-sm font-semibold; }
+  .nav-link { @apply flex items-center gap-3 rounded-xl px-3 py-2 font-medium text-stone-600 transition hover:bg-orange-50 hover:text-ink; }
+  .nav-link[aria-current="page"] { @apply bg-orange-100 text-ink; }
+  .side-heading { @apply px-2 pb-2 text-[11px] font-bold uppercase tracking-wider text-stone-400; }
+  .side-item { @apply block rounded-xl border border-transparent px-3 py-2.5 transition hover:border-orange-100 hover:bg-orange-50/60; }
+  .side-item[aria-current="page"] { @apply border-orange-200 bg-orange-50; }
+  .chip { @apply rounded-full bg-stone-100 px-3 py-1 text-sm text-stone-500; }
+  :where(button, a, input, select, textarea, summary):focus-visible { @apply outline-3 outline-offset-2 outline-blue-500; }
+}

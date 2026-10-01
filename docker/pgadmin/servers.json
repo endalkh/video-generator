@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "kids-studio (docker)",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "postgres",
+      "Username": "kids_studio",
+      "SSLMode": "prefer",
+      "ConnectionParameters": { "options": "-c search_path=public" }
+    }
+  }
+}

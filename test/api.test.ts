@@ -1,0 +1,93 @@
+import type { AddressInfo } from "node:net";
+import type http from "node:http";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createApp } from "../src/api/server.js";
+import { makeTestContainer } from "./helpers.js";
+
+let c: Awaited<ReturnType<typeof makeTestContainer>>;
+let server: http.Server;
+let base: string;
+
+beforeAll(async () => {
+  c = await makeTestContainer();
+  server = createApp(c);
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  base = `http://localhost:${(server.address() as AddressInfo).port}`;
+});
+afterAll(async () => {
+  server.closeAllConnections();
+  await new Promise((r) => server.close(r));
+  await c.cleanup();
+});
+
+const json = (method: string, body: unknown) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+describe("HTTP API", () => {
+  it("serves the UI shell", async () => {
+    const res = await fetch(`${base}/`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(await res.text()).toContain("Kids Animation Studio");
+    const js = await fetch(`${base}/app.js`);
+    expect([js.status, js.headers.get("content-type")]).toEqual([200, "text/javascript; charset=utf-8"]);
+    expect((await fetch(`${base}/..%2Fpackage.json`)).status).toBe(404);
+    expect((await fetch(`${base}/..%2F.env`)).status).toBe(404);
+  });
+
+  it("edits prompts with validation and history", async () => {
+    const list = await (await fetch(`${base}/api/prompts`)).json();
+    expect(list.map((p: { key: string }) => p.key)).toContain("song");
+
+    const bad = await fetch(`${base}/api/prompts/poem`, json("PUT", { template: "{{oops}}" }));
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).details[0]).toMatch(/unknown variable/);
+
+    const ok = await (await fetch(`${base}/api/prompts/poem`, json("PUT", { template: "Poem about {{topic}}", note: "short", expectedVersion: 1 }))).json();
+    expect(ok.version).toBe(2);
+    const stale = await fetch(`${base}/api/prompts/poem`, json("PUT", { template: "again", expectedVersion: 1 }));
+    expect(stale.status).toBe(409);
+
+    const preview = await (await fetch(`${base}/api/prompts/poem/preview`, json("POST", { input: { topic: "Colors" } }))).json();
+    expect(preview.text).toBe("Poem about Colors");
+    const reset = await (await fetch(`${base}/api/prompts/poem/reset`, json("POST", {}))).json();
+    expect(reset.isDefault).toBe(true);
+    expect(await (await fetch(`${base}/api/prompts/nope`)).json()).toMatchObject({ error: expect.stringMatching(/Unknown prompt/) });
+  });
+
+  it("creates a project, runs it, and serves the video with range requests", async () => {
+    const res = await fetch(`${base}/api/projects`, json("POST", { input: { topic: "Brushing teeth", sceneCount: 2 }, provider: "mock" }));
+    expect(res.status).toBe(201);
+    const { id } = await res.json();
+    await c.projectService.idle();
+    const p = await (await fetch(`${base}/api/projects/${id}`)).json();
+    expect(p.status).toBe("done");
+    expect(p.media.final).toBe("final.mp4");
+
+    const part = await fetch(`${base}/media/${id}/final.mp4`, { headers: { range: "bytes=0-99" } });
+    expect(part.status).toBe(206);
+    expect((await part.arrayBuffer()).byteLength).toBe(100);
+    expect((await fetch(`${base}/media/${id}/subtitles.vtt`)).headers.get("content-type")).toContain("text/vtt");
+    expect((await fetch(`${base}/media/${id}/..%2F..%2Fetc%2Fpasswd`)).status).toBe(404);
+
+    const gens = await (await fetch(`${base}/api/projects/${id}/generations`)).json();
+    expect(gens.some((g: { promptKey: string }) => g.promptKey === "scene_image")).toBe(true);
+  }, 60_000);
+
+  it("reads and changes per-task models", async () => {
+    const settings = await (await fetch(`${base}/api/models/settings`)).json();
+    expect(settings.find((s: { task: string }) => s.task === "song").model).toBe("lyria-3-clip-preview");
+    const ok = await fetch(`${base}/api/models/settings/scenes`, json("PUT", { model: "gemini-3.1-pro-preview" }));
+    expect((await ok.json()).model).toBe("gemini-3.1-pro-preview");
+    expect((await fetch(`${base}/api/models/settings/scenes`, json("PUT", { model: "veo-3.1-lite-generate-preview" }))).status).toBe(400);
+    expect((await fetch(`${base}/api/models/settings/nope`, json("PUT", { model: "x1" }))).status).toBe(404);
+    const avail = await (await fetch(`${base}/api/models/available?provider=mock`)).json();
+    expect(avail.byCapability.text.length).toBeGreaterThan(0);
+    await fetch(`${base}/api/models/settings/scenes/reset`, json("POST", {}));
+  });
+
+  it("rejects bad input, non-JSON writes, and foreign hosts/origins", async () => {
+    expect((await fetch(`${base}/api/projects`, json("POST", { input: { topic: "x" }, provider: "mock" }))).status).toBe(400);
+    expect((await fetch(`${base}/api/projects`, { method: "POST", body: "topic=x", headers: { "content-type": "application/x-www-form-urlencoded" } })).status).toBe(415);
+    expect((await fetch(`${base}/api/projects`, { headers: { origin: "https://evil.example" } })).status).toBe(403);
+  });
+});

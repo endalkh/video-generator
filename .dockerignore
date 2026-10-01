@@ -1,0 +1,15 @@
+node_modules
+dist
+output
+src/generated
+public/app.css
+.env
+.env.*
+!.env.example
+.git
+.idea
+.serena
+*.log
+.DS_Store
+test
+coverage

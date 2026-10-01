@@ -1,0 +1,68 @@
+# Kids Animation Studio: app + Postgres + pgAdmin.
+#   docker compose up -d --build
+#   App:     http://localhost:5178
+#   pgAdmin: http://localhost:5051
+# Ports are published on 127.0.0.1 only: the app has no login, so keep it off the network.
+
+name: kids-studio
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kids_studio}
+      POSTGRES_USER: ${POSTGRES_USER:-kids_studio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/<major>/docker, so mount the parent.
+      - pgdata:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:9.18.0
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?set PGADMIN_PASSWORD in .env}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+    volumes:
+      - pgadmin:/var/lib/pgadmin
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT:-5051}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build: .
+    image: kids-animation-studio:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kids_studio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-kids_studio}?schema=public
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      HOST: 0.0.0.0
+      PORT: 5178
+      MEDIA_ROOT: /app/output
+    volumes:
+      - media:/app/output
+    ports:
+      - "127.0.0.1:${APP_PORT:-5178}:5178"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  pgadmin:
+  media:

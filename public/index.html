@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kids Animation Studio</title>
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body class="min-h-screen bg-cream font-sans text-ink">
+  <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-1">Skip to content</a>
+  <div class="md:grid md:grid-cols-[272px_1fr]">
+    <!-- Sidebar: brand + sections + contextual list. Sticky, full height, scrolls on its own. -->
+    <aside class="flex flex-col border-b border-orange-100 bg-white md:sticky md:top-0 md:h-screen md:border-r md:border-b-0" aria-label="Sidebar">
+      <div class="flex items-center gap-2.5 px-5 pt-5 pb-4">
+        <span aria-hidden="true" class="grid size-9 place-items-center rounded-xl bg-coral/15 text-xl">🎈</span>
+        <div class="leading-tight">
+          <p class="font-bold">Kids Animation</p>
+          <p class="text-xs text-stone-500">Studio</p>
+        </div>
+      </div>
+      <nav aria-label="Sections" class="px-3">
+        <ul class="space-y-0.5">
+          <li><a href="#/new" data-nav="videos" class="nav-link"><span aria-hidden="true">🎬</span> Videos</a></li>
+          <li><a href="#/prompts" data-nav="prompts" class="nav-link"><span aria-hidden="true">📝</span> Prompts</a></li>
+          <li><a href="#/models" data-nav="models" class="nav-link"><span aria-hidden="true">🧠</span> Models</a></li>
+        </ul>
+      </nav>
+      <div class="mx-5 my-4 h-px bg-orange-100"></div>
+      <div id="sidebar" class="min-h-0 flex-1 overflow-y-auto px-3 pb-4"></div>
+    </aside>
+    <main id="main" tabindex="-1" class="mx-auto w-full max-w-5xl p-6 outline-none md:p-8"></main>
+  </div>
+</body>
+</html>

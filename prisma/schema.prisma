@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProjectStatus {
+  new
+  running
+  /// Manual mode: waiting for the user to review the last finished step.
+  review
+  paused
+  done
+  failed
+}
+
+/// One video project. Text artifacts live here as JSON; media files live on disk under output/<id>/.
+model Project {
+  id          String        @id
+  topic       String
+  input       Json
+  provider    String
+  status      ProjectStatus @default(new)
+  error       String?
+  completed   String[]      @default([])
+  /// Manual mode: steps the user has reviewed and approved.
+  approved    String[]      @default([])
+  poem        Json?
+  scenes      Json?
+  character   Json?
+  song        Json?
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  generations Generation[]
+
+  @@index([updatedAt(sort: Desc)])
+  @@map("projects")
+}
+
+/// Current (editable) version of each prompt template.
+model Prompt {
+  key       String          @id
+  template  String
+  version   Int             @default(1)
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  versions  PromptVersion[]
+
+  @@map("prompts")
+}
+
+/// Full history of every prompt edit, so changes can be reviewed and restored.
+model PromptVersion {
+  id        BigInt   @id @default(autoincrement())
+  key       String
+  version   Int
+  template  String
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  prompt    Prompt   @relation(fields: [key], references: [key], onDelete: Cascade)
+
+  @@unique([key, version])
+  @@map("prompt_versions")
+}
+
+/// Every rendered prompt actually sent to a model, for debugging and tuning prompts.
+model Generation {
+  id            BigInt   @id @default(autoincrement())
+  projectId     String   @map("project_id")
+  step          String
+  sceneIndex    Int?     @map("scene_index")
+  promptKey     String   @map("prompt_key")
+  promptVersion Int      @map("prompt_version")
+  prompt        String
+  provider      String
+  /// Model that received the prompt ("" for rows created before models were tracked).
+  model         String   @default("")
+  createdAt     DateTime @default(now()) @map("created_at")
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, id])
+  @@map("generations")
+}
+
+/// Which AI model to use for each pipeline task (poem, scene plan, images, song, …). Edited on the Settings page.
+model ModelSetting {
+  task      String   @id
+  model     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("model_settings")
+}
