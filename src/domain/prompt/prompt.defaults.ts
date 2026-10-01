@@ -68,6 +68,17 @@ Style: {{style}}.
 {{safety}}`,
   },
   {
+    key: "character_from_image",
+    title: "Character from an uploaded picture",
+    description: "Describes an uploaded character picture so every scene can redraw it. The picture is attached. Must return JSON {name, description}.",
+    vars: ["character_name"],
+    template: `The attached picture shows the main character of a kids' cartoon about: {{topic}}.
+Name: {{character_name}}
+If a name is given above, use it exactly. Otherwise give them a short, friendly name{{#if am}} in Amharic (Ge'ez script){{/if}}.
+"description" must be a precise ENGLISH visual description of the character in the picture (species/body, age, skin, hair, eyes, colors, clothing, accessories, distinctive features) so an illustrator can redraw them identically every time. Describe only the character, not the art style or the background.
+{{safety}}`,
+  },
+  {
     key: "character_image",
     title: "Character reference image",
     description: "Image prompt for the character sheet that keeps every scene consistent.",

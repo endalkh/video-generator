@@ -45,7 +45,7 @@ export interface Provider {
   /** Models the account can use (for the Settings page). */
   listModels(): Promise<AvailableModel[]>;
   /** JSON generation validated against the step's schema. `model` comes from the per-task settings. */
-  text<K extends TextKind>(kind: K, prompt: string, opts: { model: string; ctx: GenContext }): Promise<TextOutputs[K]>;
+  text<K extends TextKind>(kind: K, prompt: string, opts: { model: string; ctx: GenContext; /** Pictures to look at (e.g. an uploaded character). */ images?: Buffer[] }): Promise<TextOutputs[K]>;
   /** Image (PNG/JPEG). `references` are attached images (e.g. the character sheet). */
   image(prompt: string, opts: { model: string; aspectRatio: string; references?: Buffer[]; label: string; ctx: GenContext }): Promise<Buffer>;
   /** Speech as WAV. */

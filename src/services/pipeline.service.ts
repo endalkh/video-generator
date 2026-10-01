@@ -3,7 +3,7 @@ import path from "node:path";
 import type { GenContext, Provider } from "../domain/ports/generator.port.js";
 import { mmss, songTimeline } from "../domain/ports/generator.port.js";
 import type { Project } from "../domain/project/project.entity.js";
-import { STEP_NAMES, type Scene, type StepName } from "../domain/project/project.model.js";
+import { STEP_NAMES, type Character, type Scene, type StepName } from "../domain/project/project.model.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { assertFfmpegAvailable, buildSrt, concatClips, formatFor, probeDuration, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
@@ -19,6 +19,7 @@ export type PipelineEvent =
   | { type: "step-done"; step: StepName }
   | { type: "progress"; step: StepName; done: number; total: number; message: string }
   | { type: "review"; step: StepName }
+  | { type: "stopped"; step: StepName }
   | { type: "done"; output: string; duration: number }
   | { type: "error"; message: string };
 
@@ -26,6 +27,13 @@ export type PipelineEvent =
 class ReviewPause extends Error {
   constructor(readonly step: StepName) {
     super(`waiting for review of ${step}`);
+  }
+}
+
+/** A single-step run (`until`) finished its step. */
+class StopAfter extends Error {
+  constructor(readonly step: StepName) {
+    super(`stopped after ${step}`);
   }
 }
 
@@ -104,6 +112,8 @@ export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (it
 export interface RunOptions {
   provider: Provider;
   from?: StepName;
+  /** Stop after this step instead of running to the final video (generate one step on its own). */
+  until?: StepName;
   concurrency?: number;
   signal?: AbortSignal;
   onEvent?: (e: PipelineEvent) => void;
@@ -128,7 +138,16 @@ export class PipelineService {
     return path.join(this.mediaRoot, projectId);
   }
 
-  /** Returns the final video path, or null when manual mode stopped for a review. */
+  /** Ask the character model to name and describe an uploaded character picture (logged like any other prompt). */
+  async describeCharacter(project: Project, picture: Buffer, provider: Provider, name?: string): Promise<Character> {
+    const [models, prompts] = await Promise.all([this.modelSettings.snapshot(), this.promptService.snapshotFor(project.input)]);
+    const r = prompts.render("character_from_image", { character_name: name || "(none given)" });
+    await this.generations.add({ projectId: project.id, step: "character", sceneIndex: null, promptKey: r.key, promptVersion: r.version, prompt: r.text, provider: provider.name, model: models.character });
+    const out = await provider.text("character", r.text, { model: models.character, images: [picture], ctx: { input: project.input, poem: project.poem ?? undefined } });
+    return name ? { ...out, name } : out;
+  }
+
+  /** Returns the final video path, or null when the run stopped for a review or after `until`. */
   async run(project: Project, opts: RunOptions): Promise<string | null> {
     const { provider, signal } = opts;
     const emit = opts.onEvent ?? (() => {});
@@ -176,6 +195,7 @@ export class PipelineService {
           emit({ type: "step-skip", step: name });
           log.step(name, "checkpoint found, skipping");
           if (project.needsReview(name)) throw new ReviewPause(name);
+          if (name === opts.until) throw new StopAfter(name);
           return;
         }
         project.redoFrom(name); // redoing a step invalidates everything after it
@@ -186,6 +206,7 @@ export class PipelineService {
         await save();
         emit({ type: "step-done", step: name });
         if (project.needsReview(name)) throw new ReviewPause(name);
+        if (name === opts.until) throw new StopAfter(name);
       };
       const allExist = (files: string[]) => async () => (await Promise.all(files.map(fileExists))).every(Boolean);
       const ctx = (extra: Partial<GenContext> = {}): GenContext => ({ input, poem: project.poem ?? undefined, ...extra });
@@ -345,6 +366,13 @@ export class PipelineService {
         await save();
         emit({ type: "review", step: err.step });
         log.step(err.step, "ready for review");
+        return null;
+      }
+      if (err instanceof StopAfter) {
+        project.pause(null);
+        await save();
+        emit({ type: "stopped", step: err.step });
+        log.step(err.step, "done (single step)");
         return null;
       }
       const cancelled = err instanceof PipelineCancelled;

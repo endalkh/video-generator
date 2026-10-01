@@ -1,9 +1,9 @@
-import { stat, unlink } from "node:fs/promises";
+import { readFile, stat, unlink } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConflictError, ValidationError } from "../src/domain/errors.js";
 import { probeDuration } from "../src/infrastructure/media/ffmpeg.js";
 import { mediaPaths } from "../src/services/pipeline.service.js";
-import { makeTestContainer } from "./helpers.js";
+import { makeTestContainer, mockProvider } from "./helpers.js";
 
 let c: Awaited<ReturnType<typeof makeTestContainer>>;
 afterEach(async () => c?.cleanup());
@@ -90,6 +90,83 @@ describe("manual review mode", () => {
     await c.projectService.start(created.id);
     await c.projectService.idle();
     expect((await c.projectService.get(created.id)).status).toBe("done");
+  }, 60_000);
+});
+
+describe("one step at a time", () => {
+  it("generates each step on its own, in order, and remakes a done step", async () => {
+    c = await makeTestContainer();
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "feeding the chickens", sceneCount: 2 }, "mock");
+    const gen = async (step: string) => { await ps.generateStep(id, step, { provider: "mock" }); await ps.idle(); return ps.get(id); };
+
+    await expect(ps.generateStep(id, "scenes")).rejects.toBeInstanceOf(ConflictError); // poem first
+    await expect(ps.generateStep(id, "nope")).rejects.toBeInstanceOf(ValidationError);
+
+    let p = await gen("poem");
+    expect([p.status, p.error, p.completed]).toEqual(["paused", null, ["poem"]]);
+    p = await gen("scenes");
+    expect([p.completed, p.media.characterImage]).toEqual([["poem", "scenes"], null]);
+    p = await gen("character");
+    expect([p.completed.at(-1), p.media.characterImage]).toEqual(["character", "character.png"]);
+    p = await gen("audio");
+    expect(p.completed.at(-1)).toBe("audio");
+    p = await gen("clips");
+    expect([p.completed.at(-1), p.media.final, p.media.scenes.every((s) => s.clip)]).toEqual(["clips", null, true]);
+
+    // Remaking the scenes clears everything after them.
+    p = await gen("scenes");
+    expect(p.completed).toEqual(["poem", "scenes"]);
+    await expect(ps.generateStep(id, "clips")).rejects.toBeInstanceOf(ConflictError);
+    for (const s of ["character", "audio", "clips"]) await gen(s);
+    p = await gen("final");
+    expect([p.status, p.media.final]).toEqual(["done", "final.mp4"]);
+  }, 60_000);
+
+  it("uses an uploaded character picture, describing it with AI when no description is given", async () => {
+    c = await makeTestContainer();
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "herding the goats", sceneCount: 2 }, "mock");
+    const picture = await mockProvider().image("x", { model: "m", ctx: { input: (await ps.get(id)).input } });
+    const dataUrl = `data:image/png;base64,${picture.toString("base64")}`;
+
+    await expect(ps.uploadCharacter(id, { image: dataUrl })).rejects.toBeInstanceOf(ConflictError); // scenes first
+    for (const s of ["poem", "scenes"]) { await ps.generateStep(id, s); await ps.idle(); }
+    await expect(ps.uploadCharacter(id, { image: "data:image/gif;base64,R0lGOD" })).rejects.toBeInstanceOf(ValidationError);
+    await expect(ps.uploadCharacter(id, { image: Buffer.alloc(200, 7).toString("base64") })).rejects.toThrow(/Couldn't read that picture/);
+
+    // With a name only: the character model looks at the picture; the given name is kept.
+    let p = await ps.uploadCharacter(id, { image: dataUrl, name: "Selam" });
+    expect([p.character!.name, p.completed]).toEqual(["Selam", ["poem", "scenes", "character"]]);
+    const described = c.generations.items.filter((g) => g.promptKey === "character_from_image");
+    expect(described).toHaveLength(1);
+    expect(described[0]!.prompt).toContain("Name: Selam");
+    const media = mediaPaths(c.pipelineService.mediaDir(id));
+    expect((await readFile(media.characterImage)).subarray(1, 4).toString()).toBe("PNG");
+
+    // Run to the end: the uploaded picture is used, not redrawn.
+    await runToEnd(id);
+    expect(c.generations.items.some((g) => g.promptKey === "character" || g.promptKey === "character_image")).toBe(false);
+
+    // Replacing it later keeps the song and only redoes clips + final; a given description skips the AI.
+    const before = c.generations.items.length;
+    p = await ps.uploadCharacter(id, { image: picture.toString("base64"), name: "Abeba", description: "a girl in a green dress" });
+    expect([p.character, p.completed, p.status]).toEqual([{ name: "Abeba", description: "a girl in a green dress" }, ["poem", "scenes", "character", "audio"], "paused"]);
+    expect(c.generations.items.length).toBe(before);
+    expect((await ps.get(id)).media.final).toBeNull();
+  }, 60_000);
+
+  it("in manual mode, generating the next step approves the earlier ones", async () => {
+    c = await makeTestContainer();
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "rainy day songs", sceneCount: 2, reviewMode: "manual" }, "mock");
+    await ps.generateStep(id, "poem");
+    await ps.idle();
+    expect((await ps.get(id)).awaitingReview).toBe("poem");
+    await ps.generateStep(id, "scenes");
+    await ps.idle();
+    const p = await ps.get(id);
+    expect([p.awaitingReview, p.approved]).toEqual(["scenes", ["poem"]]);
   }, 60_000);
 });
 

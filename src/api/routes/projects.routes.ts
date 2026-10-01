@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { ProjectService } from "../../services/project.service.js";
+import { MAX_UPLOAD_BYTES, type ProjectService } from "../../services/project.service.js";
 import type { PipelineEvent } from "../../services/pipeline.service.js";
 import { HttpError, send, type Router } from "../http.js";
 
@@ -57,8 +57,13 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
     }, 202)
     .post("/api/projects/:id/regenerate", async ({ params, body }) => {
       const b = await body();
-      await projects.regenerate(params.id!, String(b.step ?? ""));
+      await projects.regenerate(params.id!, String(b.step ?? ""), { provider: str(b.provider) });
       return { id: params.id };
+    }, 202)
+    .post("/api/projects/:id/steps/:step/generate", async ({ params, body }) => {
+      const b = await body();
+      await projects.generateStep(params.id!, params.step!, { provider: str(b.provider) });
+      return { id: params.id, step: params.step };
     }, 202)
     .post("/api/projects/:id/scenes/:index/redo", async ({ params }) => {
       await projects.redoScene(params.id!, Number(params.index) - 1);
@@ -67,6 +72,11 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
     .put("/api/projects/:id/review-mode", async ({ params, body }) => projects.setReviewMode(params.id!, String((await body()).mode ?? "")))
     .put("/api/projects/:id/poem", async ({ params, body }) => projects.editPoem(params.id!, (await body()).poem))
     .put("/api/projects/:id/scenes", async ({ params, body }) => projects.editScenes(params.id!, (await body()).scenes))
+    .put("/api/projects/:id/character/upload", async ({ params, body }) => {
+      // base64 grows the picture by ~4/3, plus room for the name/description.
+      const b = await body(Math.ceil(MAX_UPLOAD_BYTES * 1.4) + 64_000);
+      return projects.uploadCharacter(params.id!, b, { provider: str(b.provider) });
+    })
     .put("/api/projects/:id/character", async ({ params, body }) => projects.editCharacter(params.id!, (await body()).character))
     .post("/api/projects/:id/cancel", ({ params }) => ({ cancelled: projects.cancel(params.id!) }), 202)
     .get("/api/projects/:id/events", async ({ req, res, params }) => {

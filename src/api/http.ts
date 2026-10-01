@@ -17,7 +17,8 @@ export interface Ctx {
   res: http.ServerResponse;
   params: Record<string, string>;
   url: URL;
-  body: () => Promise<Record<string, unknown>>;
+  /** Parsed JSON body; `limit` (bytes) raises the default 200 kB cap, e.g. for uploads. */
+  body: (limit?: number) => Promise<Record<string, unknown>>;
 }
 
 type Handler = (ctx: Ctx) => Promise<unknown> | unknown;

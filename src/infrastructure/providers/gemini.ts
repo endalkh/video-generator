@@ -53,13 +53,16 @@ export class GeminiProvider implements Provider {
     return models;
   }
 
-  async text<K extends TextKind>(kind: K, prompt: string, opts: { model: string; ctx: GenContext }): Promise<TextOutputs[K]> {
+  async text<K extends TextKind>(kind: K, prompt: string, opts: { model: string; ctx: GenContext; images?: Buffer[] }): Promise<TextOutputs[K]> {
     const schema = SCHEMAS[kind];
+    const contents = opts.images?.length
+      ? [{ role: "user", parts: [...opts.images.map((b) => ({ inlineData: { data: b.toString("base64"), mimeType: sniffImageMime(b) } })), { text: prompt }] }]
+      : prompt;
     return withRetry(
       async () => {
         const res = await this.ai.models.generateContent({
           model: opts.model,
-          contents: prompt,
+          contents,
           config: { responseMimeType: "application/json", responseJsonSchema: z.toJSONSchema(schema, { io: "input" }), temperature: 0.9 },
         });
         if (!res.text) throw new Error(`${kind}: empty response`);

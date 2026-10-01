@@ -1,7 +1,11 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
 import type http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/api/server.js";
+import { runFfmpeg } from "../src/infrastructure/media/ffmpeg.js";
 import { makeTestContainer } from "./helpers.js";
 
 let c: Awaited<ReturnType<typeof makeTestContainer>>;
@@ -71,6 +75,37 @@ describe("HTTP API", () => {
 
     const gens = await (await fetch(`${base}/api/projects/${id}/generations`)).json();
     expect(gens.some((g: { promptKey: string }) => g.promptKey === "scene_image")).toBe(true);
+  }, 60_000);
+
+  it("generates a single step via its own endpoint", async () => {
+    const { id } = await (await fetch(`${base}/api/projects`, json("POST", { input: { topic: "Counting apples", sceneCount: 2, reviewMode: "manual" }, provider: "mock" }))).json();
+    await c.projectService.idle(); // creation runs to the first review (poem)
+    expect((await fetch(`${base}/api/projects/${id}/steps/clips/generate`, json("POST", {}))).status).toBe(409);
+    expect((await fetch(`${base}/api/projects/${id}/steps/bogus/generate`, json("POST", {}))).status).toBe(400);
+    const res = await fetch(`${base}/api/projects/${id}/steps/scenes/generate`, json("POST", { provider: "mock" }));
+    expect(res.status).toBe(202);
+    await c.projectService.idle();
+    const p = await (await fetch(`${base}/api/projects/${id}`)).json();
+    expect([p.completed, p.awaitingReview]).toEqual([["poem", "scenes"], "scenes"]);
+  }, 60_000);
+
+  it("uploads a large character picture over HTTP", async () => {
+    const { id } = await (await fetch(`${base}/api/projects`, json("POST", { input: { topic: "Pebbles by the river", sceneCount: 2, reviewMode: "manual" }, provider: "mock" }))).json();
+    await c.projectService.idle();
+    await c.projectService.generateStep(id, "scenes");
+    await c.projectService.idle();
+    // ~1 MB noisy JPEG: well over the normal 200 kB JSON limit.
+    const dir = await mkdtemp(path.join(os.tmpdir(), "kids-studio-up-"));
+    await runFfmpeg(["-f", "lavfi", "-i", "nullsrc=s=1600x1600,geq=random(1)*255:128:128", "-frames:v", "1", "-q:v", "2", path.join(dir, "big.jpg")]);
+    const jpg = await readFile(path.join(dir, "big.jpg"));
+    await rm(dir, { recursive: true, force: true });
+    expect(jpg.length).toBeGreaterThan(300_000);
+    const res = await fetch(`${base}/api/projects/${id}/character/upload`, json("PUT", { image: `data:image/jpeg;base64,${jpg.toString("base64")}`, name: "Lulu", description: "a small grey pebble with a smile" }));
+    expect(res.status).toBe(200);
+    const p = await (await fetch(`${base}/api/projects/${id}`)).json();
+    expect([p.character.name, p.media.characterImage, p.awaitingReview]).toEqual(["Lulu", "character.png", "character"]); // manual mode: check the upload before continuing
+    const png = await fetch(`${base}/media/${id}/character.png`);
+    expect(png.headers.get("content-type")).toBe("image/png");
   }, 60_000);
 
   it("reads and changes per-task models", async () => {

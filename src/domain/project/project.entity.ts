@@ -146,6 +146,21 @@ export class Project {
     this.invalidateAfterEdit("character", "character");
   }
 
+  /**
+   * Use a character the user supplied (uploaded picture). The audio is kept; only the clips and the
+   * final video, which draw the character, have to be made again.
+   */
+  useCharacter(character: Character): void {
+    this.assertEditable();
+    if (!this.isStepDone("scenes")) throw new ConflictError("Make the scenes first");
+    this.props.character = character;
+    this.props.approved = this.props.approved.filter((s) => stepIndex(s) < stepIndex("character"));
+    if (this.isStepDone("character")) this.redoFrom("clips");
+    else this.completeStep("character");
+    if (this.props.status === "done") this.props.status = "paused";
+    this.touch();
+  }
+
   /** Throw away a step's output so it is generated again from scratch. */
   regenerate(step: StepName): void {
     this.assertEditable();

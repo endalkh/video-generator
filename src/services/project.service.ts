@@ -1,3 +1,5 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { ConflictError, NotFoundError, ValidationError } from "../domain/errors.js";
 import { GenerationMapper } from "../domain/generation/generation.mapper.js";
@@ -7,7 +9,8 @@ import { Project } from "../domain/project/project.entity.js";
 import { ProjectMapper, type ProjectDto, type ProjectSummaryDto } from "../domain/project/project.mapper.js";
 import { CharacterSchema, PoemSchema, ProjectInputSchema, ScenePlanSchema, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
-import { fileExists, slugify } from "../util/fs.js";
+import { imageToPng } from "../infrastructure/media/ffmpeg.js";
+import { fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
 import { mediaPaths, wipeMediaFrom, wipeRenders, wipeScene, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
 
@@ -20,7 +23,7 @@ export interface ProjectDetailsDto extends ProjectDto {
     characterImage: string | null;
     final: string | null;
     subtitles: string | null;
-    scenes: { index: number; image: string | null; clip: string | null; video: string | null }[];
+    scenes: { index: number; image: string | null; clip: string | null; video: string | null; audio: string | null }[];
   };
 }
 
@@ -87,7 +90,7 @@ export class ProjectService {
         characterImage: await rel(p.characterImage),
         final: await rel(p.final),
         subtitles: await rel(p.srt),
-        scenes: await Promise.all((project.scenes?.scenes ?? []).map(async (s) => ({ index: s.index, image: await rel(p.sceneImage(s.index)), clip: await rel(p.sceneClip(s.index)), video: await rel(p.sceneVideo(s.index)) }))),
+        scenes: await Promise.all((project.scenes?.scenes ?? []).map(async (s) => ({ index: s.index, image: await rel(p.sceneImage(s.index)), clip: await rel(p.sceneClip(s.index)), video: await rel(p.sceneVideo(s.index)), audio: await rel(p.sceneAudio(s.index)) }))),
       },
     };
   }
@@ -105,7 +108,7 @@ export class ProjectService {
   }
 
   /** Start (or resume) in the background; progress is published to subscribers. */
-  async start(id: string, opts: { provider?: string; from?: string } = {}): Promise<void> {
+  async start(id: string, opts: { provider?: string; from?: string; until?: StepName } = {}): Promise<void> {
     if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is already running`);
     const project = await this.load(id);
     if (opts.from !== undefined && !STEP_NAMES.includes(opts.from as StepName)) throw new ValidationError(`Unknown step "${opts.from}"`);
@@ -118,7 +121,8 @@ export class ProjectService {
       for (const l of job.listeners) l(e);
     };
     job.done = this.pipeline
-      .run(project, { provider, from: opts.from as StepName | undefined, signal: job.controller.signal, onEvent })
+      // "final" ends the run anyway, so it never needs an explicit stop.
+      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, signal: job.controller.signal, onEvent })
       .then(
         () => undefined,
         (err) => {
@@ -179,25 +183,67 @@ export class ProjectService {
     return ProjectMapper.toDto(project);
   }
 
-  /** Save an edited character and redraw its picture (in manual mode it then stops for review again). */
+  /** Save an edited character and redraw its picture, then stop so it can be checked. */
   async editCharacter(id: string, raw: unknown): Promise<ProjectDto> {
     const character = parse(CharacterSchema, raw, "character");
     const project = await this.loadIdle(id);
     project.editCharacter(character);
     await wipeMediaFrom(this.media(id), "character");
     await this.projects.save(project);
-    await this.start(id);
+    await this.start(id, { until: "character" });
     return ProjectMapper.toDto(project);
   }
 
-  /** Throw away a step's output and generate it again. */
-  async regenerate(id: string, step: string): Promise<void> {
+  /**
+   * Use an uploaded picture as the main character. Without a description, the character model looks at the
+   * picture and writes one (it's reused in every scene prompt). The audio is kept; clips are made again.
+   */
+  async uploadCharacter(id: string, raw: { image?: unknown; name?: unknown; description?: unknown }, opts: { provider?: string } = {}): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    if (!project.isStepDone("scenes")) throw new ConflictError("Make the scenes first");
+    const picture = await toPng(raw.image);
+    const name = typeof raw.name === "string" ? raw.name.trim() : "";
+    const description = typeof raw.description === "string" ? raw.description.trim() : "";
+    const character = description
+      ? parse(CharacterSchema, { name: name || project.character?.name, description }, "character")
+      : await this.pipeline.describeCharacter(project, picture, this.providers(opts.provider ?? project.provider), name || undefined);
+    if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is running; stop it first`); // started while the model was looking
+    for (const s of ["poem", "scenes"] as const) project.approve(s);
+    project.useCharacter(character);
+    const media = this.media(id);
+    await wipeMediaFrom(media, "clips");
+    await writeFileAtomic(media.characterImage, picture);
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Throw away a step's output and generate it again (only that step; later steps must be made again). */
+  async regenerate(id: string, step: string, opts: { provider?: string } = {}): Promise<void> {
     const name = this.step(step);
     const project = await this.loadIdle(id);
     project.regenerate(name);
     await wipeMediaFrom(this.media(id), name);
     await this.projects.save(project);
-    await this.start(id);
+    await this.start(id, { provider: opts.provider, until: name });
+  }
+
+  /**
+   * Generate one step on its own (each step has its own page in the UI). The steps before it must be done;
+   * asking for the next step counts as approving them. A step that's already done is made again from scratch.
+   */
+  async generateStep(id: string, step: string, opts: { provider?: string } = {}): Promise<void> {
+    const name = this.step(step);
+    const project = await this.loadIdle(id);
+    const missing = STEP_NAMES.slice(0, STEP_NAMES.indexOf(name)).find((s) => !project.isStepDone(s));
+    if (missing) throw new ConflictError(`Make the ${missing} first`);
+    if (opts.provider) this.providers(opts.provider); // fail fast (e.g. missing API key) before wiping anything
+    for (const s of STEP_NAMES.slice(0, STEP_NAMES.indexOf(name))) project.approve(s);
+    if (project.isStepDone(name)) {
+      project.regenerate(name);
+      await wipeMediaFrom(this.media(id), name);
+    }
+    await this.projects.save(project);
+    await this.start(id, { provider: opts.provider, until: name });
   }
 
   /** Make one scene's picture and clip again, keeping the others. */
@@ -208,7 +254,7 @@ export class ProjectService {
     project.redoFrom("clips");
     await wipeScene(this.media(id), index);
     await this.projects.save(project);
-    await this.start(id);
+    await this.start(id, { until: "clips" });
   }
 
   private media(id: string) {
@@ -263,6 +309,28 @@ export class ProjectService {
   }
 }
 
+
+export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+/** Decode a base64 / data-URL picture and normalise it to PNG (also rejects anything that isn't an image). */
+async function toPng(image: unknown): Promise<Buffer> {
+  if (typeof image !== "string" || !image) throw new ValidationError("Choose a picture to upload");
+  const m = /^data:(image\/(png|jpeg|webp));base64,(.*)$/s.exec(image);
+  if (image.startsWith("data:") && !m) throw new ValidationError("Upload a PNG, JPEG or WebP picture");
+  const bytes = Buffer.from(m ? m[3]! : image, "base64");
+  if (bytes.length < 64) throw new ValidationError("That picture is empty or not valid");
+  if (bytes.length > MAX_UPLOAD_BYTES) throw new ValidationError(`The picture is too big (max ${MAX_UPLOAD_BYTES / 1024 / 1024} MB)`);
+  const dir = await mkdtemp(path.join(os.tmpdir(), "kids-studio-upload-"));
+  try {
+    await writeFile(path.join(dir, "in"), bytes);
+    await imageToPng(path.join(dir, "in"), path.join(dir, "out.png")).catch(() => {
+      throw new ValidationError("Couldn't read that picture; upload a PNG, JPEG or WebP");
+    });
+    return await readFile(path.join(dir, "out.png"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
 function parse<T>(schema: { safeParse(v: unknown): { success: true; data: T } | { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } } }, raw: unknown, what: string): T {
   const r = schema.safeParse(raw);

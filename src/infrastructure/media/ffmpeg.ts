@@ -41,6 +41,11 @@ function run(bin: string, args: string[]): Promise<string> {
 
 export const runFfmpeg = (args: string[]) => run(FFMPEG, ["-hide_banner", "-loglevel", "error", "-y", ...args]);
 
+/** Convert any picture ffmpeg can read (PNG, JPEG, WebP…) to a PNG that fits in 1024×1024. Throws on non-images. */
+export async function imageToPng(input: string, out: string): Promise<void> {
+  await runFfmpeg(["-i", input, "-frames:v", "1", "-vf", "scale=w=1024:h=1024:force_original_aspect_ratio=decrease", "-f", "image2", "-c:v", "png", out]);
+}
+
 export async function assertFfmpegAvailable(): Promise<void> {
   await run(FFMPEG, ["-version"]);
   await run(FFPROBE, ["-version"]);

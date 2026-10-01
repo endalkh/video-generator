@@ -65,7 +65,7 @@ export function createApp(c: Container): http.Server {
       const route = router.match(method, url.pathname);
       if (!route) return sendJson(res, 404, { error: "not found" });
       let bodyPromise: Promise<Record<string, unknown>> | undefined;
-      const result = await route.handler({ req, res, url, params: route.params, body: () => (bodyPromise ??= readJsonBody(req)) });
+      const result = await route.handler({ req, res, url, params: route.params, body: (limit?: number) => (bodyPromise ??= readJsonBody(req, limit)) });
       if (!res.headersSent && !res.writableEnded) sendJson(res, route.status, result);
     } catch (err) {
       const e = toHttpError(err);
