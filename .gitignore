@@ -6,3 +6,7 @@ output/
 .DS_Store
 src/generated/
 public/app.css
+
+# Downloaded / exported videos and pictures
+*.mp4
+*.mov
