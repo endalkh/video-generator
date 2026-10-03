@@ -7,9 +7,10 @@ import type { GenerationDto } from "../domain/generation/generation.model.js";
 import type { Provider } from "../domain/ports/generator.port.js";
 import { Project } from "../domain/project/project.entity.js";
 import { ProjectMapper, type ProjectDto, type ProjectSummaryDto } from "../domain/project/project.mapper.js";
-import { CharacterSchema, PoemSchema, ProjectInputSchema, ScenePlanSchema, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
+import { CharacterSchema, MAX_VIDEO_SECONDS, PoemSchema, ProjectInputSchema, ScenePlanSchema, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
-import { imageToPng } from "../infrastructure/media/ffmpeg.js";
+import { audioToWav, imageToPng, probeDuration } from "../infrastructure/media/ffmpeg.js";
+import { songTimeline } from "../domain/ports/generator.port.js";
 import { fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
 import { mediaPaths, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
@@ -181,6 +182,33 @@ export class ProjectService {
     return ProjectMapper.toDto(project);
   }
 
+  /**
+   * Re-create a video as a new copy with the same settings (and channel), then start it. The original stays as it is.
+   * `keepPoem`: start from the same words (new scenes, pictures, audio and clips).
+   * `keepCharacter`: reuse the same character and its picture, so it looks the same (default).
+   */
+  async recreate(id: string, opts: { keepPoem?: boolean; keepCharacter?: boolean; provider?: string } = {}): Promise<ProjectDto> {
+    const source = await this.load(id);
+    const keepPoem = opts.keepPoem === true && source.poem !== null;
+    const keepCharacter = opts.keepCharacter !== false && source.character !== null;
+    const { audioRequest: _wish, ...input } = source.input; // a fresh start: no leftover audio wish
+    const created = await this.create(input, opts.provider ?? source.provider, { channelId: source.channelId });
+    const copy = await this.load(created.id);
+    if (keepPoem) {
+      copy.setPoem(source.poem!);
+      copy.completeStep("poem");
+      copy.approve("poem");
+    }
+    if (keepCharacter) {
+      copy.setCharacter(source.character!);
+      const from = this.media(id).characterImage;
+      if (await fileExists(from)) await writeFileAtomic(this.media(copy.id).characterImage, await readFile(from));
+    }
+    await this.projects.save(copy);
+    await this.start(copy.id);
+    return ProjectMapper.toDto(copy);
+  }
+
   /** Delete a video: its database row, prompt log and every media file. */
   async delete(id: string): Promise<void> {
     await this.loadIdle(id);
@@ -232,9 +260,11 @@ export class ProjectService {
   async editPoem(id: string, raw: unknown, opts: { keepVisuals?: boolean } = {}): Promise<ProjectDto> {
     const poem = parse(PoemSchema, raw, "poem");
     const project = await this.loadIdle(id);
-    project.editPoem(poem, { keepVisuals: opts.keepVisuals === true });
+    // "The character speaks": her voice is inside each Veo clip, so new words always need new clips.
+    const keep = opts.keepVisuals === true && project.input.audioMode !== "character";
+    project.editPoem(poem, { keepVisuals: keep });
     await wipeMediaFrom(this.media(id), "audio");
-    if (!opts.keepVisuals) await wipePictures(this.media(id));
+    if (!keep) await wipePictures(this.media(id));
     await this.projects.save(project);
     return ProjectMapper.toDto(project);
   }
@@ -247,7 +277,10 @@ export class ProjectService {
     project.editScenes(plan);
     const media = this.media(id);
     await wipeMediaFrom(media, "audio");
-    for (const s of project.scenes!.scenes) if (s.visualPrompt !== before[s.index]?.visualPrompt) await wipeScene(media, s.index);
+    const speaks = project.input.audioMode === "character";
+    for (const s of project.scenes!.scenes) {
+      if (s.visualPrompt !== before[s.index]?.visualPrompt || (speaks && s.text !== before[s.index]?.text)) await wipeScene(media, s.index);
+    }
     await this.projects.save(project);
     return ProjectMapper.toDto(project);
   }
@@ -299,6 +332,40 @@ export class ProjectService {
     return ProjectMapper.toDto(project);
   }
 
+  /**
+   * Use your own recording (you or your child singing or reading) as the audio. The scenes are timed to it by
+   * the length of each scene's words. Pictures and Veo videos are kept; the clips and final video are made again.
+   */
+  async uploadAudio(id: string, raw: { audio?: unknown }): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    if (!project.isStepDone("character") || !project.scenes) throw new ConflictError("Make the poem, scenes and character first");
+    const m = typeof raw.audio === "string" ? /^data:((?:audio|video)\/[\w.+-]+)(?:;[^,]*)?;base64,(.*)$/s.exec(raw.audio) : null;
+    if (!m) throw new ValidationError("Upload an audio file (MP3, M4A, WAV, OGG or WebM)");
+    const bytes = Buffer.from(m[2]!, "base64");
+    if (bytes.length < 1000) throw new ValidationError("That recording is empty");
+    if (bytes.length > MAX_AUDIO_UPLOAD_BYTES) throw new ValidationError(`The recording is too big (max ${MAX_AUDIO_UPLOAD_BYTES / 1024 / 1024} MB)`);
+    const dir = await mkdtemp(path.join(os.tmpdir(), "kids-studio-audio-"));
+    try {
+      await writeFile(path.join(dir, "in"), bytes);
+      const wav = path.join(dir, "song.wav");
+      await audioToWav(path.join(dir, "in"), wav).catch(() => {
+        throw new ValidationError("Couldn't read that recording; upload an MP3, M4A, WAV, OGG or WebM file");
+      });
+      const duration = await probeDuration(wav);
+      if (duration < 3) throw new ValidationError("The recording is shorter than 3 seconds");
+      if (duration > MAX_VIDEO_SECONDS + 30) throw new ValidationError(`The recording is longer than ${MAX_VIDEO_SECONDS / 60} minutes`);
+      if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is running; stop it first`);
+      const media = this.media(id);
+      await wipeMediaFrom(media, "audio");
+      await writeFileAtomic(media.song("wav"), await readFile(wav));
+      project.useRecording({ file: "song.wav", duration, slots: songTimeline(project.scenes.scenes, duration) });
+      await this.projects.save(project);
+      return ProjectMapper.toDto(project);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
   /** Throw away a step's output and generate it again (only that step; later steps must be made again). */
   async regenerate(id: string, step: string, opts: { provider?: string; keepVisuals?: boolean } = {}): Promise<void> {
     const name = this.step(step);
@@ -312,9 +379,10 @@ export class ProjectService {
    * Generate one step on its own (each step has its own page in the UI). The steps before it must be done;
    * asking for the next step counts as approving them. A step that's already done is made again from scratch.
    */
-  async generateStep(id: string, step: string, opts: { provider?: string; keepVisuals?: boolean } = {}): Promise<void> {
+  async generateStep(id: string, step: string, opts: { provider?: string; keepVisuals?: boolean; audioRequest?: string } = {}): Promise<void> {
     const name = this.step(step);
     const project = await this.loadIdle(id);
+    if (name === "audio" && opts.audioRequest !== undefined) project.setAudioRequest(opts.audioRequest);
     const missing = STEP_NAMES.slice(0, STEP_NAMES.indexOf(name)).find((s) => !project.isStepDone(s));
     if (missing) throw new ConflictError(`Make the ${missing} first`);
     if (opts.provider) this.providers(opts.provider); // fail fast (e.g. missing API key) before wiping anything
@@ -326,7 +394,7 @@ export class ProjectService {
 
   /** Forget a step's output and delete its media. A new poem with `keepVisuals` keeps the pictures and videos. */
   private async makeFresh(project: Project, step: StepName, keepVisuals: boolean): Promise<void> {
-    const keep = keepVisuals && step === "poem";
+    const keep = keepVisuals && step === "poem" && project.input.audioMode !== "character";
     project.regenerate(step, { keepVisuals: keep });
     await wipeMediaFrom(this.media(project.id), keep ? "audio" : step);
   }
@@ -396,6 +464,7 @@ export class ProjectService {
 
 
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+export const MAX_AUDIO_UPLOAD_BYTES = 30 * 1024 * 1024;
 
 /** Decode a base64 / data-URL picture and normalise it to PNG (also rejects anything that isn't an image). */
 export async function toPng(image: unknown): Promise<Buffer> {

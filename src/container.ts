@@ -54,7 +54,10 @@ export function buildServices(deps: {
   const contentPlans = deps.contentPlans ?? new InMemoryContentPlanRepository();
   const channelService = new ChannelService(deps.channelKits ?? new InMemoryChannelKitRepository(), promptService, modelSettingsService, providers, path.resolve(deps.mediaRoot), projectService, contentPlans);
   projectService.assertChannel = channelService.assertExists;
-  const planService = new PlanService(contentPlans, promptService, modelSettingsService, providers, projectService, channelService.assertExists);
+  const planService = new PlanService(contentPlans, promptService, modelSettingsService, providers, projectService, channelService.assertExists, async (id) => {
+    const { audioMode, singer, voice } = (await channelService.get(id)).input;
+    return { audioMode, singer, voice };
+  });
   return {
     promptService,
     modelSettingsService,

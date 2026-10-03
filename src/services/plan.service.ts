@@ -37,6 +37,8 @@ export class PlanService {
     private readonly projects: ProjectService,
     /** Throws NotFoundError for unknown channels. */
     private readonly assertChannel: (channel: string) => Promise<void>,
+    /** The channel's audio defaults (audio mode, singer, voice) for videos made from ideas. */
+    private readonly channelDefaults: (channel: string) => Promise<{ audioMode?: string; singer?: string; voice?: string }> = async () => ({}),
   ) {}
 
   async list(channel: string): Promise<ContentPlanSummaryDto[]> {
@@ -137,10 +139,14 @@ export class PlanService {
     if (idea.projectId && (await this.projects.get(idea.projectId).then(() => true, (e) => (e instanceof NotFoundError ? false : Promise.reject(e))))) {
       throw new ConflictError(`"${idea.title}" was already made (project ${idea.projectId})`);
     }
+    const defaults = await this.channelDefaults(channel);
     const input = {
       topic: idea.topic,
       language: idea.language,
-      audioMode: idea.audioMode,
+      // A channel set to "voice over music" uses it for every planned song (e.g. Amharic channels).
+      audioMode: defaults.audioMode === "music_voice" && idea.audioMode === "song" ? "music_voice" : idea.audioMode,
+      ...(defaults.singer ? { singer: defaults.singer } : {}),
+      ...(defaults.voice ? { voice: defaults.voice } : {}),
       // A month with a set length: the length picks the scene count. Otherwise the planned count.
       ...(plan.input.videoMinutes ? { lengthSeconds: Math.round(plan.input.videoMinutes * 60) } : { sceneCount: idea.sceneCount }),
       ageRange: plan.input.ageRange,

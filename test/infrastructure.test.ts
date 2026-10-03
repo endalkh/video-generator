@@ -43,6 +43,9 @@ describe("media helpers", () => {
 describe("retry", () => {
   it("classifies errors", () => {
     expect(isTransientError({ status: 429 })).toBe(true);
+    // Ordinary rate limits retry; a monthly spending cap doesn't (waiting won't fix it).
+    expect(isTransientError({ status: 429, message: "You exceeded your current quota, please check your plan and billing details." })).toBe(true);
+    expect(isTransientError({ status: 429, message: "Your project has exceeded its monthly spending cap. Please go to AI Studio" })).toBe(false);
     expect(isTransientError({ status: 503 })).toBe(true);
     expect(isTransientError({ status: 400 })).toBe(false);
     expect(isTransientError(new Error("API key not valid"))).toBe(false);

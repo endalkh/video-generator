@@ -39,7 +39,7 @@ export interface ProjectProps {
 const stepIndex = (s: StepName) => STEP_NAMES.indexOf(s);
 
 /** Settings that can be changed after a video was started (Video settings panel). */
-export const SETTING_KEYS = ["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "aspectRatio"] as const;
+export const SETTING_KEYS = ["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio"] as const;
 
 /**
  * Aggregate root for a video project. Owns the pipeline progress rules:
@@ -179,6 +179,23 @@ export class Project {
     this.touch();
   }
 
+  /**
+   * Use your own recording as the audio (Audio page upload). The poem, scenes, character and pictures are kept;
+   * only the clips are re-timed to the recording and the final video is built again.
+   */
+  useRecording(song: SongTimeline): void {
+    this.assertEditable();
+    if (!this.isStepDone("character")) throw new ConflictError("Make the poem, scenes and character first");
+    this.props.song = { ...song, source: "upload" };
+    this.props.approved = this.props.approved.filter((s) => stepIndex(s) < stepIndex("audio"));
+    // Choosing the audio means the steps before it are accepted (like making a step on its own page).
+    for (const s of ["poem", "scenes", "character"] as const) if (!this.props.approved.includes(s)) this.props.approved.push(s);
+    if (this.isStepDone("audio")) this.redoFrom("clips");
+    else this.completeStep("audio");
+    if (this.props.status === "done") this.props.status = "paused";
+    this.touch();
+  }
+
   /** Put the poem's stanzas into the existing scenes (one each), keeping what every scene shows. */
   rewordScenes(): void {
     const { poem, scenes } = this.props;
@@ -282,7 +299,7 @@ export class Project {
     const unknown = Object.keys(patch).filter((k) => !(SETTING_KEYS as readonly string[]).includes(k));
     if (unknown.length) throw new ValidationError(`These can't be changed here: ${unknown.join(", ")}`);
     const next: Record<string, unknown> = { ...this.props.input, ...patch };
-    for (const k of ["sceneCount", "lengthSeconds", "characterHint", "voice"]) if (next[k] === null || next[k] === "") delete next[k];
+    for (const k of ["sceneCount", "lengthSeconds", "characterHint", "voice", "singer"]) if (next[k] === null || next[k] === "") delete next[k];
     const parsed = ProjectInputSchema.safeParse(next);
     if (!parsed.success) throw new ValidationError("Invalid settings", parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`));
     const input = parsed.data;
@@ -291,12 +308,12 @@ export class Project {
     if (!changed.length) return null;
 
     const has = (keys: readonly string[]) => changed.some((k) => keys.includes(k));
-    const onlyLength = changed.every((k) => ["lengthSeconds", "songSeconds", "voice"].includes(k));
+    const onlyLength = changed.every((k) => ["lengthSeconds", "songSeconds", "voice", "singer"].includes(k));
     let from: StepName;
     if (has(["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange"])) {
       from = opts.keepPoem && onlyLength && this.props.poem && this.isStepDone("scenes") ? "audio" : "poem";
     } else if (has(["style", "characterHint"])) from = "character";
-    else if (has(["voice"])) from = "audio";
+    else if (has(["voice", "singer"])) from = "audio";
     else from = "clips"; // aspectRatio
 
     this.props.input = input;
@@ -309,6 +326,15 @@ export class Project {
     if (from === "audio") this.props.song = null;
     this.invalidateAfterEdit(from, from);
     return from;
+  }
+
+  /** Extra wishes for the audio (used the next time the audio is made); empty = none. */
+  setAudioRequest(text: unknown): void {
+    this.assertEditable();
+    const parsed = ProjectInputSchema.safeParse({ ...this.props.input, audioRequest: typeof text === "string" ? text : undefined });
+    if (!parsed.success) throw new ValidationError("The audio wish is too long (max 500 characters)");
+    this.props.input = { ...this.props.input, audioRequest: parsed.data.audioRequest };
+    this.touch();
   }
 
   /** Turn the lyrics/caption subtitles on or off; only the final video has to be built again. */
@@ -330,6 +356,7 @@ export class Project {
   changeVisuals(mode: VideoMode): boolean {
     if (this.isRunning) throw new ConflictError(`Project "${this.id}" is running; stop it before changing visuals`);
     if (!VideoModeSchema.safeParse(mode).success) throw new ValidationError(`Unknown visuals "${mode}"`);
+    if (mode === "still" && this.props.input.audioMode === "character") throw new ValidationError("The character can only speak in Veo clips; change the audio first");
     const changed = this.props.input.videoMode !== mode;
     this.props.input = { ...this.props.input, videoMode: mode };
     this.redoFrom("clips");

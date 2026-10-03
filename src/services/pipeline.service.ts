@@ -3,10 +3,10 @@ import path from "node:path";
 import type { GenContext, Provider } from "../domain/ports/generator.port.js";
 import { MAX_SONG_PART_SEC, mmss, singableSeconds, songParts, songTimeline } from "../domain/ports/generator.port.js";
 import type { Project } from "../domain/project/project.entity.js";
-import { STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
+import { defaultVoice, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
-import { assertFfmpegAvailable, buildSrt, concatAudio, concatClips, formatFor, probeDuration, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
+import { assertFfmpegAvailable, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
 import { ensureDir, fileExists, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
@@ -45,6 +45,13 @@ export class PipelineCancelled extends Error {
   }
 }
 
+/** Voice over music: music alone before the first line, pause after each line, music after the last one. */
+const MUSIC_INTRO_SEC = 2;
+/** "The character speaks": each Veo clip is ~8 s with her own voice. */
+const CHARACTER_CLIP_SEC = 8;
+const VOICE_GAP_SEC = 0.6;
+const MUSIC_OUTRO_SEC = 2.5;
+
 /** On-disk layout of a project's media (text artifacts live in Postgres). */
 export function mediaPaths(dir: string) {
   const sceneDir = (i: number) => path.join(dir, "scenes", String(i + 1).padStart(2, "0"));
@@ -54,6 +61,8 @@ export function mediaPaths(dir: string) {
     srt: path.join(dir, "subtitles.srt"),
     final: path.join(dir, "final.mp4"),
     song: (ext: string) => path.join(dir, `song.${ext}`),
+    /** Voice over music: the instrumental music under the voice. */
+    music: (ext: string) => path.join(dir, `music.${ext}`),
     /** Long songs: part j (0-based) before they're joined into song.wav. */
     songPart: (j: number, ext: string) => path.join(dir, `song-part-${String(j + 1).padStart(2, "0")}.${ext}`),
     sceneDir,
@@ -71,7 +80,7 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   const files: string[] = [];
   const perScene: ((i: number) => string)[] = [];
   if (at("character")) files.push(p.characterImage), perScene.push(p.sceneImage, p.sceneVideo);
-  if (at("audio")) files.push(p.song("mp3"), p.song("wav")), perScene.push(p.sceneAudio);
+  if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio);
   // Pictures and Veo videos don't depend on the audio: a new song only re-times (re-renders) the clips.
   if (at("clips")) perScene.push(p.sceneClip);
   if (from === "clips") perScene.push(p.sceneImage, p.sceneVideo);
@@ -328,8 +337,66 @@ export class PipelineService {
       const songMode = input.audioMode === "song" && typeof provider.song === "function";
       if (input.audioMode === "song" && !songMode) log.warn(`Provider "${provider.name}" has no song model; singing each scene with TTS`);
 
-      if (songMode) {
-        await step("audio", async () => project.song !== null && (await fileExists(path.join(p.dir, project.song.file))), async () => {
+      // A song file (sung, voice over music, or your own uploaded recording) counts as the audio when it exists.
+      const songFileOk = async () => project.song !== null && (await fileExists(path.join(p.dir, project.song.file)));
+      const voice = input.voice ?? defaultVoice(input.singer, input.audioMode);
+      const voiceScenes = () => perScene("audio", p.sceneAudio, "voiced", async (s) => {
+        const r = await prompt("audio", "scene_speech", "narration", { scene_number: s.index + 1, scene_text: s.text }, s.index);
+        await writeFileAtomic(p.sceneAudio(s.index), await provider.speech(r.text, { model: r.model, voice, label: `scene ${s.index + 1} audio`, ctx: ctx({ scene: s }) }));
+      });
+
+      const musicFile = async () => (await Promise.all(["mp3", "wav"].map(async (ext) => ((await fileExists(p.music(ext))) ? p.music(ext) : null)))).find(Boolean) ?? undefined;
+      if (input.audioMode === "character") {
+        // Her voice is made by Veo in each clip (lip-sync). Here: only soft background music, if the provider can make music.
+        await step("audio", async () => typeof provider.song !== "function" || Boolean(await musicFile()), async () => {
+          project.setSong(null);
+          if (typeof provider.song !== "function" || (await musicFile())) return;
+          const seconds = Math.min(fixedSongLength ?? MAX_SONG_PART_SEC, scenes.length * CHARACTER_CLIP_SEC + 2);
+          emit({ type: "progress", step: "audio", done: 0, total: 1, message: "composing soft background music" });
+          const r = await prompt("audio", "music_bed", "song", { title: project.poem!.title, song_seconds: seconds });
+          const music = await provider.song(r.text, { model: r.model, label: "background music", durationSec: seconds, ctx: ctx() });
+          await writeFileAtomic(p.music(music.ext), music.audio);
+          log.step("audio", "background music ready (the character's voice is made with each Veo clip)");
+        });
+      } else if (project.song?.source === "upload") {
+        // Your own recording: nothing to generate (re-check it's still there).
+        await step("audio", songFileOk, async () => {
+          throw new Error("The uploaded recording is missing; upload it again on the Audio page");
+        });
+      } else if (input.audioMode === "music_voice") {
+        await step("audio", songFileOk, async () => {
+          if (typeof provider.song !== "function") throw new Error(`Provider "${provider.name}" can't make music; choose Narrated story or another provider`);
+          // 1. The voice: each scene's rhyme, chanted clearly by the speech model.
+          await voiceScenes();
+          checkCancel();
+          const durations = await Promise.all(scenes.map((s) => probeDuration(p.sceneAudio(s.index))));
+          const slots: { start: number; end: number }[] = [];
+          let t = MUSIC_INTRO_SEC;
+          durations.forEach((d, i) => {
+            slots.push({ start: i === 0 ? 0 : t, end: t + d + VOICE_GAP_SEC });
+            t += d + VOICE_GAP_SEC;
+          });
+          const total = t + MUSIC_OUTRO_SEC;
+          slots[slots.length - 1]!.end = total;
+          // 2. The music: one instrumental piece (any length the model makes), looped under the voice.
+          const bedLength = Math.min(fixedSongLength ?? MAX_SONG_PART_SEC, Math.ceil(total));
+          let bed = (await Promise.all(["mp3", "wav"].map(async (ext) => ((await fileExists(p.music(ext))) ? p.music(ext) : null)))).find(Boolean);
+          if (!bed) {
+            emit({ type: "progress", step: "audio", done: 0, total: 1, message: "composing the music" });
+            const r = await prompt("audio", "music_bed", "song", { title: project.poem!.title, song_seconds: bedLength });
+            const music = await provider.song!(r.text, { model: r.model, label: "music", durationSec: bedLength, ctx: ctx() });
+            bed = p.music(music.ext);
+            await writeFileAtomic(bed, music.audio);
+          }
+          // 3. Mix: voice on top, music quieter underneath.
+          emit({ type: "progress", step: "audio", done: 0, total: 1, message: "mixing the voice over the music" });
+          await mixVoiceOverMusic({ voices: scenes.map((s) => p.sceneAudio(s.index)), starts: slots.map((sl, i) => (i === 0 ? MUSIC_INTRO_SEC : sl.start)), music: bed, total, out: `${p.song("wav")}.part` });
+          await rename(`${p.song("wav")}.part`, p.song("wav"));
+          project.setSong({ file: "song.wav", duration: total, slots, source: "music_voice" });
+          log.step("audio", `voice over music ${total.toFixed(1)}s (voice ${voice})`);
+        });
+      } else if (songMode) {
+        await step("audio", songFileOk, async () => {
           // Too many words for the length makes the singer rush and slur (worst in Amharic). Give the
           // words the time they need when the model can make longer songs; otherwise warn.
           const needed = singableSeconds(scenes.map((s) => s.text));
@@ -404,11 +471,7 @@ export class PipelineService {
       } else {
         await step("audio", allExist(scenes.map((s) => p.sceneAudio(s.index))), async () => {
           project.setSong(null);
-          const voice = input.voice || (input.audioMode === "song" ? "Leda" : "Kore");
-          await perScene("audio", p.sceneAudio, "voiced", async (s) => {
-            const r = await prompt("audio", "scene_speech", "narration", { scene_number: s.index + 1, scene_text: s.text }, s.index);
-            await writeFileAtomic(p.sceneAudio(s.index), await provider.speech(r.text, { model: r.model, voice, label: `scene ${s.index + 1} audio`, ctx: ctx({ scene: s }) }));
-          });
+          await voiceScenes();
         });
       }
       const timeline = project.song;
@@ -445,7 +508,9 @@ export class PipelineService {
             }
           }
           const tmpClip = `${p.sceneClip(i)}.part.mp4`;
-          if (useVeo) {
+          if (input.audioMode === "character") {
+            await videoToClip({ video: p.sceneVideo(i), out: tmpClip, fmt, keepAudio: true });
+          } else if (useVeo) {
             await videoToClip({ ...timing(i), video: p.sceneVideo(i), out: tmpClip, fmt });
           } else {
             await stillToClip({ ...timing(i), image: p.sceneImage(i), out: tmpClip, motion: s.motion, fmt });
@@ -460,7 +525,8 @@ export class PipelineService {
         // The .srt is always written (handy for uploading to YouTube); it's only put in the video when asked for.
         await writeFileAtomic(p.srt, buildSrt(scenes.map((s, i) => ({ text: s.text, duration: durations[i]! }))));
         const tmp = `${p.final}.part.mp4`;
-        await concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: timeline ? path.join(p.dir, timeline.file) : undefined });
+        const bed = input.audioMode === "character" ? await musicFile() : undefined;
+        await concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: timeline ? path.join(p.dir, timeline.file) : undefined, bed });
         await rename(tmp, p.final);
         await rm(path.join(p.dir, "concat.txt"), { force: true });
       });

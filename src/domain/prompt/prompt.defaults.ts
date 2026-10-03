@@ -7,10 +7,10 @@
 import { NotFoundError } from "../errors.js";
 
 /** Flags available to every prompt. The has_reference / has_channel_name / has_title flags are only set on the Channel page. */
-export const PROMPT_FLAGS = ["am", "en", "song", "narration", "veo", "has_character_hint", "has_reference", "has_channel_name", "has_title"] as const;
+export const PROMPT_FLAGS = ["am", "en", "song", "narration", "music_voice", "character_voice", "veo", "has_character_hint", "has_reference", "has_channel_name", "has_title", "has_audio_request"] as const;
 
 /** Variables available to every prompt. */
-export const COMMON_VARS = ["topic", "language_name", "age_range", "style", "scene_count", "character_hint", "safety", "syllables_per_line", "video_seconds"] as const;
+export const COMMON_VARS = ["topic", "language_name", "age_range", "style", "scene_count", "character_hint", "safety", "syllables_per_line", "letters_per_line", "video_seconds", "singer", "voice_style", "audio_request"] as const;
 
 export interface PromptDefinition {
   key: string;
@@ -36,13 +36,33 @@ export const DEFAULT_PROMPTS: readonly PromptDefinition[] = [
     title: "Poem / lyrics",
     description: "Writes the poem (song lyrics or story verses). Must return JSON {title, stanzas:[{lines}], moral}.",
     vars: ["song_seconds"],
-    template: `Write a rhythmic {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+    template: `Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+Topic: {{topic}}.
+{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short enough to sing slowly and clearly. Repeat a simple chorus line every few stanzas.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if character_voice}}Exactly {{scene_count}} stanzas of 2 short lines each. The main character says each stanza herself, looking at the camera, in one 8-second shot, so each stanza is something she says out loud (talking to the children watching), slowly and clearly. Tell one story from beginning to end, one step per stanza.{{/if}}
+{{#if en}}Each line has at most {{syllables_per_line}} syllables.{{/if}}{{#if am}}Each line has about {{letters_per_line}} Ge'ez letters (fidel), never more than {{letters_per_line}} + 2.{{/if}}
+Simple vocabulary, repetition, and a positive message.
+{{#if am}}Write a real Amharic children's ግጥም, natively in Ge'ez script (not transliteration, not a translation from English):
+- ቤት (rhyme): the lines of each stanza end on the same sound, the same last syllable (for example ተነሳች / ታጠበች, ሳሙና / ጤና), like traditional Amharic poems and children's songs.
+- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is shown on its own picture. Never let a sentence run on into the next stanza.
+- Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
+- All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
+{{safety}}`,
+    /** Earlier built-in versions: a prompt still on one of these (never edited) is upgraded automatically. */
+    previousTemplates: [`Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+Topic: {{topic}}.
+{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short enough to sing slowly and clearly. Repeat a simple chorus line every few stanzas.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}
+{{#if en}}Each line has at most {{syllables_per_line}} syllables.{{/if}}{{#if am}}Each line has about {{letters_per_line}} Ge'ez letters (fidel), never more than {{letters_per_line}} + 2.{{/if}}
+Simple vocabulary, repetition, and a positive message.
+{{#if am}}Write a real Amharic children's ግጥም, natively in Ge'ez script (not transliteration, not a translation from English):
+- ቤት (rhyme): the lines of each stanza end on the same sound, the same last syllable (for example ተነሳች / ታጠበች, ሳሙና / ጤና), like traditional Amharic poems and children's songs.
+- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is shown on its own picture. Never let a sentence run on into the next stanza.
+- Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
+- All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
+{{safety}}`, `Write a rhythmic {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
 Topic: {{topic}}.
 {{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), so each line has at most {{syllables_per_line}} syllables (in Ge'ez script, about one letter per syllable): short enough to sing slowly and clearly. Repeat a simple chorus line every few stanzas.{{else}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds), so each line has about {{syllables_per_line}} syllables (in Ge'ez script, about one letter per syllable). Tell one story from beginning to end, one step per stanza.{{/if}} Simple vocabulary, repetition, and a positive message.
 {{#if am}}Write natively in Amharic using Ge'ez script (not transliteration, not translation-ese).{{/if}}
-{{safety}}`,
-    /** Earlier built-in versions: a prompt still on one of these (never edited) is upgraded automatically. */
-    previousTemplates: [`Write a short, rhythmic {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+{{safety}}`, `Write a short, rhythmic {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
 Topic: {{topic}}.
 {{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), so each line has at most {{syllables_per_line}} syllables (in Ge'ez script, about one letter per syllable): short enough to sing slowly and clearly. Repeat a simple chorus line.{{else}}Exactly {{scene_count}} stanzas of 2-4 short lines each.{{/if}} Simple vocabulary, repetition, and a positive message.
 {{#if am}}Write natively in Amharic using Ge'ez script (not transliteration, not translation-ese).{{/if}}
@@ -57,7 +77,25 @@ Topic: {{topic}}.
     title: "Rewrite one stanza",
     description: "Poem and Scenes pages: writes ONE stanza (scene) again, keeping the rest of the poem. {{poem_text}} is the whole poem with numbered stanzas, {{hint}} what the parent wants changed. Must return JSON {lines}.",
     vars: ["title", "poem_text", "stanza_number", "stanza_text", "line_count", "hint"],
-    template: `Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+    template: `Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+Topic: {{topic}}. Title: "{{title}}".
+
+The whole poem (stanza {{stanza_number}} is the one to rewrite):
+{{poem_text}}
+
+Write a new stanza {{stanza_number}} to replace:
+{{stanza_text}}
+
+It must fit between the stanzas around it: the same rhythm and tone, and the story keeps going in the same order. Exactly {{line_count}} short lines{{#if en}}, each with at most {{syllables_per_line}} syllables{{/if}}{{#if am}}, each with about {{letters_per_line}} Ge'ez letters (fidel){{/if}}{{#if song}}, easy to sing slowly and clearly{{/if}}. If the poem has a chorus line and this stanza had it, keep it.
+What the parent wants changed: {{hint}}
+{{#if am}}Write a real Amharic children's ግጥም, natively in Ge'ez script (not transliteration, not a translation from English):
+- ቤት (rhyme): the lines of each stanza end on the same sound, the same last syllable (for example ተነሳች / ታጠበች, ሳሙና / ጤና), like traditional Amharic poems and children's songs.
+- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is shown on its own picture. Never let a sentence run on into the next stanza.
+- Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
+- All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
+Return only the new stanza's lines; don't repeat the old one.
+{{safety}}`,
+    previousTemplates: [`Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
 Topic: {{topic}}. Title: "{{title}}".
 
 The whole poem (stanza {{stanza_number}} is the one to rewrite):
@@ -70,7 +108,7 @@ It must fit between the stanzas around it: the same rhythm, rhyme style and tone
 What the parent wants changed: {{hint}}
 {{#if am}}Write natively in Amharic using Ge'ez script (not transliteration, not translation-ese).{{/if}}
 Return only the new stanza's lines; don't repeat the old one.
-{{safety}}`,
+{{safety}}`],
   },
   {
     key: "scenes",
@@ -136,14 +174,29 @@ Style: {{style}}. No text, letters or watermarks. {{safety}}`,
     description: "Music prompt for the song. {{timed_lyrics}} holds the verses with [m:ss - m:ss] timestamps so scene cuts land on verse boundaries. Songs longer than the model allows (~3 min, or 30 s for Lyria 3 Clip) are made in parts that are joined; {{part_note}} tells each part how it fits (empty for a one-part song).",
     vars: ["title", "timed_lyrics", "song_seconds", "part_note"],
     template: `Create a cheerful, bouncy children's song for ages {{age_range}} titled "{{title}}", about {{song_seconds}} seconds long.
+Bright, simple melody, ~100 BPM, ukulele, xylophone, light hand percussion, clapping; {{singer}} singing slowly and clearly in {{language_name}}, one syllable per note, never rushing the words.
+{{#if am}}The singer is a native Amharic-speaking Ethiopian vocalist with natural Ethiopian pronunciation (ejective consonants, gemination); a light Ethiopian kids'-song flavour (krar, kebero) is welcome.
+ይህ የልጆች ዘፈን በአማርኛ፣ በግልጽ እና ቀስ ብሎ ይዘመር።{{/if}}
+{{part_note}}
+{{#if has_audio_request}}Extra wishes from the parent (follow them unless they break the rules above): {{audio_request}}{{/if}}
+Sing exactly these lyrics, at these times, and nothing else:
+
+{{timed_lyrics}}`,
+    previousTemplates: [`Create a cheerful, bouncy children's song for ages {{age_range}} titled "{{title}}", about {{song_seconds}} seconds long.
+Bright, simple melody, ~100 BPM, ukulele, xylophone, light hand percussion, clapping; {{singer}} singing slowly and clearly in {{language_name}}, one syllable per note, never rushing the words.
+{{#if am}}The singer is a native Amharic-speaking Ethiopian vocalist with natural Ethiopian pronunciation (ejective consonants, gemination); a light Ethiopian kids'-song flavour (krar, kebero) is welcome.
+ይህ የልጆች ዘፈን በአማርኛ፣ በግልጽ እና ቀስ ብሎ ይዘመር።{{/if}}
+{{part_note}}
+Sing exactly these lyrics, at these times, and nothing else:
+
+{{timed_lyrics}}`, `Create a cheerful, bouncy children's song for ages {{age_range}} titled "{{title}}", about {{song_seconds}} seconds long.
 Bright, simple melody, ~100 BPM, ukulele, xylophone, light hand percussion, clapping; one clear, warm, friendly vocalist singing slowly and clearly in {{language_name}}, one syllable per note, never rushing the words.
 {{#if am}}The singer is a native Amharic-speaking Ethiopian vocalist with natural Ethiopian pronunciation (ejective consonants, gemination); a light Ethiopian kids'-song flavour (krar, kebero) is welcome.
 ይህ የልጆች ዘፈን በአማርኛ፣ በግልጽ እና ቀስ ብሎ ይዘመር።{{/if}}
 {{part_note}}
 Sing exactly these lyrics, at these times, and nothing else:
 
-{{timed_lyrics}}`,
-    previousTemplates: [`Create a cheerful, bouncy children's song for ages {{age_range}} titled "{{title}}", about {{song_seconds}} seconds long.
+{{timed_lyrics}}`, `Create a cheerful, bouncy children's song for ages {{age_range}} titled "{{title}}", about {{song_seconds}} seconds long.
 Bright, simple melody, ~100 BPM, ukulele, xylophone, light hand percussion, clapping; one clear, warm, friendly vocalist singing slowly and clearly in {{language_name}}, one syllable per note, never rushing the words.
 {{#if am}}The singer is a native Amharic-speaking Ethiopian vocalist with natural Ethiopian pronunciation (ejective consonants, gemination); a light Ethiopian kids'-song flavour (krar, kebero) is welcome.
 ይህ የልጆች ዘፈን በአማርኛ፣ በግልጽ እና ቀስ ብሎ ይዘመር።{{/if}}
@@ -157,13 +210,33 @@ Sing exactly these lyrics, at these times, and nothing else:
 {{timed_lyrics}}`],
   },
   {
+    key: "music_bed",
+    title: "Music under the voice",
+    description: "Voice over music mode: the instrumental music played under the chanted rhyme. No singing, so it works for any language. It is looped to the video length and played quietly under the voice.",
+    vars: ["title", "song_seconds"],
+    template: `Instrumental background music for a children's nursery-rhyme video titled "{{title}}" (ages {{age_range}}), about {{song_seconds}} seconds long.
+Cheerful, warm and bouncy, ~100 BPM, simple and steady so a voice can chant a rhyme over it: ukulele, xylophone, soft hand percussion and light clapping.
+{{#if am}}A light Ethiopian kids'-music flavour (krar, kebero, masinko) is welcome.{{/if}}
+Instrumental only: no vocals, no singing, no humming, no spoken words. Even volume, no big drops or solos, so it loops well.
+{{#if has_audio_request}}Extra wishes from the parent (follow them unless they break the rules above): {{audio_request}}{{/if}}`,
+    previousTemplates: [`Instrumental background music for a children's nursery-rhyme video titled "{{title}}" (ages {{age_range}}), about {{song_seconds}} seconds long.
+Cheerful, warm and bouncy, ~100 BPM, simple and steady so a voice can chant a rhyme over it: ukulele, xylophone, soft hand percussion and light clapping.
+{{#if am}}A light Ethiopian kids'-music flavour (krar, kebero, masinko) is welcome.{{/if}}
+Instrumental only: no vocals, no singing, no humming, no spoken words. Even volume, no big drops or solos, so it loops well.`],
+  },
+  {
     key: "scene_speech",
     title: "Narration / TTS",
-    description: "Text-to-speech instruction per scene (narration mode, or song mode when the provider has no music model).",
+    description: "Text-to-speech instruction per scene: narration, voice over music (chanted like a nursery rhyme over the music), or song mode when the provider has no music model. {{voice_style}} is the chosen singer/voice.",
     vars: ["scene_number", "scene_text"],
-    template: `{{#if song}}Sing this cheerfully as a simple children's song with a bouncy melody{{else}}Read this aloud warmly and slowly, like a storyteller for small children{{/if}}, in {{language_name}}:
+    template: `{{#if song}}Sing this cheerfully as a simple children's song with a bouncy melody{{/if}}{{#if narration}}Read this aloud warmly and slowly, like a storyteller for small children{{/if}}{{#if music_voice}}Say this as a lively children's nursery rhyme with a steady, bouncy beat (it is played over cheerful music), slowly and very clearly, with a short pause at the end of each line{{/if}}, in {{language_name}}, in the voice of {{voice_style}}{{#if am}}, with natural native Ethiopian Amharic pronunciation{{/if}}{{#if has_audio_request}}, and: {{audio_request}}{{/if}}:
 
 {{scene_text}}`,
+    previousTemplates: [`{{#if song}}Sing this cheerfully as a simple children's song with a bouncy melody{{/if}}{{#if narration}}Read this aloud warmly and slowly, like a storyteller for small children{{/if}}{{#if music_voice}}Say this as a lively children's nursery rhyme with a steady, bouncy beat (it is played over cheerful music), slowly and very clearly, with a short pause at the end of each line{{/if}}, in {{language_name}}, in the voice of {{voice_style}}{{#if am}}, with natural native Ethiopian Amharic pronunciation{{/if}}:
+
+{{scene_text}}`, `{{#if song}}Sing this cheerfully as a simple children's song with a bouncy melody{{else}}Read this aloud warmly and slowly, like a storyteller for small children{{/if}}, in {{language_name}}:
+
+{{scene_text}}`],
   },
   {
     key: "scene_video",
@@ -173,8 +246,14 @@ Sing exactly these lyrics, at these times, and nothing else:
     template: `A shot from a high-quality 3D animated kids' movie (Pixar-like), full of life and motion. {{visual_prompt}}
 {{character_name}} ({{character_description}}) looks exactly like the character in the reference image in every frame: same face, hair, clothes and colours.
 She is clearly animated the whole time: expressive face (smiling, laughing, eyes blinking, looking around), lively hands and body acting out the action, natural movement. The animals move too (walking, nibbling, wagging, hopping). Setting: outdoors in a sunny, lush green countryside (never indoors). Add small living details: bubbles, splashing water, grass and leaves swaying in the breeze, butterflies, light glinting.
+{{#if song}}A cheerful children's song is playing and she is singing along to it, singing these words: "{{scene_text}}". Her mouth moves as she sings, she smiles and sways and claps gently to the beat (~100 BPM), and acts out the words.{{/if}}{{#if music_voice}}A cheerful nursery rhyme is playing and she is chanting along to it: "{{scene_text}}". Her mouth moves with the words, she sways and claps gently to the beat and acts out the words.{{/if}}{{#if narration}}A storyteller (not shown) is telling this part of the story: "{{scene_text}}". She acts it out with her face, hands and body, but she does not talk.{{/if}}{{#if character_voice}}She speaks to the camera in {{language_name}}, in the voice of {{voice_style}}, saying exactly these words, slowly and clearly, with her lips in sync: "{{scene_text}}". Only her voice and soft natural sounds of the scene (birds, water, breeze); no music, no other voices.{{/if}}
 Cinematic camera: a smooth slow push-in or gentle tracking move, medium or close-up framing; the character stays in frame.
-Style: {{style}}. No speech, no captions, no text. {{safety}}`,
+Style: {{style}}. {{#if character_voice}}No captions, no text.{{else}}No speech, no captions, no text.{{/if}} {{safety}}`,
+    previousTemplates: [`A shot from a high-quality 3D animated kids' movie (Pixar-like), full of life and motion. {{visual_prompt}}
+{{character_name}} ({{character_description}}) looks exactly like the character in the reference image in every frame: same face, hair, clothes and colours.
+She is clearly animated the whole time: expressive face (smiling, laughing, eyes blinking, looking around), lively hands and body acting out the action, natural movement. The animals move too (walking, nibbling, wagging, hopping). Setting: outdoors in a sunny, lush green countryside (never indoors). Add small living details: bubbles, splashing water, grass and leaves swaying in the breeze, butterflies, light glinting.
+Cinematic camera: a smooth slow push-in or gentle tracking move, medium or close-up framing; the character stays in frame.
+Style: {{style}}. No speech, no captions, no text. {{safety}}`],
   },
   {
     key: "channel_details",

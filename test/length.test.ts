@@ -6,6 +6,7 @@ import { probeDuration } from "../src/infrastructure/media/ffmpeg.js";
 import { InMemoryPromptRepository } from "../src/repositories/memory/memory.repositories.js";
 import { mediaPaths } from "../src/services/pipeline.service.js";
 import { PromptService } from "../src/services/prompt.service.js";
+import { MockProvider } from "../src/infrastructure/providers/mock.js";
 import { makeTestContainer, mockProvider } from "./helpers.js";
 
 let c: Awaited<ReturnType<typeof makeTestContainer>>;
@@ -50,8 +51,36 @@ describe("video length", () => {
     const poem = mock.prompts.find((x) => x.kind === "poem")!.prompt;
     expect(poem).toContain("Exactly 25 stanzas of 4 short lines each");
     expect(poem).toContain("in about 300 seconds");
-    expect(poem).toMatch(/each line has about \d+ syllables/);
+    expect(poem).toMatch(/Each line has at most \d+ syllables/);
   });
+});
+
+describe("Amharic ግጥም", () => {
+  it("asks Amharic poems for ቤት (rhyme), complete stanzas, natural grammar and a letter count", async () => {
+    const mock = new MockProvider({ audioSecondsPerScene: 1, songLengthSec: null, imageSize: [320, 180] }); // 30 s songs (Lyria 3 Clip)
+    c = await makeTestContainer({ provider: () => mock });
+    const am = await c.projectService.create({ topic: "ሚልካ ጠዋት ትነሳለች", language: "am", sceneCount: 4, reviewMode: "manual" }, "mock");
+    await c.projectService.start(am.id);
+    await c.projectService.idle();
+    const poem = mock.prompts.find((x) => x.kind === "poem")!.prompt;
+    expect(poem).toContain("real Amharic children's ግጥም");
+    expect(poem).toContain("ቤት (rhyme)");
+    expect(poem).toContain("one complete sentence or thought");
+    expect(poem).toContain("verbs agree with the subject");
+    // 30 s song, 4 scenes: 8 syllables per line = 10 Ge'ez letters (not 8).
+    expect(poem).toContain("about 10 Ge'ez letters (fidel)");
+    expect(poem).not.toContain("syllables.");
+
+    await c.projectService.rewriteStanza(am.id, 0, { provider: "mock" });
+    expect(mock.prompts.filter((x) => x.kind === "stanza").at(-1)!.prompt).toContain("ቤት (rhyme)");
+
+    const en = await c.projectService.create({ topic: "Morning routine", sceneCount: 4, reviewMode: "manual" }, "mock");
+    await c.projectService.start(en.id);
+    await c.projectService.idle();
+    const enPoem = mock.prompts.filter((x) => x.kind === "poem").at(-1)!.prompt;
+    expect(enPoem).not.toContain("ግጥም");
+    expect(enPoem).toContain("Each line has at most 8 syllables.");
+  }, 60_000);
 });
 
 describe("built-in prompt upgrades", () => {

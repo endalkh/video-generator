@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { stat, writeFile } from "node:fs/promises";
+import { rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AspectRatio, Scene } from "../../domain/project/project.model.js";
 import { log } from "../../util/log.js";
@@ -61,6 +61,33 @@ export async function fitImage(opts: { input: string; out: string; width: number
     if (!jpeg) break;
   }
   throw new Error(`${path.basename(opts.out)} is larger than ${Math.round(opts.maxBytes! / 1024)} kB`);
+}
+
+/**
+ * Voice over music: each voice clip starts at its time (seconds), the music loops underneath at a lower volume
+ * (fading in and out), and the result is exactly `total` seconds of 48 kHz stereo WAV.
+ */
+export async function mixVoiceOverMusic(opts: { voices: string[]; starts: number[]; music: string; total: number; out: string; musicVolume?: number }): Promise<void> {
+  const n = opts.voices.length;
+  const total = opts.total.toFixed(3);
+  const fmt = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo";
+  const voices = opts.voices.map((_, i) => {
+    const ms = Math.max(0, Math.round((opts.starts[i] ?? 0) * 1000));
+    return `[${i}:a]${fmt},adelay=${ms}|${ms}[v${i}]`;
+  });
+  const fadeOut = Math.max(0, opts.total - 2.5).toFixed(3);
+  const filter = [
+    ...voices,
+    `${opts.voices.map((_, i) => `[v${i}]`).join("")}amix=inputs=${n}:normalize=0:dropout_transition=0[voice]`,
+    `[${n}:a]${fmt},atrim=0:${total},asetpts=N/SR/TB,volume=${opts.musicVolume ?? 0.22},afade=t=in:d=0.8,afade=t=out:st=${fadeOut}:d=2.5[bed]`,
+    `[voice][bed]amix=inputs=2:normalize=0:duration=longest,atrim=0:${total},alimiter=limit=0.95[a]`,
+  ].join(";");
+  await runFfmpeg([...opts.voices.flatMap((f) => ["-i", f]), "-stream_loop", "-1", "-i", opts.music, "-filter_complex", filter, "-map", "[a]", "-t", total, "-c:a", "pcm_s16le", "-f", "wav", opts.out]);
+}
+
+/** Any audio ffmpeg can read (MP3, M4A, WAV, OGG, WebM…) → 48 kHz stereo WAV. Throws on files without audio. */
+export async function audioToWav(input: string, out: string): Promise<void> {
+  await runFfmpeg(["-i", input, "-vn", "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le", "-f", "wav", out]);
 }
 
 /** Join audio files (any format/rate) into one WAV, in order. */
@@ -144,13 +171,28 @@ export async function stillToClip(opts: ClipTiming & { image: string; out: strin
 }
 
 /** Fit a generated video (e.g. Veo) to the target format and scene length, looping if it's too short. */
-export async function videoToClip(opts: ClipTiming & { video: string; out: string; fmt: VideoFormat }): Promise<number> {
-  const { dur, audioInput, audioFilter } = await timingArgs(opts);
+export async function videoToClip(opts: ClipTiming & { video: string; out: string; fmt: VideoFormat; /** Keep the video's own sound (a speaking character) at its natural length. */ keepAudio?: boolean }): Promise<number> {
   const { width: w, height: h, fps } = opts.fmt;
+  const fit = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},fps=${fps},setsar=1,format=yuv420p`;
+  if (opts.keepAudio) {
+    const dur = await probeDuration(opts.video);
+    const hasAudio = (await probeStreams(opts.video)).includes("audio");
+    await runFfmpeg([
+      "-i", opts.video,
+      ...(hasAudio ? [] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]),
+      "-filter_complex", `[0:v]${fit}[v];[${hasAudio ? 0 : 1}:a]aresample=48000,apad[a]`,
+      "-map", "[v]", "-map", "[a]", "-t", dur.toFixed(3), ...ENCODE_ARGS, "-movflags", "+faststart", opts.out,
+    ]);
+    return dur;
+  }
+  const { dur, audioInput, audioFilter } = await timingArgs(opts);
+  // A scene a little longer than the animation: play it slightly slower (smooth) rather than visibly restarting it.
+  const src = await probeDuration(opts.video).catch(() => 0);
+  const stretch = src > 0 && dur > src && dur <= src * 1.35 ? dur / src : 1;
   await runFfmpeg([
-    "-stream_loop", "-1", "-i", opts.video,
+    ...(stretch === 1 ? ["-stream_loop", "-1"] : []), "-i", opts.video,
     ...audioInput,
-    "-filter_complex", `[0:v]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},fps=${fps},setsar=1,format=yuv420p[v];${audioFilter}`,
+    "-filter_complex", `[0:v]${stretch === 1 ? "" : `setpts=${stretch.toFixed(4)}*PTS,`}${fit}[v];${audioFilter}`,
     "-map", "[v]", "-map", "[a]",
     "-t", dur.toFixed(3),
     ...ENCODE_ARGS,
@@ -178,7 +220,22 @@ export function buildSrt(entries: { text: string; duration: number }[]): string 
 }
 
 /** Concatenate uniform clips into the final MP4, optionally embedding soft subtitles (mov_text). */
-export async function concatClips(opts: { clips: string[]; out: string; workDir: string; srt?: string; language?: string; audio?: string }): Promise<void> {
+export async function concatClips(opts: { clips: string[]; out: string; workDir: string; srt?: string; language?: string; audio?: string; /** Music mixed softly under the clips' own sound. */ bed?: string }): Promise<void> {
+  if (opts.bed && !opts.audio) {
+    // Join first, then lay the looped music under the clips' own sound (keeping video and subtitles as they are).
+    const joined = path.join(opts.workDir, "joined.part.mp4");
+    await concatClips({ ...opts, bed: undefined, out: joined });
+    const total = (await probeDuration(joined)).toFixed(3);
+    const fadeOut = Math.max(0, Number(total) - 2.5).toFixed(3);
+    await runFfmpeg([
+      "-i", joined, "-stream_loop", "-1", "-i", opts.bed,
+      "-filter_complex", `[1:a]aresample=48000,atrim=0:${total},asetpts=N/SR/TB,volume=0.15,afade=t=in:d=1,afade=t=out:st=${fadeOut}:d=2.5[b];[0:a][b]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[a]`,
+      "-map", "0:v", "-map", "[a]", "-map", "0:s?", "-c:v", "copy", "-c:s", "copy", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+      "-movflags", "+faststart", opts.out,
+    ]);
+    await rm(joined, { force: true });
+    return;
+  }
   const list = path.join(opts.workDir, "concat.txt");
   // Paths in concat lists are relative to the list file; quote-escape per ffmpeg rules.
   const body = opts.clips.map((c) => `file '${path.resolve(c).replace(/'/g, "'\\''")}'`).join("\n") + "\n";

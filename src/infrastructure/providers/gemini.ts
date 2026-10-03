@@ -8,7 +8,7 @@ import { ChannelDetailsSchema } from "../../domain/channel/channel.model.js";
 import { PlanTextSchema } from "../../domain/plan/plan.model.js";
 import { CharacterSchema, PoemSchema, ScenePlanSchema, StanzaSchema } from "../../domain/project/project.model.js";
 import { log } from "../../util/log.js";
-import { isTransientError, sleep, withRetry } from "../../util/retry.js";
+import { isBillingStop, isTransientError, sleep, withRetry } from "../../util/retry.js";
 import { type AvailableModel, type GenContext, type Provider, type SongResult, type TextKind, type TextOutputs } from "../../domain/ports/generator.port.js";
 
 
@@ -147,7 +147,7 @@ export class GeminiProvider implements Provider {
       retries: 4,
       baseDelayMs: 30_000,
       maxDelayMs: 120_000,
-      shouldRetry: (err) => (err as { status?: number }).status === 429 || isTransientError(err),
+      shouldRetry: (err) => !isBillingStop(err) && ((err as { status?: number }).status === 429 || isTransientError(err)),
     });
     const started = Date.now();
     while (!op.done) {

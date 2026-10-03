@@ -29,7 +29,7 @@ export interface ProjectDto {
   poem: ProjectProps["poem"];
   scenes: ProjectProps["scenes"];
   character: ProjectProps["character"];
-  song: { file: string; duration: number } | null;
+  song: { file: string; duration: number; source: "ai" | "music_voice" | "upload" } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -109,7 +109,7 @@ export const ProjectMapper = {
       poem: p.poem,
       scenes: p.scenes,
       character: p.character,
-      song: p.song ? { file: p.song.file, duration: p.song.duration } : null,
+      song: p.song ? { file: p.song.file, duration: p.song.duration, source: p.song.source ?? "ai" } : null,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     };

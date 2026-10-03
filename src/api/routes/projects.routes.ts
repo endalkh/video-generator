@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { MAX_UPLOAD_BYTES, type ProjectService } from "../../services/project.service.js";
+import { MAX_AUDIO_UPLOAD_BYTES, MAX_UPLOAD_BYTES, type ProjectService } from "../../services/project.service.js";
 import type { PipelineEvent } from "../../services/pipeline.service.js";
 import { HttpError, send, type Router } from "../http.js";
 
@@ -35,6 +35,10 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
       await projects.delete(params.id!);
       return { deleted: params.id };
     })
+    .post("/api/projects/:id/recreate", async ({ params, body }) => {
+      const b = await body();
+      return projects.recreate(params.id!, { keepPoem: b.keepPoem === true, keepCharacter: b.keepCharacter !== false, provider: str(b.provider) });
+    }, 201)
     .put("/api/projects/:id/channel", async ({ params, body }) => {
       const channelId = str((await body()).channelId);
       if (!channelId) throw new HttpError(400, "channelId is required");
@@ -71,7 +75,7 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
     }, 202)
     .post("/api/projects/:id/steps/:step/generate", async ({ params, body }) => {
       const b = await body();
-      await projects.generateStep(params.id!, params.step!, { provider: str(b.provider), keepVisuals: b.keepVisuals === true });
+      await projects.generateStep(params.id!, params.step!, { provider: str(b.provider), keepVisuals: b.keepVisuals === true, audioRequest: typeof b.audioRequest === "string" ? b.audioRequest : undefined });
       return { id: params.id, step: params.step };
     }, 202)
     .post("/api/projects/:id/scenes/:index/redo", async ({ params }) => {
@@ -98,6 +102,7 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
       const b = await body(Math.ceil(MAX_UPLOAD_BYTES * 1.4) + 64_000);
       return projects.uploadCharacter(params.id!, b, { provider: str(b.provider) });
     })
+    .put("/api/projects/:id/audio/upload", async ({ params, body }) => projects.uploadAudio(params.id!, await body(Math.ceil(MAX_AUDIO_UPLOAD_BYTES * 1.4) + 64_000)))
     .put("/api/projects/:id/character", async ({ params, body }) => projects.editCharacter(params.id!, (await body()).character))
     .post("/api/projects/:id/cancel", ({ params }) => ({ cancelled: projects.cancel(params.id!) }), 202)
     .get("/api/projects/:id/events", async ({ req, res, params }) => {

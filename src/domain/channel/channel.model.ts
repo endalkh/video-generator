@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AudioModeSchema, SingerSchema, TTS_VOICES, type TtsVoice } from "../project/project.model.js";
 
 const tidy = (v: string) => v.replace(/\s+/g, " ").trim();
 const optionalText = (max: number) =>
@@ -26,6 +27,10 @@ export const ChannelInputSchema = z.object({
   mainCharacter: optionalText(300),
   /** Channel default for new videos and plans: video length in minutes (½–10). */
   videoMinutes: z.number().min(0.5).max(10).multipleOf(0.5).optional(),
+  /** Channel defaults for new and planned videos: how the audio is made and who sings / speaks. */
+  audioMode: AudioModeSchema.optional(),
+  singer: SingerSchema.optional(),
+  voice: z.enum(Object.keys(TTS_VOICES) as [TtsVoice, ...TtsVoice[]]).optional(),
 });
 export type ChannelInput = z.infer<typeof ChannelInputSchema>;
 

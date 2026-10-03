@@ -1,6 +1,6 @@
 import { ConflictError, NotFoundError } from "../domain/errors.js";
 import { KIDS_SYLLABLES_PER_SEC, LANGUAGE_NAMES, SONG_FRAME_SEC } from "../domain/ports/generator.port.js";
-import { SECONDS_PER_SCENE, type ProjectInput } from "../domain/project/project.model.js";
+import { SECONDS_PER_SCENE, type ProjectInput, type Singer } from "../domain/project/project.model.js";
 import { SCENE_TAIL_SEC } from "../infrastructure/media/ffmpeg.js";
 import { DEFAULT_PROMPTS, promptDefinition } from "../domain/prompt/prompt.defaults.js";
 import { Prompt, PromptSet, SHARED } from "../domain/prompt/prompt.entity.js";
@@ -157,17 +157,23 @@ export class PromptService {
         character_hint: input.characterHint ?? "",
         song_seconds: extra.songSeconds ?? input.songSeconds,
         video_seconds: videoSeconds(input, extra.songSeconds),
+        // Ge'ez: one letter (fidel) is ~0.8 syllable (see estimateSyllables), so a line can have a few more letters.
+        letters_per_line: Math.round(syllablesPerLine(input, extra.songSeconds) / 0.8),
+        singer: SINGER_TEXT[input.singer],
+        voice_style: VOICE_STYLE[input.singer],
+        audio_request: input.audioRequest ?? "",
         // Song: 2 lines per stanza sung at a clear kids' pace within the song length.
         // Narration: 4 lines per stanza read slowly, with a short pause after each scene.
-        syllables_per_line: input.audioMode === "song"
-          ? Math.max(4, Math.floor(((extra.songSeconds ?? input.songSeconds) - SONG_FRAME_SEC) * KIDS_SYLLABLES_PER_SEC / (input.sceneCount * 2)))
-          : Math.max(4, Math.min(14, Math.floor((videoSeconds(input) - input.sceneCount * SCENE_TAIL_SEC) * KIDS_SYLLABLES_PER_SEC / (input.sceneCount * 4)))),
+        syllables_per_line: syllablesPerLine(input, extra.songSeconds),
       },
       {
         am: input.language === "am",
         en: input.language === "en",
         song: input.audioMode === "song",
         narration: input.audioMode === "narration",
+        music_voice: input.audioMode === "music_voice",
+        character_voice: input.audioMode === "character",
+        has_audio_request: Boolean(input.audioRequest),
         veo: input.videoMode === "veo",
         has_character_hint: Boolean(input.characterHint?.trim()),
         has_reference: false,
@@ -187,9 +193,38 @@ export class PromptService {
   }
 }
 
+/**
+ * Longest line that can still be sung / read clearly in the time: song = 2 lines per stanza at a kids' pace;
+ * narration and rhyme over music = 4 lines per stanza with a short pause after each scene.
+ */
+function syllablesPerLine(input: ProjectInput, songSeconds?: number): number {
+  return input.audioMode === "song"
+    ? Math.max(4, Math.floor(((songSeconds ?? input.songSeconds) - SONG_FRAME_SEC) * KIDS_SYLLABLES_PER_SEC / (input.sceneCount * 2)))
+    : Math.max(4, Math.min(14, Math.floor((videoSeconds(input) - input.sceneCount * SCENE_TAIL_SEC) * KIDS_SYLLABLES_PER_SEC / (input.sceneCount * (input.audioMode === "character" ? 2 : 4)))));
+}
+
+/** How the music prompt describes the singer (music models have no voice setting). */
+const SINGER_TEXT: Record<Singer, string> = {
+  auto: "one clear, warm, friendly vocalist",
+  woman: "one clear, warm, friendly female vocalist (a young woman)",
+  man: "one clear, warm, friendly male vocalist (a young man)",
+  girl: "one young girl (about 8 years old) with a bright, sweet, natural child's voice",
+  boy: "one young boy (about 8 years old) with a bright, cheerful, natural child's voice",
+  kids: "a small, joyful children's choir singing together in unison",
+};
+/** How the speech prompt describes the voice (on top of the chosen prebuilt voice). */
+const VOICE_STYLE: Record<Singer, string> = {
+  auto: "a warm, friendly storyteller",
+  woman: "a warm, friendly young woman",
+  man: "a warm, friendly young man",
+  girl: "a cheerful little girl, bright and childlike",
+  boy: "a cheerful little boy, bright and childlike",
+  kids: "a cheerful, playful child",
+};
+
 /** Target video length: the chosen length, else the song length (song) or ~12 s per scene (narration). */
 function videoSeconds(input: ProjectInput, songSeconds?: number): number {
-  return input.lengthSeconds ?? (input.audioMode === "song" ? (songSeconds ?? input.songSeconds) : input.sceneCount * SECONDS_PER_SCENE.narration);
+  return input.lengthSeconds ?? (input.audioMode === "song" ? (songSeconds ?? input.songSeconds) : input.sceneCount * SECONDS_PER_SCENE[input.audioMode]);
 }
 
 /** Extra inputs for a prompt snapshot: the song length, and the Channel page's language and flags. */

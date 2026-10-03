@@ -71,7 +71,7 @@ const extLink = (href, text) => h("a", { href, target: "_blank", rel: "noopener 
  */
 function billingHelp(message) {
   const text = String(message ?? "");
-  if (/\b429\b|RESOURCE_EXHAUSTED|exceeded your current quota|rate limit/i.test(text) && !/spend cap|dunning/i.test(text)) {
+  if (/\b429\b|RESOURCE_EXHAUSTED|exceeded your current quota|rate limit/i.test(text) && !/spend(ing)? cap|dunning/i.test(text)) {
     return h("div", { class: "mt-2 rounded-lg bg-white/70 p-2 text-sm text-ink" },
       h("p", { text: "This is a Google rate limit (too many requests for this model), not a payment problem. Finished work is kept. Wait and try again, or pick a model with higher limits:" }),
       h("p", { class: "mt-1 flex flex-wrap gap-x-4 gap-y-1" },
@@ -79,10 +79,13 @@ function billingHelp(message) {
         extLink("https://aistudio.google.com/usage", "Usage"),
         h("a", { href: "#/models", class: "font-semibold underline", text: "Models page" })));
   }
-  if (!/dunning|billing|prepay|credit balance|payment required|\b402\b|spend cap/i.test(text)) return null;
+  if (!/dunning|billing|prepay|credit balance|payment required|\b402\b|spend(ing)? cap/i.test(text)) return null;
   return h("div", { class: "mt-2 rounded-lg bg-white/70 p-2 text-sm text-ink" },
-    h("p", { text: "This looks like a Google billing problem (unpaid or overdue bill, declined card, or no Prepay credits). Nothing in the app needs changing; fix it here, then try again in a few minutes:" }),
+    h("p", { text: /spend(ing)? cap/i.test(text)
+      ? "Your Google AI project reached the monthly spending cap you set, so Google stops further requests until next month. Nothing in the app needs changing: raise the cap in AI Studio (Spend), then try again:"
+      : "This looks like a Google billing problem (unpaid or overdue bill, declined card, or no Prepay credits). Nothing in the app needs changing; fix it here, then try again in a few minutes:" }),
     h("p", { class: "mt-1 flex flex-wrap gap-x-4 gap-y-1" },
+      /spend(ing)? cap/i.test(text) ? extLink("https://ai.studio/spend", "Spend cap") : null,
       extLink("https://aistudio.google.com/billing", "AI Studio billing"),
       extLink("https://console.cloud.google.com/billing", "Google Cloud billing"),
       extLink("https://aistudio.google.com/usage", "Usage")));
@@ -229,6 +232,26 @@ function projectItem(p) {
         h("span", { class: `block h-full rounded-full ${bar} ${status === "running" ? "animate-pulse" : ""}`, style: `width:${pct}%` }))));
 }
 
+// ---------- audio choices (same lists as src/domain/project/project.model.ts) ----------
+const AUDIO_MODES = [
+  ["song", "Song — sung by the music AI (Lyria)"],
+  ["music_voice", "Rhyme over music — clear voice + instrumental music (best for Amharic)"],
+  ["narration", "Narrated story — a narrator reads, the character acts it out"],
+  ["character", "The character speaks — she says the words herself in the video (lip-sync; needs Veo)"],
+];
+const SINGERS = [["auto", "Any (let the AI choose)"], ["woman", "Woman"], ["man", "Man"], ["girl", "Girl (child)"], ["boy", "Boy (child)"], ["kids", "Group of children"]];
+const TTS_VOICES = {
+  Zephyr: "female, bright", Kore: "female, firm", Leda: "female, youthful", Aoede: "female, breezy", Callirrhoe: "female, easy-going",
+  Autonoe: "female, bright", Despina: "female, smooth", Erinome: "female, clear", Laomedeia: "female, upbeat", Achernar: "female, soft",
+  Gacrux: "female, mature", Pulcherrima: "female, forward", Vindemiatrix: "female, gentle", Sulafat: "female, warm",
+  Puck: "male, upbeat", Charon: "male, informative", Fenrir: "male, excitable", Orus: "male, firm", Enceladus: "male, breathy",
+  Iapetus: "male, clear", Umbriel: "male, easy-going", Algieba: "male, smooth", Algenib: "male, gravelly", Rasalgethi: "male, informative",
+  Alnilam: "male, firm", Schedar: "male, even", Achird: "male, friendly", Zubenelgenubi: "male, casual", Sadachbia: "male, lively", Sadaltager: "male, knowledgeable",
+};
+const VOICE_OPTIONS = [["", "Matching the singer (recommended)"], ...Object.entries(TTS_VOICES).map(([v, d]) => [v, `${v} — ${d}`])];
+const AUDIO_LABEL = { song: "song", music_voice: "rhyme over music", narration: "narrated story", character: "the character speaks" };
+const SINGER_HINT = "Songs: the singer is described to the music AI (it has no voice setting, so it's a strong hint). Rhyme over music and narration: also picks a matching voice.";
+
 // Same rules as the server (src/domain/project/project.model.ts): ½–10 minutes, one scene per ~10 s (song) / ~12 s (story).
 const lengthSecondsOf = (minutes) => Math.min(600, Math.max(30, Math.round((Number(minutes) || 0.5) * 60)));
 const autoScenes = (seconds, mode) => Math.min(40, Math.max(2, Math.round(seconds / (mode === "song" ? 10 : 12))));
@@ -251,7 +274,9 @@ async function showNewVideo() {
     field("f-topic", "What is the video about?", h("textarea", { id: "f-topic", name: "topic", required: true, minlength: 3, rows: 2, class: "field", placeholder: "e.g. Washing hands before eating / እጅ መታጠብ" })),
     h("div", { class: "grid gap-4 sm:grid-cols-2 lg:grid-cols-3" },
       field("f-language", "Language", select("f-language", "language", [["en", "English"], ["am", "አማርኛ (Amharic)"]], lang)),
-      field("f-audio", "Audio", select("f-audio", "audioMode", [["song", "Song — sung by Lyria"], ["narration", "Narrated story (TTS)"]])),
+      field("f-audio", "Audio", select("f-audio", "audioMode", AUDIO_MODES, d.audioMode ?? (lang === "am" ? "music_voice" : "song"))),
+      field("f-singer", "Singer / voice", select("f-singer", "singer", SINGERS, d.singer ?? "auto"), SINGER_HINT),
+      field("f-voice", "Exact voice (optional)", select("f-voice", "voice", VOICE_OPTIONS, d.voice ?? ""), "For rhyme over music and narrated stories."),
       field("f-video", "Visuals", select("f-video", "videoMode", [["still", "Animated pictures — still images with camera motion (fast)"], ["veo", "Moving video clips — Veo (slow, uses more credits)"]])),
       field("f-scenes", "Scenes", h("input", { id: "f-scenes", name: "sceneCount", type: "number", min: 2, max: 40, class: "field", placeholder: "Auto" }),
         "Leave empty: one picture about every 10 s (song) or 12 s (story)."),
@@ -304,9 +329,19 @@ async function showNewVideo() {
         ? (seconds > 180
             ? `Google's song models make at most about 3 minutes per song, so this song is made in ${Math.ceil(seconds / 180)} parts that are joined (with Lyria 3 Clip: ${Math.ceil(seconds / 30)} parts of 30 s, and the tune may change between parts). Pick Lyria 3 Pro or 3.5 on the Models page for long songs.`
             : seconds > 30 ? "Pick Lyria 3 Pro or 3.5 on the Models page: Lyria 3 Clip makes 30-second songs, so longer ones are joined from several 30 s parts." : "")
-        : "The story is written to be read aloud in about this time; the exact length depends on the voice.");
+        : mode === "character"
+          ? `In every scene Veo makes ${$("#f-character").value.trim() || "the character"} say that scene's words herself, with her lips in sync, plus soft background music. Each scene is one 8-second Veo clip, so this needs Visuals = Veo (${scenes} paid clips). Veo's Amharic speech isn't documented: try a short video first.`
+          : mode === "music_voice"
+          ? "The rhyme is chanted clearly by the voice AI over instrumental music from the music AI (one music piece, looped). Amharic words come out clear, because the voice AI speaks Amharic while the music AI can't sing it well."
+          : "The story is written to be read aloud in about this time; the exact length depends on the voice.");
+    $("#f-voice").closest("div").hidden = mode === "song" || mode === "character";
+    if (mode === "character") $("#f-video").value = "veo";
   };
   for (const id of ["#f-length", "#f-audio", "#f-scenes", "#f-video"]) $(id).addEventListener("input", updateLengthPlan);
+  // Amharic is better as a rhyme over music: suggest it when switching the language (unless the channel chose otherwise).
+  $("#f-language").addEventListener("change", () => {
+    if (!d.audioMode && $("#f-language").value === "am" && $("#f-audio").value === "song") { $("#f-audio").value = "music_voice"; updateLengthPlan(); }
+  });
   updateLengthPlan();
   $("#f-topic").focus();
 }
@@ -427,7 +462,7 @@ async function renderProject(id, keepStatus = false) {
 
   const header = h("section", { class: "card" },
     h("div", { class: "flex flex-wrap items-center gap-3" }, h("h2", { class: "text-2xl font-bold", lang, text: p.poem?.title || p.topic }), badge(p.running ? "running" : p.status)),
-    h("p", { class: "mt-1 text-sm text-stone-500", text: [manual ? "manual review" : "auto", lang === "am" ? "አማርኛ" : "English", p.input.audioMode, p.input.lengthSeconds ? `${formatLength(p.input.lengthSeconds)} target` : null, `${p.input.sceneCount} scenes`, p.input.videoMode === "veo" ? "Veo video" : "animated pictures", p.input.aspectRatio, `provider: ${p.provider}`].filter(Boolean).join(" · ") }),
+    h("p", { class: "mt-1 text-sm text-stone-500", text: [manual ? "manual review" : "auto", lang === "am" ? "አማርኛ" : "English", AUDIO_LABEL[p.input.audioMode] ?? p.input.audioMode, p.song?.source === "upload" ? "your recording" : null, p.input.lengthSeconds ? `${formatLength(p.input.lengthSeconds)} target` : null, `${p.input.sceneCount} scenes`, p.input.videoMode === "veo" ? "Veo video" : "animated pictures", p.input.aspectRatio, `provider: ${p.provider}`].filter(Boolean).join(" · ") }),
     controls,
     p.running ? null : settingsPanel(p),
     p.running ? null : videoAdmin(p),
@@ -487,15 +522,21 @@ function stepPage(p, step, keepVideo, videoKey) {
   const laterNote = laterDone.length ? ` ${laterDone.map((s) => STEP_LABELS[s]).join(", ")} will need to be made again.` : "";
   // Pictures / Veo videos already made. A new song never deletes them; a poem change can keep them too.
   const hasVisuals = p.media.scenes.some((m) => m.image || m.video);
-  const keepBox = step === "poem" && editable_(p, step) && hasVisuals && p.completed.includes("scenes")
+  const veoKept = p.media.scenes.filter((m) => m.video).length;
+  const keepBox = step === "poem" && editable_(p, step) && hasVisuals && p.completed.includes("scenes") && p.input.audioMode !== "character"
     ? h("input", { id: "keep-visuals", type: "checkbox", checked: true, class: "mt-1 size-4 accent-coral" }) : null;
   const keeping = () => Boolean(keepBox?.checked);
   const keepNote = " The pictures and video clips are kept; the song, clip timing and final video are made again.";
-  const changeNote = () => (keeping() ? keepNote : step === "audio" && hasVisuals ? `${laterNote} The pictures and video clips are kept and re-timed to the new audio.` : laterNote);
+  const changeNote = () => (keeping() ? keepNote : step === "audio" && hasVisuals ? `${laterNote} The pictures${veoKept ? ` and ${veoKept} Veo animation${veoKept === 1 ? "" : "s"}` : ""} are kept (no new AI cost); the clips are only re-timed to the new audio.` : laterNote);
+  
+  // Audio page: extra wishes for the song / music / voice, remembered for this video.
+  const wish = step === "audio" && idle && ready
+    ? h("input", { id: "audio-wish", class: "field", lang: p.input.language, maxlength: 500, value: p.input.audioRequest ?? "", placeholder: "e.g. slower and happier · more krar and kebero · a softer, sleepy lullaby · louder clapping · speak more slowly" })
+    : null;
   const generate = (label = MAKE_LABEL[step], cls = "btn") => h("button", { type: "button", class: cls, onclick: act(async () => {
     if (done && !confirm(`Throw this ${STEP_LABELS[step].toLowerCase()} away and make a new one?${changeNote()}`)) return SKIP;
     if (step === "clips" && p.input.videoMode === "veo" && !confirm(`This makes ${p.scenes.scenes.length} Veo video requests (slow, uses paid credits). Continue?`)) return SKIP;
-    await post(`/api/projects/${enc(id)}/steps/${step}/generate`, { provider: provider(), keepVisuals: keeping() });
+    await post(`/api/projects/${enc(id)}/steps/${step}/generate`, { provider: provider(), keepVisuals: keeping(), audioRequest: wish ? wish.value : undefined });
   }) }, label);
 
   // Each step fills in: body (what was made), save (returns a function that saves the edits, or null when
@@ -580,8 +621,8 @@ function stepPage(p, step, keepVideo, videoKey) {
   if (step === "audio" && done) {
     body = p.song
       ? h("div", { class: "space-y-2" }, h("audio", { controls: true, class: "w-full", src: mediaUrl(id, p.song.file, p.updatedAt) }),
-          h("p", { class: "text-sm text-stone-500", text: `Song · ${p.song.duration.toFixed(1)} seconds` }),
-          h("a", { class: "btn-soft", href: mediaUrl(id, p.song.file, p.updatedAt), download: "" }, "⬇ Download song"))
+          h("p", { class: "text-sm text-stone-500", text: `${{ upload: "Your recording", music_voice: "Rhyme over music", ai: "Song" }[p.song.source ?? "ai"]} · ${p.song.duration.toFixed(1)} seconds` }),
+          h("a", { class: "btn-soft", href: mediaUrl(id, p.song.file, p.updatedAt), download: "" }, "⬇ Download audio"))
       : h("ol", { class: "space-y-3" }, (p.scenes?.scenes ?? []).map((sc) => {
           const a = p.media.scenes.find((m) => m.index === sc.index)?.audio;
           return h("li", { class: "rounded-xl border border-orange-100 p-3" },
@@ -591,7 +632,11 @@ function stepPage(p, step, keepVideo, videoKey) {
   } else if (step === "clips" && p.scenes && (done || making || p.media.scenes.some((m) => m.image || m.clip))) {
     body = h("div", { class: "grid gap-4 sm:grid-cols-2" }, p.scenes.scenes.map((sc) => {
       const m = p.media.scenes.find((x) => x.index === sc.index);
+      // Finished clip; else the Veo animation it's made from (kept when the audio changes, re-timed later); else the picture.
       const media = m?.clip ? h("video", { controls: true, preload: "metadata", class: "aspect-video w-full bg-black", src: mediaUrl(id, m.clip, p.updatedAt), "aria-label": `Scene ${sc.index + 1} clip` })
+        : m?.video ? h("div", { class: "relative" },
+            h("video", { controls: true, muted: true, loop: true, preload: "metadata", class: "aspect-video w-full bg-black", src: mediaUrl(id, m.video, p.updatedAt), "aria-label": `Scene ${sc.index + 1} Veo animation` }),
+            h("span", { class: "absolute top-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white", text: "🎞️ Veo animation · timed to the audio when the clips are made" }))
         : m?.image ? h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: sc.visualPrompt, class: "aspect-video w-full object-cover" })
         : h("div", { class: "grid aspect-video place-items-center bg-stone-100 text-sm text-stone-500", text: making ? "painting…" : "not made yet" });
       return h("figure", { class: "overflow-hidden rounded-xl border border-orange-100" }, media,
@@ -613,6 +658,7 @@ function stepPage(p, step, keepVideo, videoKey) {
       p.media.subtitles ? h("a", { class: "btn-soft", href: mediaUrl(id, p.media.subtitles, p.updatedAt), download: `${id}.srt` }, "⬇ Lyrics file (.srt)") : null));
   }
   if (step === "final" && idle) after = subtitlesToggle(p, act);
+  if (step === "audio" && idle && p.completed.includes("character")) after = audioUpload(p, act, done);
 
   // What to do on this page.
   let buttons = [];
@@ -654,6 +700,9 @@ function stepPage(p, step, keepVideo, videoKey) {
       reviewing ? h("span", { class: "chip bg-sky-100 text-sky-800", text: "👀 needs your review" }) : done ? h("span", { class: "chip bg-emerald-100 text-emerald-800", text: "✓ done" }) : null),
     h("p", { class: "mb-4 text-sm text-stone-600", text: STEP_HELP[step] }),
     body,
+    wish && buttons.length ? h("div", { class: "mt-5 rounded-xl bg-violet-50 p-3" },
+      h("label", { for: "audio-wish", class: "label", text: done ? "What should be different this time? (optional)" : "Anything special for the audio? (optional)" }), wish,
+      h("p", { class: "mt-1 text-xs text-stone-500", text: "Added to the song / music / voice prompt (in English or Amharic). It's remembered for this video; clear it to go back to the normal prompt." })) : null,
     buttons.length || nextLink ? h("div", { class: "mt-5 flex flex-wrap items-center gap-2" }, buttons, nextLink) : null,
     status,
     after);
@@ -727,8 +776,27 @@ function videoAdmin(p) {
       location.hash = "#/new";
     } catch (err) { mount(status, errorBox(err)); }
   } }, "🗑 Delete video");
+  const keepPoem = h("input", { id: "rc-poem", type: "checkbox", class: "size-4 accent-coral", checked: false, disabled: !p.poem || null });
+  const keepChar = h("input", { id: "rc-char", type: "checkbox", class: "size-4 accent-coral", checked: Boolean(p.character) || null, disabled: !p.character || null });
+  const recreate = h("button", { type: "button", class: "btn px-3 py-1.5 text-sm", onclick: async () => {
+    const kept = [keepPoem.checked && "the same words", keepChar.checked && `the same character (${p.character?.name})`].filter(Boolean);
+    if (!confirm(`Make a new copy of this video with the same settings${kept.length ? `, keeping ${kept.join(" and ")}` : ""}? Everything else is made again${p.input.videoMode === "veo" ? ` (including ${p.input.sceneCount} paid Veo clips)` : ""}. This video stays as it is.`)) return;
+    recreate.disabled = true;
+    mount(status, "Creating the copy…");
+    try {
+      const copy = await post(`/api/projects/${enc(p.id)}/recreate`, { keepPoem: keepPoem.checked, keepCharacter: keepChar.checked, provider: $("#prov")?.value });
+      await loadChannels();
+      location.hash = `#/project/${enc(copy.id)}`;
+    } catch (err) { mount(status, errorBox(err)); recreate.disabled = false; }
+  } }, "🔁 Re-create video");
   return h("details", { class: "mt-3 rounded-xl border border-orange-100 p-4" },
-    h("summary", { class: "cursor-pointer font-semibold", text: "📦 Move or delete this video" }),
+    h("summary", { class: "cursor-pointer font-semibold", text: "📦 Re-create, move or delete this video" }),
+    h("div", { class: "mt-3 space-y-2 rounded-xl bg-violet-50 p-3 text-sm" },
+      h("p", { class: "font-semibold", text: "Re-create: make this video again as a new copy (same settings and channel)" }),
+      h("div", { class: "flex flex-wrap items-center gap-x-5 gap-y-2" },
+        h("label", { for: "rc-poem", class: "flex items-center gap-2" }, keepPoem, "Keep the same words (poem)"),
+        h("label", { for: "rc-char", class: "flex items-center gap-2" }, keepChar, "Keep the same character"),
+        recreate)),
     h("div", { class: "mt-3 flex flex-wrap items-center gap-2" },
       target ? [h("label", { for: "mv-channel", class: "text-sm", text: "Move to channel" }), target, move, h("span", { class: "mx-2 h-6 w-px bg-orange-100", "aria-hidden": "true" })] : null,
       del),
@@ -746,7 +814,9 @@ function settingsPanel(p) {
   const els = {
     topic: h("textarea", { id: "ps-topic", class: "field", rows: 2, lang: inp.language, value: inp.topic }),
     language: sel("language", [["en", "English"], ["am", "አማርኛ (Amharic)"]], inp.language),
-    audioMode: sel("audioMode", [["song", "Song — sung by Lyria"], ["narration", "Narrated story (TTS)"]], inp.audioMode),
+    audioMode: sel("audioMode", AUDIO_MODES, inp.audioMode),
+    singer: sel("singer", SINGERS, inp.singer ?? "auto"),
+    voice: sel("voice", VOICE_OPTIONS, inp.voice ?? ""),
     length: h("input", { id: "ps-length", type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: inp.lengthSeconds ? inp.lengthSeconds / 60 : inp.audioMode === "song" ? inp.songSeconds / 60 : "", placeholder: "not set" }),
     sceneCount: h("input", { id: "ps-sceneCount", type: "number", min: 2, max: 40, class: "field", value: inp.sceneCount, placeholder: "Auto" }),
     ageRange: h("input", { id: "ps-ageRange", class: "field", value: inp.ageRange }),
@@ -766,6 +836,7 @@ function settingsPanel(p) {
     return {
       topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, ageRange: els.ageRange.value.trim() || "3-6",
       aspectRatio: els.aspectRatio.value, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
+      singer: els.singer.value, voice: els.voice.value || null,
       lengthSeconds: minutes ? lengthSecondsOf(minutes) : null,
       sceneCount: els.sceneCount.value ? Number(els.sceneCount.value) : null,
     };
@@ -773,7 +844,7 @@ function settingsPanel(p) {
   const changedKeys = () => {
     const next = read();
     const autoCount = next.sceneCount ?? autoScenes(next.lengthSeconds ?? inp.songSeconds, next.audioMode);
-    const cur = { ...inp, characterHint: inp.characterHint ?? null, lengthSeconds: inp.lengthSeconds ?? null };
+    const cur = { ...inp, characterHint: inp.characterHint ?? null, lengthSeconds: inp.lengthSeconds ?? null, singer: inp.singer ?? "auto", voice: inp.voice ?? null };
     return Object.keys(next).filter((k) => k === "sceneCount" ? autoCount !== inp.sceneCount
       : k === "lengthSeconds" ? next.lengthSeconds !== (cur.lengthSeconds ?? (inp.audioMode === "song" ? inp.songSeconds : null))
       : String(next[k] ?? "") !== String(cur[k] ?? ""));
@@ -788,6 +859,7 @@ function settingsPanel(p) {
     const has = (list) => keys.some((k) => list.includes(k));
     if (has(["topic", "language", "audioMode", "lengthSeconds", "sceneCount", "ageRange"])) return lengthOnly() && keepBox.checked ? "audio" : "poem";
     if (has(["style", "characterHint"])) return "character";
+    if (has(["singer", "voice"])) return "audio";
     return "clips";
   };
   const update = () => {
@@ -801,7 +873,7 @@ function settingsPanel(p) {
     impact.textContent = !from ? "Nothing changed yet."
       : from === "poem" ? `A new poem is written for these settings, then the scenes, audio and clips are made again.${scenesNote} The character (${p.character?.name ?? "not made yet"}) is kept.${later.length ? "" : " Nothing has been made yet, so nothing is lost."}`
       : from === "character" ? "The poem and scenes are kept. The character is drawn again in the new style, then the audio and clips are made again."
-      : from === "audio" ? "The poem and pictures are kept. The song or narration is made again for the new length, and the clips are re-timed."
+      : from === "audio" ? "The poem and pictures are kept. The song or voice is made again with the new length or voice, and the clips are re-timed."
       : "The poem, character and audio are kept. The pictures and clips are made again in the new shape.";
   };
   for (const el of Object.values(els)) el.addEventListener("input", update);
@@ -835,6 +907,7 @@ function settingsPanel(p) {
       f("topic", "What is the video about?", els.topic),
       h("div", { class: "grid gap-4 sm:grid-cols-3" },
         f("language", "Language", els.language), f("audioMode", "Audio", els.audioMode), f("aspectRatio", "Shape", els.aspectRatio)),
+      h("div", { class: "grid gap-4 sm:grid-cols-2" }, f("singer", "Singer / voice", els.singer, SINGER_HINT), f("voice", "Exact voice (rhyme over music, narration)", els.voice)),
       h("div", { class: "grid gap-4 sm:grid-cols-3" },
         f("length", "Video length (minutes)", els.length, "½ to 10 minutes."),
         f("sceneCount", "Scenes", els.sceneCount, "Empty = picked from the length."),
@@ -859,6 +932,36 @@ function subtitlesToggle(p, act) {
 }
 
 const MAX_UPLOAD_MB = 8;
+const MAX_AUDIO_MB = 30;
+
+/** Use your own recording (you or your child singing or reading the poem) as the audio. */
+function audioUpload(p, act, done) {
+  const file = h("input", { id: "au-file", type: "file", accept: "audio/*,.m4a,.mp3,.wav,.ogg,.webm", class: "field text-sm", "aria-describedby": "au-help" });
+  const preview = h("audio", { controls: true, hidden: true, class: "w-full" });
+  const msg = h("p", { role: "status", "aria-live": "polite", class: "text-sm" });
+  let url = null;
+  file.addEventListener("change", () => {
+    if (url) URL.revokeObjectURL(url);
+    const f = file.files[0];
+    url = f ? URL.createObjectURL(f) : null;
+    preview.hidden = !url;
+    if (url) preview.src = url;
+    msg.textContent = f && f.size > MAX_AUDIO_MB * 1024 * 1024 ? `That file is too big (max ${MAX_AUDIO_MB} MB).` : "";
+  });
+  const useIt = h("button", { type: "button", class: "btn", onclick: act(async () => {
+    const f = file.files[0];
+    if (!f) { msg.textContent = "Choose a recording first."; file.focus(); return SKIP; }
+    if (f.size > MAX_AUDIO_MB * 1024 * 1024) { msg.textContent = `That file is too big (max ${MAX_AUDIO_MB} MB).`; return SKIP; }
+    if (done && !confirm("Use this recording instead of the current audio? The clips and final video are made again (pictures are kept).")) return SKIP;
+    msg.textContent = "Uploading…";
+    await post(`/api/projects/${enc(p.id)}/audio/upload`, { audio: await fileToDataUrl(f) }, "PUT");
+  }, false) }, "📤 Use this recording");
+  return h("details", { class: "mt-5 rounded-xl border border-dashed border-orange-200 p-4", open: !done || null },
+    h("summary", { class: "cursor-pointer font-semibold", text: "🎙️ Use your own recording instead" }),
+    h("p", { id: "au-help", class: "mt-2 text-sm text-stone-600", text: `Sing or read the poem yourself (or with your child), record it on your phone, and upload it here: MP3, M4A, WAV, OGG or WebM, up to ${MAX_AUDIO_MB} MB. Sing the stanzas in order; each scene gets a share of the time that matches its words. The pictures are kept, the clips are timed to your recording.` }),
+    h("div", { class: "mt-3 space-y-2" }, h("label", { for: "au-file", class: "label", text: "Recording" }), file, preview),
+    h("div", { class: "mt-3 flex flex-wrap items-center gap-3" }, useIt, msg));
+}
 
 /** Upload your own picture as the main character (instead of, or replacing, the designed one). */
 function characterUpload(p, act, done) {
@@ -963,7 +1066,7 @@ function renderPromptEditor(p) {
   const status = h("div", { role: "status", "aria-live": "polite", class: "text-sm" });
   const preview = h("pre", { class: "min-h-24 whitespace-pre-wrap rounded-xl bg-stone-50 p-3 font-mono text-xs", text: "Click Preview to see the final prompt with sample values." });
   const lang = h("select", { class: "field w-auto", "aria-label": "Preview language" }, h("option", { value: "en", text: "English" }), h("option", { value: "am", text: "Amharic" }));
-  const mode = h("select", { class: "field w-auto", "aria-label": "Preview audio mode" }, h("option", { value: "song", text: "song" }), h("option", { value: "narration", text: "narration" }));
+  const mode = h("select", { class: "field w-auto", "aria-label": "Preview audio mode" }, h("option", { value: "song", text: "song" }), h("option", { value: "music_voice", text: "rhyme over music" }), h("option", { value: "narration", text: "narration" }));
   const dirty = () => textarea.value !== p.template;
   const saveBtn = h("button", { type: "button", class: "btn", disabled: true }, "💾 Save new version");
   textarea.addEventListener("input", () => { saveBtn.disabled = !dirty(); status.textContent = dirty() ? "Unsaved changes" : ""; });
@@ -1208,6 +1311,9 @@ function channelBriefFields(prefix, input = {}) {
     style: h("input", { id: `${prefix}-style`, class: "field", value: input.style ?? "colorful 3D animated kids' movie style, Pixar-like, soft cinematic lighting, expressive characters" }),
     mainCharacter: h("input", { id: `${prefix}-character`, class: "field", maxlength: 300, value: input.mainCharacter ?? "", placeholder: "e.g. Milcah (ሚልካ), a cheerful, curious little Ethiopian girl" }),
     videoMinutes: h("input", { id: `${prefix}-minutes`, type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: input.videoMinutes ?? "", placeholder: "e.g. 5" }),
+    audioMode: h("select", { id: `${prefix}-audio`, class: "field" }, [["", "Not set (song; rhyme over music for Amharic)"], ...AUDIO_MODES].map(([v, t]) => h("option", { value: v, text: t, selected: v === (input.audioMode ?? "") }))),
+    singer: h("select", { id: `${prefix}-singer`, class: "field" }, SINGERS.map(([v, t]) => h("option", { value: v, text: t, selected: v === (input.singer ?? "auto") }))),
+    voice: h("select", { id: `${prefix}-voice`, class: "field" }, VOICE_OPTIONS.map(([v, t]) => h("option", { value: v, text: t, selected: v === (input.voice ?? "") }))),
   };
   const view = [
     field(`${prefix}-brief`, "What is the channel about? (prompt)", els.brief, "Optional if you add a sample photo. Describe the topic, the mascot, colours or mood you want."),
@@ -1219,11 +1325,16 @@ function channelBriefFields(prefix, input = {}) {
     h("div", { class: "grid gap-4 sm:grid-cols-[2fr_1fr]" },
       field(`${prefix}-character`, "Main character (in every video, optional)", els.mainCharacter),
       field(`${prefix}-minutes`, "Usual video length (minutes, optional)", els.videoMinutes)),
+    h("div", { class: "grid gap-4 sm:grid-cols-3" },
+      field(`${prefix}-audio`, "Usual audio", els.audioMode, "Rhyme over music: planned songs use it too."),
+      field(`${prefix}-singer`, "Singer / voice", els.singer),
+      field(`${prefix}-voice`, "Exact voice (optional)", els.voice)),
     h("p", { class: "text-xs text-stone-500", text: "The language, age range, style, main character and length fill the New video and Ideas & schedule forms for this channel." }),
   ];
   const read = () => ({
     brief: els.brief.value.trim(), name: els.name.value.trim(), language: els.language.value, ageRange: els.ageRange.value.trim() || "3-6", style: els.style.value.trim() || undefined,
     mainCharacter: els.mainCharacter.value.trim(), videoMinutes: els.videoMinutes.value ? Math.round(Number(els.videoMinutes.value) * 2) / 2 : null,
+    audioMode: els.audioMode.value || null, singer: els.singer.value === "auto" ? null : els.singer.value, voice: els.voice.value || null,
   });
   return { view, read, els };
 }

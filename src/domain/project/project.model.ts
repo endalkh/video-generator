@@ -3,7 +3,12 @@ import { z } from "zod";
 export const LanguageSchema = z.enum(["am", "en"]);
 export type Language = z.infer<typeof LanguageSchema>;
 
-export const AudioModeSchema = z.enum(["song", "narration"]);
+/**
+ * song = sung by the music model; narration = read by the speech model; music_voice = the speech model chants the
+ * rhyme over instrumental music from the music model (clear words in languages the music model can't sing, e.g. Amharic);
+ * character = the main character says each scene's words in the Veo clip itself (lip-sync), over soft background music. Needs Veo.
+ */
+export const AudioModeSchema = z.enum(["song", "narration", "music_voice", "character"]);
 export type AudioMode = z.infer<typeof AudioModeSchema>;
 
 export const VideoModeSchema = z.enum(["still", "veo"]);
@@ -23,7 +28,28 @@ const tidy = (v: string) => v.replace(/\s+/g, " ").trim();
 export const MAX_VIDEO_SECONDS = 600;
 export const MAX_SCENES = 40;
 /** Auto scene count: about one picture every this many seconds. */
-export const SECONDS_PER_SCENE = { song: 10, narration: 12 } as const;
+export const SECONDS_PER_SCENE = { song: 10, narration: 12, music_voice: 12, character: 8 } as const;
+
+/** Who sings or speaks. Songs describe the singer in the music prompt; speech also picks a matching voice. */
+export const SingerSchema = z.enum(["auto", "woman", "man", "girl", "boy", "kids"]);
+export type Singer = z.infer<typeof SingerSchema>;
+
+/** Gemini TTS prebuilt voices (name → character), for the "exact voice" picker. */
+export const TTS_VOICES = {
+  Zephyr: "female, bright", Kore: "female, firm", Leda: "female, youthful", Aoede: "female, breezy", Callirrhoe: "female, easy-going",
+  Autonoe: "female, bright", Despina: "female, smooth", Erinome: "female, clear", Laomedeia: "female, upbeat", Achernar: "female, soft",
+  Gacrux: "female, mature", Pulcherrima: "female, forward", Vindemiatrix: "female, gentle", Sulafat: "female, warm",
+  Puck: "male, upbeat", Charon: "male, informative", Fenrir: "male, excitable", Orus: "male, firm", Enceladus: "male, breathy",
+  Iapetus: "male, clear", Umbriel: "male, easy-going", Algieba: "male, smooth", Algenib: "male, gravelly", Rasalgethi: "male, informative",
+  Alnilam: "male, firm", Schedar: "male, even", Achird: "male, friendly", Zubenelgenubi: "male, casual", Sadachbia: "male, lively", Sadaltager: "male, knowledgeable",
+} as const;
+export type TtsVoice = keyof typeof TTS_VOICES;
+
+/** Speech voice used when no exact voice is chosen. */
+export function defaultVoice(singer: Singer, audioMode: AudioMode): TtsVoice {
+  const bySinger: Record<Singer, TtsVoice> = { auto: audioMode === "narration" ? "Kore" : "Leda", woman: "Sulafat", man: "Achird", girl: "Leda", boy: "Puck", kids: "Laomedeia" };
+  return bySinger[singer];
+}
 
 export function autoSceneCount(lengthSeconds: number, audioMode: AudioMode): number {
   return Math.min(MAX_SCENES, Math.max(2, Math.round(lengthSeconds / SECONDS_PER_SCENE[audioMode])));
@@ -47,11 +73,18 @@ const ProjectInputObject = z.object({
   /** Show the lyrics / narration as subtitles in the final video. Off unless asked for. */
   subtitles: z.boolean().default(false),
   characterHint: z.string().transform(tidy).optional(),
-  voice: z.string().optional(),
+  /** Extra wishes for the audio, added to the song / music / voice prompts (Audio page, "What should be different?"). */
+  audioRequest: z.string().transform(tidy).pipe(z.string().max(500)).optional().transform((v) => v || undefined),
+  /** Who sings / speaks (all audio modes). */
+  singer: SingerSchema.default("auto"),
+  /** Exact speech voice (narration and voice over music); empty = picked from `singer`. */
+  voice: z.enum(Object.keys(TTS_VOICES) as [TtsVoice, ...TtsVoice[]]).optional(),
 });
 
 export const ProjectInputSchema = ProjectInputObject.transform((v) => ({
   ...v,
+  // The character can only speak in Veo clips.
+  videoMode: v.audioMode === "character" ? ("veo" as const) : v.videoMode,
   songSeconds: v.lengthSeconds ?? v.songSeconds,
   sceneCount: v.sceneCount ?? (v.lengthSeconds ? autoSceneCount(v.lengthSeconds, v.audioMode) : 4),
 }));
@@ -98,6 +131,8 @@ export const SongTimelineSchema = z.object({
   duration: z.number().positive(),
   slots: z.array(z.object({ start: z.number(), end: z.number() })),
   lyrics: z.string().optional(),
+  /** ai = made by the music model (default), music_voice = voice over music, upload = your own recording. */
+  source: z.enum(["ai", "music_voice", "upload"]).optional(),
 });
 export type SongTimeline = z.infer<typeof SongTimelineSchema>;
 
