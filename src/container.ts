@@ -10,6 +10,7 @@ import type { Provider } from "./domain/ports/generator.port.js";
 import { ChannelService } from "./services/channel.service.js";
 import { PipelineService } from "./services/pipeline.service.js";
 import { PlanService } from "./services/plan.service.js";
+import { PublishService } from "./services/publish.service.js";
 import { ProjectService, type ProviderFactory } from "./services/project.service.js";
 import { PromptService } from "./services/prompt.service.js";
 import { ModelSettingsService } from "./services/model-settings.service.js";
@@ -29,6 +30,7 @@ export interface Container {
   pipelineService: PipelineService;
   channelService: ChannelService;
   planService: PlanService;
+  publishService: PublishService;
   close(): Promise<void>;
 }
 
@@ -54,6 +56,14 @@ export function buildServices(deps: {
   const contentPlans = deps.contentPlans ?? new InMemoryContentPlanRepository();
   const channelService = new ChannelService(deps.channelKits ?? new InMemoryChannelKitRepository(), promptService, modelSettingsService, providers, path.resolve(deps.mediaRoot), projectService, contentPlans);
   projectService.assertChannel = channelService.assertExists;
+  const publishService = new PublishService(deps.projects, promptService, modelSettingsService, providers, (id) => pipelineService.mediaDir(id));
+  publishService.isRunning = (id) => projectService.isRunning(id);
+  publishService.channelInfo = async (id) => {
+    if (!id) return {};
+    const kit = await channelService.get(id).catch(() => null);
+    return kit ? { name: kit.details?.name ?? kit.input.name, handle: kit.details?.handle, language: kit.input.language } : {};
+  };
+  pipelineService.afterFinal = publishService.afterFinal;
   const planService = new PlanService(contentPlans, promptService, modelSettingsService, providers, projectService, channelService.assertExists, async (id) => {
     const { audioMode, singer, voice } = (await channelService.get(id)).input;
     return { audioMode, singer, voice };
@@ -65,6 +75,7 @@ export function buildServices(deps: {
     pipelineService,
     channelService,
     planService,
+    publishService,
     close: async () => {
       await projectService.shutdown();
       await deps.close?.();

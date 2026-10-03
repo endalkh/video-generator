@@ -1,6 +1,8 @@
 // Kids Animation Studio UI — vanilla JS, no build step. All dynamic text goes through textContent (never innerHTML).
 
-const STEP_LABELS = { poem: "Poem", scenes: "Scenes", character: "Character", audio: "Audio", clips: "Clips", final: "Final video" };
+const STEP_LABELS = { poem: "Poem", scenes: "Scenes", character: "Character", audio: "Audio", clips: "Clips", final: "Final video", upload: "Upload" };
+/** The step pages: the pipeline steps, then "Upload" (YouTube title, description, tags, thumbnail; not a pipeline step). */
+const pages = () => [...config.steps, "upload"];
 const STATUS_BADGE = {
   running: ["⏳ running", "bg-amber-100 text-amber-800"],
   review: ["👀 needs review", "bg-sky-100 text-sky-800"],
@@ -223,8 +225,19 @@ function projectItem(p) {
   const pct = Math.round((p.completed.length / steps) * 100);
   const status = p.running ? "running" : p.status;
   const bar = status === "failed" ? "bg-red-400" : status === "done" ? "bg-emerald-400" : "bg-coral";
-  return h("li", {},
-    h("a", { href: `#/project/${enc(p.id)}`, class: "side-item", "aria-current": p.id === currentProject ? "page" : null },
+  const del = h("button", { type: "button", class: "absolute top-2 right-2 z-10 rounded-lg px-1.5 py-0.5 text-sm text-stone-400 transition hover:bg-red-50 hover:text-red-700 disabled:hidden",
+    "aria-label": `Delete "${p.title || p.topic}"`, title: "Delete this video", disabled: p.running || null, onclick: async (e) => {
+      e.preventDefault();
+      if (!confirm(`Delete "${p.title || p.topic}"? The poem, pictures, song and video files are deleted for good.`)) return;
+      try {
+        await post(`/api/projects/${enc(p.id)}`, {}, "DELETE");
+        await loadChannels();
+        if (p.id === currentProject) location.hash = "#/new";
+        else await renderProjectList();
+      } catch (err) { alert(err.message); }
+    } }, "🗑");
+  return h("li", { class: "relative" }, del,
+    h("a", { href: `#/project/${enc(p.id)}`, class: "side-item pr-9", "aria-current": p.id === currentProject ? "page" : null },
       h("span", { class: "line-clamp-2 text-sm font-semibold leading-snug", lang: p.language, text: p.title || p.topic }),
       p.title ? h("span", { class: "mt-0.5 line-clamp-1 text-xs text-stone-500", text: p.topic }) : null,
       h("span", { class: "mt-1.5 flex items-center gap-2 text-xs text-stone-500" }, badge(status), h("span", { text: p.language === "am" ? "አማርኛ" : "EN" })),
@@ -347,7 +360,7 @@ async function showNewVideo() {
 }
 
 // ---------- Project: one page per step ----------
-const STEP_ICONS = { poem: "✍️", scenes: "🗺️", character: "🧸", audio: "🎵", clips: "🎞️", final: "🎬" };
+const STEP_ICONS = { poem: "✍️", scenes: "🗺️", character: "🧸", audio: "🎵", clips: "🎞️", final: "🎬", upload: "📤" };
 const STEP_HELP = {
   poem: "The words of the song or story, one stanza per scene. Edit any line, or write a new poem.",
   scenes: "What each scene sings or says, and what its picture shows. Edit them, or plan the scenes again.",
@@ -398,7 +411,7 @@ async function showProject(id, step) {
   setNav("videos");
   const opening = currentProject !== id || !events;
   currentProject = id;
-  currentStep = config.steps.includes(step) ? step : null;
+  currentStep = pages().includes(step) ? step : null;
   await renderProject(id);
   $("#main").focus();
   if (opening) watch(id);
@@ -470,8 +483,8 @@ async function renderProject(id, keepStatus = false) {
   );
 
   const tabs = h("nav", { "aria-label": "Steps", class: "mb-4" },
-    h("ol", { class: "flex flex-wrap gap-2" }, config.steps.map((s, i) => {
-      const done = p.completed.includes(s);
+    h("ol", { class: "flex flex-wrap gap-2" }, pages().map((s, i) => {
+      const done = s === "upload" ? Boolean(p.publish && p.media.thumbnail) : p.completed.includes(s);
       const state = s === p.awaitingReview ? "review" : done ? "done" : p.running && s === p.nextStep ? "active" : "todo";
       const cls = { review: "bg-sky-100 text-sky-800", done: "bg-emerald-50 text-emerald-800", active: "bg-orange-100 text-orange-800 animate-pulse", todo: "bg-white text-stone-500" }[state];
       const mark = { review: "👀", done: "✓", active: "⏳", todo: String(i + 1) }[state];
@@ -488,7 +501,7 @@ async function renderProject(id, keepStatus = false) {
 
   const wasOpen = $("#gen-log")?.open;
   const settingsOpen = $("#settings-panel")?.open;
-  mount($("#main"), header, tabs, stepPage(p, step, keepVideo, videoKey), generationLog(id, step));
+  mount($("#main"), header, tabs, step === "upload" ? uploadPage(p) : stepPage(p, step, keepVideo, videoKey), step === "upload" ? null : generationLog(id, step));
   if (wasOpen) $("#gen-log").open = true;
   if (settingsOpen && $("#settings-panel")) $("#settings-panel").open = true;
   if (prevStatus) $("#run-status").textContent = prevStatus;
@@ -691,6 +704,7 @@ function stepPage(p, step, keepVideo, videoKey) {
 
   const nextLink = next && done && !p.running
     ? h("a", { href: stepUrl(id, next), class: p.completed.includes(next) ? "btn-soft ml-auto" : "btn ml-auto" }, `Next: ${STEP_ICONS[next]} ${STEP_LABELS[next]} →`)
+    : step === "final" && done && !p.running ? h("a", { href: stepUrl(id, "upload"), class: "btn ml-auto" }, `Next: ${STEP_ICONS.upload} Upload to YouTube →`)
     : null;
 
   return h("section", { class: `card ${reviewing ? "border-2 border-sky-200 bg-sky-50/40" : ""}`, "aria-labelledby": "step-title" },
@@ -917,6 +931,88 @@ function settingsPanel(p) {
       h("div", { class: "flex flex-wrap items-center gap-3" }, save, status)));
   update();
   return panel;
+}
+
+/** The Upload page: the finished video's YouTube thumbnail, title, description and tags. */
+function uploadPage(p) {
+  // The text only needs the poem; the thumbnail needs the pictures; the MP4 comes with the final video.
+  const ready = Boolean(p.poem && p.scenes);
+  return h("section", { class: "card", "aria-labelledby": "step-title" },
+    h("div", { class: "mb-1 flex flex-wrap items-center gap-2" },
+      h("span", { "aria-hidden": "true", class: "text-xl", text: STEP_ICONS.upload }),
+      h("h3", { id: "step-title", class: "text-xl font-bold", text: "Upload to YouTube" }),
+      p.publish && p.media.thumbnail ? h("span", { class: "chip bg-emerald-100 text-emerald-800", text: "✓ ready" }) : null),
+    h("p", { class: "mb-4 text-sm text-stone-600", text: "The thumbnail, title, description and tags for this video. They're made automatically when the video is finished, and you can make them again any time with the buttons below." }),
+    !ready ? h("p", { class: "text-stone-600" }, "Make the ", h("a", { href: stepUrl(p.id, "poem"), class: "font-semibold underline", text: "Poem" }), " and ", h("a", { href: stepUrl(p.id, "scenes"), class: "font-semibold underline", text: "Scenes" }), " first.")
+      : [
+          p.media.final
+            ? h("div", { class: "flex flex-wrap gap-2" },
+                h("a", { class: "btn", href: mediaUrl(p.id, p.media.final, p.updatedAt), download: `${p.id}.mp4` }, "⬇ Download MP4"),
+                p.media.subtitles ? h("a", { class: "btn-soft", href: mediaUrl(p.id, p.media.subtitles, p.updatedAt), download: `${p.id}.srt` }, "⬇ Lyrics file (.srt) for YouTube subtitles") : null)
+            : h("p", { class: "rounded-xl bg-amber-50 p-3 text-sm text-amber-900" }, "The video itself isn't finished yet, so there's no MP4 to upload; ",
+                h("a", { href: stepUrl(p.id, "final"), class: "font-semibold underline", text: "finish the Final video" }), ". You can already prepare the text" + (p.media.scenes.some((m) => m.image) ? " and the thumbnail." : " (the thumbnail needs the scene pictures).")),
+          p.running ? h("p", { class: "mt-4 text-sm text-stone-500", text: "The video is being made; this updates when it's done." }) : publishCard(p, { inPage: true }),
+        ]);
+}
+
+/** Everything to paste into YouTube for this video: thumbnail, title, description, tags (made when the video is finished). */
+function publishCard(p, { inPage = false } = {}) {
+  const id = p.id, lang = p.input.language;
+  const info = p.publish;
+  const status = h("div", { role: "status", "aria-live": "polite", class: "text-sm" });
+  const busy = (btn, label) => { btn.disabled = true; mount(status, label); };
+  const call = async (btn, label, fn) => {
+    busy(btn, label);
+    try { await fn(); await renderProject(id); } catch (err) { mount(status, errorBox(err)); btn.disabled = false; }
+  };
+  const thumbUrl = p.media.thumbnail ? mediaUrl(id, p.media.thumbnail, p.updatedAt) : null;
+  const thumbTitle = h("input", { id: "pub-thumb-title", class: "field", lang, maxlength: 40, value: info?.thumbnailTitle ?? "", placeholder: "Words on the thumbnail (empty = none)" });
+  const newThumb = h("button", { type: "button", class: thumbUrl ? "btn-soft" : "btn", onclick: (e) => call(e.currentTarget, "Drawing the thumbnail…",
+    () => post(`/api/projects/${enc(id)}/publish/thumbnail`, { title: thumbTitle.value, provider: $("#prov")?.value })) }, thumbUrl ? "↻ New thumbnail" : "✨ Make the thumbnail");
+  const fromPicture = h("button", { type: "button", class: "btn-soft", title: "No AI: crops the first scene's picture to 1280×720", onclick: (e) => call(e.currentTarget, "Using the first picture…",
+    () => post(`/api/projects/${enc(id)}/publish/frame`, {})) }, "🖼️ Use the first picture");
+
+  const counter = (el, max, measure = (v) => v.length) => {
+    const out = h("span", { class: "text-xs text-stone-500" });
+    const update = () => { const n = measure(el.value); out.textContent = `${n} / ${max}`; out.className = `text-xs ${n > max ? "font-semibold text-red-700" : "text-stone-500"}`; };
+    el.addEventListener("input", update);
+    update();
+    return out;
+  };
+  const tagsOf = (v) => v.split(/[,\n]/).map((t) => t.trim().replace(/^#/, "")).filter(Boolean);
+  const title = h("input", { id: "pub-title", class: "field", lang, value: info?.title ?? "" });
+  const description = h("textarea", { id: "pub-desc", class: "field text-sm leading-relaxed", lang, rows: 10, value: info?.description ?? "" });
+  const tags = h("textarea", { id: "pub-tags", class: "field text-sm", lang, rows: 3, value: (info?.tags ?? []).join(", ") });
+  const row = (fid, label, el, copy, count) => h("div", {},
+    h("div", { class: "mb-1 flex items-center gap-2" }, h("label", { for: fid, class: "label mb-0 flex-1", text: label }), count, copyButton(label, copy)), el);
+  const save = h("button", { type: "button", class: "btn", onclick: (e) => call(e.currentTarget, "Saving…", () => post(`/api/projects/${enc(id)}/publish`, {
+    publish: { title: title.value.trim(), description: description.value.trim(), tags: tagsOf(tags.value), thumbnailTitle: thumbTitle.value.trim() } }, "PUT")) }, "💾 Save changes");
+  const rewrite = h("button", { type: "button", class: info ? "btn-soft" : "btn", onclick: (e) => {
+    if (info && !confirm("Write a new title, description and tags? Your edits are replaced.")) return;
+    call(e.currentTarget, "Writing the title, description and tags…", () => post(`/api/projects/${enc(id)}/publish/text`, { provider: $("#prov")?.value }));
+  } }, info ? "↻ Write new text" : "✨ Write title, description & tags");
+
+  return h("section", { class: inPage ? "mt-5" : "mt-5 rounded-xl border border-orange-100 p-4", "aria-label": "YouTube upload info" },
+    h("div", { class: "flex flex-wrap items-center gap-2" },
+      inPage ? null : h("h4", { class: "flex-1 text-lg font-bold", text: "📤 Upload to YouTube" }),
+      h("p", { class: "flex-1 text-sm text-stone-600", text: "In YouTube Studio: Create → Upload video, pick the MP4, then paste these. Set the audience to “Yes, it's made for kids”." }),
+      extLink("https://studio.youtube.com", "Open YouTube Studio")),
+    h("div", { class: "mt-4 grid gap-4 md:grid-cols-[minmax(0,22rem)_1fr]" },
+      h("div", { class: "space-y-2" },
+        thumbUrl ? h("img", { src: thumbUrl, alt: `Thumbnail: ${info?.thumbnailTitle ?? ""}`, class: "w-full rounded-xl border border-orange-100" })
+          : h("div", { class: "grid aspect-video place-items-center rounded-xl bg-stone-100 text-sm text-stone-500", text: "no thumbnail yet" }),
+        h("label", { for: "pub-thumb-title", class: "label", text: "Words on the thumbnail" }), thumbTitle,
+        h("div", { class: "flex flex-wrap gap-2" }, newThumb, fromPicture,
+          thumbUrl ? h("a", { class: "btn-soft", href: thumbUrl, download: `${id}-thumbnail.jpg` }, "⬇ Download") : null),
+        h("p", { class: "text-xs text-stone-500", text: "1280 × 720 JPG, under 2 MB (what YouTube wants)." })),
+      info
+        ? h("div", { class: "space-y-3" },
+            row("pub-title", "Title", title, () => title.value, counter(title, 100)),
+            row("pub-desc", "Description", description, () => description.value, counter(description, 5000)),
+            row("pub-tags", "Tags", tags, () => tagsOf(tags.value).join(", "), counter(tags, 500, (v) => tagsOf(v).join(",").length)),
+            h("div", { class: "flex flex-wrap gap-2" }, save, rewrite))
+        : h("div", { class: "space-y-3" }, h("p", { class: "text-sm text-stone-500", text: "No title, description and tags yet." }), rewrite)),
+    status);
 }
 
 /** Lyrics / captions on the video: off by default; switching only rebuilds the final video (quick, no AI). */

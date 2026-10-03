@@ -242,6 +242,8 @@ const SAMPLE_VARS = {
   channel_name: "Happy Little Learners",
   thumbnail_title: "Wash Your Hands!",
   part_note: "",
+  lyrics: "Wash, wash, wash your hands,\nbubbles big and small!\n…",
+  channel_handle: "@MilcahsWorld",
   poem_text: "1. Wash, wash, wash your hands,\n   bubbles big and small!\n2. …",
   stanza_number: 1,
   stanza_text: "Wash, wash, wash your hands,\nbubbles big and small!",

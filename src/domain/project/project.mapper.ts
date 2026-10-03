@@ -3,6 +3,7 @@ import { Project, type ProjectProps } from "./project.entity.js";
 import {
   CharacterSchema,
   PoemSchema,
+  PublishInfoSchema,
   ProjectInputSchema,
   ScenePlanSchema,
   SongTimelineSchema,
@@ -30,6 +31,7 @@ export interface ProjectDto {
   scenes: ProjectProps["scenes"];
   character: ProjectProps["character"];
   song: { file: string; duration: number; source: "ai" | "music_voice" | "upload" } | null;
+  publish: ProjectProps["publish"];
   createdAt: string;
   updatedAt: string;
 }
@@ -65,6 +67,7 @@ export const ProjectMapper = {
       scenes: nullable(ScenePlanSchema, row.scenes),
       character: nullable(CharacterSchema, row.character),
       song: nullable(SongTimelineSchema, row.song),
+      publish: nullable(PublishInfoSchema, row.publish),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     });
@@ -88,6 +91,7 @@ export const ProjectMapper = {
       scenes: j(p.scenes),
       character: j(p.character),
       song: j(p.song),
+      publish: j(p.publish),
       createdAt: p.createdAt,
     };
   },
@@ -110,6 +114,7 @@ export const ProjectMapper = {
       scenes: p.scenes,
       character: p.character,
       song: p.song ? { file: p.song.file, duration: p.song.duration, source: p.song.source ?? "ai" } : null,
+      publish: p.publish,
       createdAt: p.createdAt.toISOString(),
       updatedAt: p.updatedAt.toISOString(),
     };

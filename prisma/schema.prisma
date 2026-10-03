@@ -32,6 +32,8 @@ model Project {
   scenes      Json?
   character   Json?
   song        Json?
+  /// YouTube upload info made at the end: title, description, tags, thumbnail text.
+  publish     Json?
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
   generations Generation[]

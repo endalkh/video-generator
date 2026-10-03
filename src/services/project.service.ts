@@ -24,6 +24,7 @@ export interface ProjectDetailsDto extends ProjectDto {
     characterImage: string | null;
     final: string | null;
     subtitles: string | null;
+    thumbnail: string | null;
     scenes: { index: number; image: string | null; clip: string | null; video: string | null; audio: string | null }[];
   };
 }
@@ -97,6 +98,7 @@ export class ProjectService {
         characterImage: await rel(p.characterImage),
         final: await rel(p.final),
         subtitles: await rel(p.srt),
+        thumbnail: await rel(p.thumbnail),
         scenes: await Promise.all((project.scenes?.scenes ?? []).map(async (s) => ({ index: s.index, image: await rel(p.sceneImage(s.index)), clip: await rel(p.sceneClip(s.index)), video: await rel(p.sceneVideo(s.index)), audio: await rel(p.sceneAudio(s.index)) }))),
       },
     };

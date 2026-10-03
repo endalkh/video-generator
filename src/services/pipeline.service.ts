@@ -60,6 +60,8 @@ export function mediaPaths(dir: string) {
     characterImage: path.join(dir, "character.png"),
     srt: path.join(dir, "subtitles.srt"),
     final: path.join(dir, "final.mp4"),
+    /** YouTube thumbnail for the finished video (1280×720). */
+    thumbnail: path.join(dir, "thumbnail.jpg"),
     song: (ext: string) => path.join(dir, `song.${ext}`),
     /** Voice over music: the instrumental music under the voice. */
     music: (ext: string) => path.join(dir, `music.${ext}`),
@@ -79,7 +81,7 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   const at = (s: StepName) => STEP_NAMES.indexOf(s) >= STEP_NAMES.indexOf(from);
   const files: string[] = [];
   const perScene: ((i: number) => string)[] = [];
-  if (at("character")) files.push(p.characterImage), perScene.push(p.sceneImage, p.sceneVideo);
+  if (at("character")) files.push(p.characterImage, p.thumbnail), perScene.push(p.sceneImage, p.sceneVideo);
   if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio);
   // Pictures and Veo videos don't depend on the audio: a new song only re-times (re-renders) the clips.
   if (at("clips")) perScene.push(p.sceneClip);
@@ -162,6 +164,9 @@ export class PipelineService {
     private readonly modelSettings: ModelSettingsService,
     private readonly mediaRoot: string,
   ) {}
+
+  /** Set by the container: make the YouTube upload info after the final video. */
+  afterFinal?: (project: Project, provider: Provider) => Promise<void>;
 
   mediaDir(projectId: string): string {
     return path.join(this.mediaRoot, projectId);
@@ -531,6 +536,11 @@ export class PipelineService {
         await rm(path.join(p.dir, "concat.txt"), { force: true });
       });
 
+      // YouTube title, description, tags and thumbnail (only what's missing; never fails the video).
+      if (this.afterFinal && (!project.publish || !(await fileExists(p.thumbnail)))) {
+        emit({ type: "progress", step: "final", done: 1, total: 1, message: "writing the YouTube title, description, tags and thumbnail" });
+        await this.afterFinal(project, provider);
+      }
       project.finish();
       await save();
       const duration = await probeDuration(p.final);

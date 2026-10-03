@@ -8,6 +8,8 @@ import {
   type ProjectStatus,
   type ScenePlan,
   type SongTimeline,
+  type PublishInfo,
+  normalizePublishInfo,
   type StepName,
   type VideoMode,
   VideoModeSchema,
@@ -32,6 +34,8 @@ export interface ProjectProps {
   scenes: ScenePlan | null;
   character: Character | null;
   song: SongTimeline | null;
+  /** YouTube title / description / tags / thumbnail text (made when the video is finished). */
+  publish: PublishInfo | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -66,6 +70,7 @@ export class Project {
       scenes: null,
       character: null,
       song: null,
+      publish: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -73,7 +78,7 @@ export class Project {
 
   /** Rehydrate from persistence (mappers only). */
   static restore(props: ProjectProps): Project {
-    return new Project({ ...props, channelId: props.channelId ?? null, completed: [...props.completed], approved: [...(props.approved ?? [])] });
+    return new Project({ ...props, channelId: props.channelId ?? null, publish: props.publish ?? null, completed: [...props.completed], approved: [...(props.approved ?? [])] });
   }
 
   get id() { return this.props.id; }
@@ -88,6 +93,7 @@ export class Project {
   get scenes() { return this.props.scenes; }
   get character() { return this.props.character; }
   get song() { return this.props.song; }
+  get publish() { return this.props.publish; }
   get createdAt() { return this.props.createdAt; }
   get updatedAt() { return this.props.updatedAt; }
   get isRunning() { return this.props.status === "running"; }
@@ -144,6 +150,7 @@ export class Project {
     }
     this.props.poem = poem;
     this.props.scenes = null;
+    this.props.publish = null;
     this.invalidateAfterEdit("poem", "scenes");
   }
 
@@ -372,6 +379,7 @@ export class Project {
 
   setPoem(poem: Poem): void {
     this.props.poem = poem;
+    this.props.publish = null;
     this.touch();
   }
 
@@ -383,6 +391,12 @@ export class Project {
 
   setCharacter(character: Character): void {
     this.props.character = character;
+    this.touch();
+  }
+
+  /** YouTube upload info (generated or edited); clamped to YouTube's limits. */
+  setPublish(info: PublishInfo | null): void {
+    this.props.publish = info ? normalizePublishInfo(info) : null;
     this.touch();
   }
 

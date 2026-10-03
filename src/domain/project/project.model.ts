@@ -136,6 +136,37 @@ export const SongTimelineSchema = z.object({
 });
 export type SongTimeline = z.infer<typeof SongTimelineSchema>;
 
+/** What to paste into YouTube when uploading the finished video (Final video page). */
+export const PublishInfoSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1),
+  tags: z.array(z.string()),
+  /** The big words on the thumbnail. */
+  thumbnailTitle: z.string(),
+});
+export type PublishInfo = z.infer<typeof PublishInfoSchema>;
+
+/** YouTube limits: title 100, description 5000, tags 500 characters in total. */
+export const PUBLISH_LIMITS = { title: 100, description: 5000, tags: 500, thumbnailTitle: 40 } as const;
+
+export function normalizePublishInfo(p: PublishInfo): PublishInfo {
+  const tidy = (v: string) => v.replace(/\s+/g, " ").trim();
+  const tags: string[] = [];
+  let total = 0;
+  for (const t of p.tags.map((x) => tidy(x).replace(/^#/, "")).filter(Boolean)) {
+    if (tags.some((x) => x.toLowerCase() === t.toLowerCase())) continue;
+    if (total + t.length + 1 > PUBLISH_LIMITS.tags) break;
+    tags.push(t);
+    total += t.length + 1;
+  }
+  return {
+    title: tidy(p.title).slice(0, PUBLISH_LIMITS.title),
+    description: p.description.trim().slice(0, PUBLISH_LIMITS.description),
+    tags,
+    thumbnailTitle: tidy(p.thumbnailTitle).slice(0, PUBLISH_LIMITS.thumbnailTitle),
+  };
+}
+
 export const STEP_NAMES = ["poem", "scenes", "character", "audio", "clips", "final"] as const;
 export const StepNameSchema = z.enum(STEP_NAMES);
 export type StepName = z.infer<typeof StepNameSchema>;

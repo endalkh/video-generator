@@ -48,6 +48,12 @@ export class MockProvider implements Provider {
         })),
       }),
       character: () => ({ name: input.language === "am" ? "ቡቡ" : "Bubu", description: input.characterHint ?? "a round, friendly pink creature with big dark eyes" }),
+      publish: () => ({
+        title: `${poem?.title ?? input.topic} | Kids Song`,
+        description: `A happy song about ${input.topic}.\n\n${(poem?.stanzas ?? []).map((s) => s.lines.join("\n")).join("\n\n")}\n\nSubscribe for more! #kids #songs #learning`,
+        tags: ["kids songs", "nursery rhymes", input.topic, "Kids Songs"],
+        thumbnailTitle: input.language === "am" ? "እንዘምር!" : "Sing along!",
+      }),
       stanza: () => {
         const n = (ctx.stanzaIndex ?? 0) + 1;
         return { lines: input.language === "am" ? [`አዲስ ክፍል ${n}`, "በደስታ እንዘምር"] : [`A brand new verse ${n}`, "We sing it all day long"] };

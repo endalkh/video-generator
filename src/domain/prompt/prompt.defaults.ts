@@ -256,6 +256,33 @@ Cinematic camera: a smooth slow push-in or gentle tracking move, medium or close
 Style: {{style}}. No speech, no captions, no text. {{safety}}`],
   },
   {
+    key: "video_publish",
+    title: "YouTube upload: title, description, tags",
+    description: "Final video page: writes the YouTube title, description, tags and thumbnail words for the finished video. {{lyrics}} are the words of the video. Must return JSON {title, description, tags, thumbnailTitle}.",
+    vars: ["title", "lyrics", "channel_name", "channel_handle", "video_length"],
+    template: `Write the YouTube upload text for a finished kids' video{{#if has_channel_name}} on the channel "{{channel_name}}" (YouTube handle: {{channel_handle}}){{/if}}.
+Working title: "{{title}}". Topic: {{topic}}. Audience: children aged {{age_range}} and their parents. Length: {{video_length}}.
+The words of the video:
+{{lyrics}}
+
+"title" = a catchy YouTube title in {{language_name}}, at most 70 characters, with the main keyword near the start. Honest (no clickbait), no ALL CAPS, at most one emoji.
+"description" = in {{language_name}}: a warm first line (a hook with the main keyword); 2-3 short sentences for parents about what the child sees and learns; then the words of the video under a short heading (lyrics or story); then a friendly invitation to subscribe{{#if has_channel_name}} to {{channel_name}}{{/if}}; end with 3 hashtags. Under 1500 characters. No links.
+"tags" = 12-20 search tags in {{language_name}}{{#if am}} plus some in English{{/if}}, most important first, without #.
+"thumbnailTitle" = 2-4 big, simple words for the thumbnail, in {{language_name}}.
+{{safety}}`,
+  },
+  {
+    key: "video_thumbnail",
+    title: "YouTube upload: video thumbnail",
+    description: "Final video page: image prompt for the 1280×720 thumbnail of the finished video. The character sheet and a scene picture are attached as references.",
+    vars: ["thumbnail_title", "character_name", "character_description", "channel_name"],
+    template: `Design an eye-catching YouTube video thumbnail (16:9) for a kids' video{{#if has_channel_name}} from the channel "{{channel_name}}"{{/if}} about: {{topic}}.
+Feature {{character_name}} ({{character_description}}) looking exactly like the character in the attached reference pictures (same face, hair, clothes and colours), large, close-up and very expressive, in a moment from the video like the attached scene.
+{{#if has_title}}Add the title "{{thumbnail_title}}" in big, bold, rounded, high-contrast letters with a thick outline, spelled exactly, on one side.{{else}}Leave clear empty space on one side; no text.{{/if}}
+Bright saturated colours, a simple background, easy to read at small size. No YouTube logos, play buttons or watermarks.
+Style: {{style}}. {{safety}}`,
+  },
+  {
     key: "channel_details",
     title: "YouTube channel: name & description",
     description: "Channel page. Writes the channel name, handle, tagline, description and keywords. {{topic}} is the channel brief; the sample photo is attached when there is one. Must return JSON {name, handle, tagline, description, keywords}.",

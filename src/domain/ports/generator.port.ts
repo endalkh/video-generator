@@ -1,6 +1,6 @@
 import type { ChannelDetails } from "../channel/channel.model.js";
 import type { PlanText } from "../plan/plan.model.js";
-import type { Character, Poem, ProjectInput, Scene, ScenePlan, Stanza } from "../project/project.model.js";
+import type { Character, Poem, ProjectInput, PublishInfo, Scene, ScenePlan, Stanza } from "../project/project.model.js";
 
 /** A time window within the song where a scene's lyrics are sung. */
 export interface SongSlot {
@@ -22,6 +22,8 @@ export interface TextOutputs {
   character: Character;
   /** Channel page: YouTube channel name, handle, description, keywords. */
   channel: ChannelDetails;
+  /** Final video page: YouTube title, description, tags and thumbnail words. */
+  publish: PublishInfo;
   /** Poem page: one stanza written again. */
   stanza: Stanza;
   /** Ideas & schedule page: a month of video ideas, one per posting slot. */

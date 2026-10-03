@@ -51,6 +51,12 @@ export function createApp(c: Container): http.Server {
   modelRoutes(router, c.modelSettingsService);
   channelRoutes(router, c.channelService);
   planRoutes(router, c.planService);
+  router
+    .post("/api/projects/:id/publish/:what", async ({ params, body }) => {
+      const b = await body();
+      return c.publishService.generate(params.id!, params.what!, { provider: typeof b.provider === "string" ? b.provider : undefined, title: typeof b.title === "string" ? b.title : undefined });
+    })
+    .put("/api/projects/:id/publish", async ({ params, body }) => c.publishService.edit(params.id!, (await body()).publish));
 
   return http.createServer(async (req, res) => {
     try {
