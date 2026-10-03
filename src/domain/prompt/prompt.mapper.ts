@@ -4,6 +4,9 @@ import { Prompt, type PromptRevision } from "./prompt.entity.js";
 
 export interface PromptDto {
   key: string;
+  /** "shared", or "channel" when the channel has its own copy. */
+  scope: "shared" | "channel";
+  channelId: string | null;
   title: string;
   description: string;
   template: string;
@@ -24,22 +27,24 @@ export interface PromptRevisionDto {
 
 export const PromptMapper = {
   toDomain(row: PromptRow): Prompt {
-    return Prompt.restore({ key: row.key, template: row.template, version: row.version, updatedAt: row.updatedAt });
+    return Prompt.restore({ channelId: row.channelId, key: row.key, template: row.template, version: row.version, updatedAt: row.updatedAt });
   },
 
   toPersistence(prompt: Prompt) {
     const p = prompt.toProps();
-    return { key: p.key, template: p.template, version: p.version };
+    return { channelId: p.channelId, key: p.key, template: p.template, version: p.version };
   },
 
   revisionToDomain(row: PromptVersionRow): PromptRevision {
-    return { key: row.key, version: row.version, template: row.template, note: row.note, createdAt: row.createdAt };
+    return { channelId: row.channelId, key: row.key, version: row.version, template: row.template, note: row.note, createdAt: row.createdAt };
   },
 
   toDto(prompt: Prompt): PromptDto {
     const def = prompt.definition;
     return {
       key: prompt.key,
+      scope: prompt.channelId ? "channel" : "shared",
+      channelId: prompt.channelId || null,
       title: def.title,
       description: def.description,
       template: prompt.template,

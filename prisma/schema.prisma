@@ -35,33 +35,39 @@ model Project {
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
   generations Generation[]
+  /// The channel (channel_kits.id) this video belongs to; null only for rows from before channels existed.
+  channelId   String?       @map("channel_id")
 
   @@index([updatedAt(sort: Desc)])
+  @@index([channelId, updatedAt(sort: Desc)])
   @@map("projects")
 }
 
-/// Current (editable) version of each prompt template.
+/// Current (editable) version of each prompt template. channelId "" = the shared prompt; otherwise a channel's own copy.
 model Prompt {
-  key       String          @id
+  channelId String          @default("") @map("channel_id")
+  key       String
   template  String
   version   Int             @default(1)
   updatedAt DateTime        @updatedAt @map("updated_at")
   versions  PromptVersion[]
 
+  @@id([channelId, key])
   @@map("prompts")
 }
 
 /// Full history of every prompt edit, so changes can be reviewed and restored.
 model PromptVersion {
   id        BigInt   @id @default(autoincrement())
+  channelId String   @default("") @map("channel_id")
   key       String
   version   Int
   template  String
   note      String?
   createdAt DateTime @default(now()) @map("created_at")
-  prompt    Prompt   @relation(fields: [key], references: [key], onDelete: Cascade)
+  prompt    Prompt   @relation(fields: [channelId, key], references: [channelId, key], onDelete: Cascade)
 
-  @@unique([key, version])
+  @@unique([channelId, key, version])
   @@map("prompt_versions")
 }
 
@@ -91,4 +97,36 @@ model ModelSetting {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("model_settings")
+}
+
+/// A YouTube channel brand kit (Channel page). Pictures (logo, banner, …) live on disk under output/_channels/<id>/.
+model ChannelKit {
+  id        String   @id
+  /// Name, brief (prompt), language, age range and art style.
+  input     Json
+  provider  String
+  /// Channel name, handle, tagline, description and keywords.
+  details   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([updatedAt(sort: Desc)])
+  @@map("channel_kits")
+}
+
+/// A month of video ideas with posting dates/times (Ideas & schedule page). One row per channel and month.
+model ContentPlan {
+  channelId String   @default("") @map("channel_id")
+  /// YYYY-MM
+  month     String
+  /// Channel, main character, language, posting days/times, time zone, notes.
+  input     Json
+  theme     String?
+  /// Ideas in posting order: date, time, language, topic, audio mode, scenes, thumbnail title, description, tags, projectId.
+  ideas     Json     @default("[]")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([channelId, month])
+  @@map("content_plans")
 }

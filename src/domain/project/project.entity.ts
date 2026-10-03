@@ -19,6 +19,8 @@ import {
 /** Plain data shape of a Project, used by mappers and repositories. */
 export interface ProjectProps {
   id: string;
+  /** The channel this video belongs to (null only for videos from before channels existed). */
+  channelId: string | null;
   input: ProjectInput;
   provider: string;
   status: ProjectStatus;
@@ -36,6 +38,9 @@ export interface ProjectProps {
 
 const stepIndex = (s: StepName) => STEP_NAMES.indexOf(s);
 
+/** Settings that can be changed after a video was started (Video settings panel). */
+export const SETTING_KEYS = ["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "aspectRatio"] as const;
+
 /**
  * Aggregate root for a video project. Owns the pipeline progress rules:
  * steps complete in order, and redoing a step invalidates everything after it.
@@ -43,13 +48,14 @@ const stepIndex = (s: StepName) => STEP_NAMES.indexOf(s);
 export class Project {
   private constructor(private props: ProjectProps) {}
 
-  static create(args: { id: string; input: ProjectInput; provider: string; now?: Date }): Project {
+  static create(args: { id: string; input: ProjectInput; provider: string; channelId?: string | null; now?: Date }): Project {
     const parsed = ProjectInputSchema.safeParse(args.input);
     if (!parsed.success) throw new ValidationError("Invalid project input", parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`));
     if (!/^[a-z0-9][a-z0-9-]{0,80}$/.test(args.id)) throw new ValidationError(`Invalid project id "${args.id}"`);
     const now = args.now ?? new Date();
     return new Project({
       id: args.id,
+      channelId: args.channelId ?? null,
       input: parsed.data,
       provider: args.provider,
       status: "new",
@@ -67,10 +73,11 @@ export class Project {
 
   /** Rehydrate from persistence (mappers only). */
   static restore(props: ProjectProps): Project {
-    return new Project({ ...props, completed: [...props.completed], approved: [...(props.approved ?? [])] });
+    return new Project({ ...props, channelId: props.channelId ?? null, completed: [...props.completed], approved: [...(props.approved ?? [])] });
   }
 
   get id() { return this.props.id; }
+  get channelId() { return this.props.channelId; }
   get topic() { return this.props.input.topic; }
   get input(): Readonly<ProjectInput> { return this.props.input; }
   get provider() { return this.props.provider; }
@@ -118,11 +125,22 @@ export class Project {
     this.touch();
   }
 
-  /** Replace the poem with an edited version; scenes and everything after are made again. */
-  editPoem(poem: Poem): void {
+  /**
+   * Replace the poem with an edited version. By default the scenes are planned again from it; with
+   * `keepVisuals` the scenes (and their pictures/videos) stay and just get the new words, so only the
+   * audio, clip timing and final video are made again.
+   */
+  editPoem(poem: Poem, opts: { keepVisuals?: boolean } = {}): void {
     this.assertEditable();
     if (poem.stanzas.length !== this.props.input.sceneCount) {
       throw new ValidationError(`The poem needs exactly ${this.props.input.sceneCount} stanzas (one per scene); it has ${poem.stanzas.length}`);
+    }
+    if (opts.keepVisuals) {
+      if (!this.isStepDone("scenes")) throw new ConflictError("There are no scenes to keep yet");
+      this.props.poem = poem;
+      this.rewordScenes();
+      this.invalidateAfterEdit("poem", "audio");
+      return;
     }
     this.props.poem = poem;
     this.props.scenes = null;
@@ -161,10 +179,28 @@ export class Project {
     this.touch();
   }
 
-  /** Throw away a step's output so it is generated again from scratch. */
-  regenerate(step: StepName): void {
+  /** Put the poem's stanzas into the existing scenes (one each), keeping what every scene shows. */
+  rewordScenes(): void {
+    const { poem, scenes } = this.props;
+    if (!poem || !scenes || scenes.scenes.length !== poem.stanzas.length) throw new ConflictError("The poem and scenes don't match up");
+    this.props.scenes = { scenes: scenes.scenes.map((s, i) => ({ ...s, text: poem.stanzas[i]!.lines.join("\n") })) };
+    this.touch();
+  }
+
+  /** Drop the scene plan so it's planned again (pipeline redo from poem/scenes). */
+  forgetScenes(): void {
+    this.props.scenes = null;
+    this.touch();
+  }
+
+  /**
+   * Throw away a step's output so it is generated again from scratch. For the poem, `keepVisuals` keeps
+   * the scenes so the new poem's words go into them (pictures and videos are reused).
+   */
+  regenerate(step: StepName, opts: { keepVisuals?: boolean } = {}): void {
     this.assertEditable();
-    if (step === "poem") (this.props.poem = null), (this.props.scenes = null);
+    if (step === "poem" && opts.keepVisuals && !this.isStepDone("scenes")) throw new ConflictError("There are no scenes to keep yet");
+    if (step === "poem") (this.props.poem = null), opts.keepVisuals || (this.props.scenes = null);
     if (step === "scenes") this.props.scenes = null;
     if (step === "character") this.props.character = null;
     if (step === "audio") this.props.song = null;
@@ -233,6 +269,61 @@ export class Project {
   }
 
   /**
+   * Change the video's settings after it was started. Returns the first step that has to be made again
+   * (null when nothing changed). Only what depends on the changed settings is thrown away:
+   * - topic, language, song/story, length, scenes, age → the poem (the character is kept);
+   *   with `keepPoem`, a new length with the same number of scenes keeps the poem and pictures and only redoes the audio
+   * - art style, character → the character and what comes after it
+   * - voice → the audio · shape → the pictures and clips
+   * `sceneCount: null` means "pick it from the length"; `lengthSeconds: null` removes the target length.
+   */
+  changeSettings(patch: Record<string, unknown>, opts: { keepPoem?: boolean } = {}): StepName | null {
+    this.assertEditable();
+    const unknown = Object.keys(patch).filter((k) => !(SETTING_KEYS as readonly string[]).includes(k));
+    if (unknown.length) throw new ValidationError(`These can't be changed here: ${unknown.join(", ")}`);
+    const next: Record<string, unknown> = { ...this.props.input, ...patch };
+    for (const k of ["sceneCount", "lengthSeconds", "characterHint", "voice"]) if (next[k] === null || next[k] === "") delete next[k];
+    const parsed = ProjectInputSchema.safeParse(next);
+    if (!parsed.success) throw new ValidationError("Invalid settings", parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`));
+    const input = parsed.data;
+    const old = this.props.input;
+    const changed = SETTING_KEYS.filter((k) => JSON.stringify(old[k] ?? null) !== JSON.stringify(input[k] ?? null));
+    if (!changed.length) return null;
+
+    const has = (keys: readonly string[]) => changed.some((k) => keys.includes(k));
+    const onlyLength = changed.every((k) => ["lengthSeconds", "songSeconds", "voice"].includes(k));
+    let from: StepName;
+    if (has(["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange"])) {
+      from = opts.keepPoem && onlyLength && this.props.poem && this.isStepDone("scenes") ? "audio" : "poem";
+    } else if (has(["style", "characterHint"])) from = "character";
+    else if (has(["voice"])) from = "audio";
+    else from = "clips"; // aspectRatio
+
+    this.props.input = input;
+    if (from === "poem") {
+      this.props.poem = null;
+      this.props.scenes = null;
+      this.props.song = null;
+    }
+    if (from === "character" && has(["characterHint"])) this.props.character = null;
+    if (from === "audio") this.props.song = null;
+    this.invalidateAfterEdit(from, from);
+    return from;
+  }
+
+  /** Turn the lyrics/caption subtitles on or off; only the final video has to be built again. */
+  setSubtitles(on: boolean): void {
+    this.assertEditable();
+    if (typeof on !== "boolean") throw new ValidationError("subtitles must be true or false");
+    this.props.input = { ...this.props.input, subtitles: on };
+    if (this.isStepDone("final")) {
+      this.redoFrom("final");
+      if (this.props.status === "done") this.props.status = "paused";
+    }
+    this.touch();
+  }
+
+  /**
    * Switch between animated stills and Veo video. Keeps the poem, song and scene pictures;
    * only the clips and final video need to be rendered again.
    */
@@ -243,6 +334,13 @@ export class Project {
     this.props.input = { ...this.props.input, videoMode: mode };
     this.redoFrom("clips");
     return changed;
+  }
+
+  /** Move the video to another channel; its next runs use that channel's prompts. */
+  moveTo(channelId: string): void {
+    this.assertEditable();
+    this.props.channelId = channelId;
+    this.touch();
   }
 
   setPoem(poem: Poem): void {

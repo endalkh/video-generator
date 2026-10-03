@@ -8,7 +8,7 @@ import { InMemoryGenerationRepository, InMemoryModelSettingRepository, InMemoryP
 export const mockProvider = () => new MockProvider({ audioSecondsPerScene: 1, songLengthSec: 4, imageSize: [320, 180] });
 
 /** Services wired to in-memory repositories and a temp media folder. */
-export async function makeTestContainer(): Promise<Container & { mediaRoot: string; generations: InMemoryGenerationRepository; cleanup(): Promise<void> }> {
+export async function makeTestContainer(opts: { provider?: () => MockProvider } = {}): Promise<Container & { mediaRoot: string; generations: InMemoryGenerationRepository; cleanup(): Promise<void> }> {
   const mediaRoot = await mkdtemp(path.join(os.tmpdir(), "kids-studio-test-"));
   const generations = new InMemoryGenerationRepository();
   const c = buildServices({
@@ -19,7 +19,7 @@ export async function makeTestContainer(): Promise<Container & { mediaRoot: stri
     mediaRoot,
     providers: (name) => {
       if (name !== "mock") throw new Error(`tests only use the mock provider, got ${name}`);
-      return mockProvider();
+      return (opts.provider ?? mockProvider)();
     },
   });
   await c.promptService.seedDefaults();

@@ -34,6 +34,7 @@ export class Router {
   get = (p: string, h: Handler) => this.on("GET", p, h);
   post = (p: string, h: Handler, status = 200) => this.on("POST", p, h, status);
   put = (p: string, h: Handler) => this.on("PUT", p, h);
+  del = (p: string, h: Handler) => this.on("DELETE", p, h);
 
   match(method: string, pathname: string): { handler: Handler; params: Record<string, string>; status: number } | undefined {
     const segs = pathname.split("/").filter(Boolean);

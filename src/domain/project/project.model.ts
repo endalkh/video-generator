@@ -19,21 +19,42 @@ export type AspectRatio = z.infer<typeof AspectRatioSchema>;
 /** What the user asks for (from the UI form, --input JSON, or CLI flags). */
 const tidy = (v: string) => v.replace(/\s+/g, " ").trim();
 
-export const ProjectInputSchema = z.object({
+/** Longest video the app makes, and the most scenes (pictures) in one video. */
+export const MAX_VIDEO_SECONDS = 600;
+export const MAX_SCENES = 40;
+/** Auto scene count: about one picture every this many seconds. */
+export const SECONDS_PER_SCENE = { song: 10, narration: 12 } as const;
+
+export function autoSceneCount(lengthSeconds: number, audioMode: AudioMode): number {
+  return Math.min(MAX_SCENES, Math.max(2, Math.round(lengthSeconds / SECONDS_PER_SCENE[audioMode])));
+}
+
+const ProjectInputObject = z.object({
   topic: z.string().transform(tidy).pipe(z.string().min(3, "topic must be at least 3 characters")),
   language: LanguageSchema.default("en"),
   audioMode: AudioModeSchema.default("song"),
   videoMode: VideoModeSchema.default("still"),
   ageRange: z.string().default("3-6"),
   style: z.string().transform(tidy).default("colorful 3D animated kids' movie style, Pixar-like, soft cinematic lighting, expressive characters"),
-  reviewMode: ReviewModeSchema.default("auto"),
-  sceneCount: z.number().int().min(2).max(12).default(4),
-  /** Song length in seconds (Song mode). Lyria 3 Clip models are always 30s. */
-  songSeconds: z.number().int().min(10).max(180).default(30),
+  reviewMode: ReviewModeSchema.default("manual"),
+  /** Leave out to pick it from the video length. */
+  sceneCount: z.number().int().min(2).max(MAX_SCENES).optional(),
+  /** Song length in seconds (Song mode). Set from lengthSeconds when that is given. */
+  songSeconds: z.number().int().min(10).max(MAX_VIDEO_SECONDS).default(30),
+  /** Target length of the whole video in seconds (song or narration). Songs over ~3 minutes are made in parts. */
+  lengthSeconds: z.number().int().min(10).max(MAX_VIDEO_SECONDS).optional(),
   aspectRatio: AspectRatioSchema.default("16:9"),
+  /** Show the lyrics / narration as subtitles in the final video. Off unless asked for. */
+  subtitles: z.boolean().default(false),
   characterHint: z.string().transform(tidy).optional(),
   voice: z.string().optional(),
 });
+
+export const ProjectInputSchema = ProjectInputObject.transform((v) => ({
+  ...v,
+  songSeconds: v.lengthSeconds ?? v.songSeconds,
+  sceneCount: v.sceneCount ?? (v.lengthSeconds ? autoSceneCount(v.lengthSeconds, v.audioMode) : 4),
+}));
 export type ProjectInput = z.infer<typeof ProjectInputSchema>;
 
 export const PoemSchema = z.object({
@@ -42,6 +63,10 @@ export const PoemSchema = z.object({
   moral: z.string().optional(),
 });
 export type Poem = z.infer<typeof PoemSchema>;
+
+/** One rewritten stanza (Poem page: "Rewrite this stanza"). */
+export const StanzaSchema = z.object({ lines: z.array(z.string().min(1)).min(1).max(8) });
+export type Stanza = z.infer<typeof StanzaSchema>;
 
 export const MotionSchema = z.enum(["zoom-in", "zoom-out", "pan-left", "pan-right", "static"]);
 export type Motion = z.infer<typeof MotionSchema>;

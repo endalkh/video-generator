@@ -15,6 +15,7 @@ import {
 /** Public shape returned by the API. */
 export interface ProjectDto {
   id: string;
+  channelId: string | null;
   topic: string;
   input: ProjectInput;
   provider: string;
@@ -35,6 +36,7 @@ export interface ProjectDto {
 
 export interface ProjectSummaryDto {
   id: string;
+  channelId: string | null;
   topic: string;
   /** Song/poem title once written, else null. */
   title: string | null;
@@ -52,6 +54,7 @@ export const ProjectMapper = {
   toDomain(row: ProjectRow): Project {
     return Project.restore({
       id: row.id,
+      channelId: row.channelId ?? null,
       input: ProjectInputSchema.parse(row.input),
       provider: row.provider,
       status: row.status,
@@ -73,6 +76,7 @@ export const ProjectMapper = {
     const j = json;
     return {
       id: p.id,
+      channelId: p.channelId,
       topic: p.input.topic,
       input: p.input as Prisma.InputJsonValue,
       provider: p.provider,
@@ -92,6 +96,7 @@ export const ProjectMapper = {
     const p = project.toProps();
     return {
       id: p.id,
+      channelId: p.channelId,
       topic: p.input.topic,
       input: p.input,
       provider: p.provider,
@@ -113,6 +118,7 @@ export const ProjectMapper = {
   toSummaryDto(project: Project): ProjectSummaryDto {
     return {
       id: project.id,
+      channelId: project.channelId,
       topic: project.topic,
       title: project.poem?.title ?? null,
       language: project.input.language,

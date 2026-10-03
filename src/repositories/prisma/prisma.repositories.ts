@@ -1,3 +1,7 @@
+import type { ChannelKit } from "../../domain/channel/channel.entity.js";
+import { ChannelKitMapper } from "../../domain/channel/channel.mapper.js";
+import type { ContentPlan } from "../../domain/plan/plan.entity.js";
+import { ContentPlanMapper } from "../../domain/plan/plan.mapper.js";
 import { ConflictError } from "../../domain/errors.js";
 import type { Generation } from "../../domain/generation/generation.model.js";
 import { GenerationMapper } from "../../domain/generation/generation.mapper.js";
@@ -9,7 +13,7 @@ import type { Prompt, PromptRevision } from "../../domain/prompt/prompt.entity.j
 import { PromptMapper } from "../../domain/prompt/prompt.mapper.js";
 import { Prisma } from "../../generated/prisma/client.js";
 import type { Db } from "../../infrastructure/prisma.js";
-import type { GenerationRepository, ModelSettingRepository, ProjectRepository, PromptRepository } from "../repositories.js";
+import type { ChannelKitRepository, ContentPlanRepository, GenerationRepository, ModelSettingRepository, ProjectRepository, PromptRepository } from "../repositories.js";
 
 const isUniqueViolation = (err: unknown) => err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
 
@@ -21,8 +25,8 @@ export class PrismaProjectRepository implements ProjectRepository {
     return row ? ProjectMapper.toDomain(row) : undefined;
   }
 
-  async list(limit = 100) {
-    const rows = await this.db.project.findMany({ orderBy: { updatedAt: "desc" }, take: limit });
+  async list({ channelId, limit = 100 }: { channelId?: string | null; limit?: number } = {}) {
+    const rows = await this.db.project.findMany({ where: channelId === undefined ? {} : { channelId }, orderBy: { updatedAt: "desc" }, take: limit });
     return rows.map(ProjectMapper.toDomain);
   }
 
@@ -48,13 +52,17 @@ export class PrismaProjectRepository implements ProjectRepository {
     const res = await this.db.project.updateMany({ where: { status: "running" }, data: { status: "paused", error: reason } });
     return res.count;
   }
+
+  async delete(id: string) {
+    await this.db.project.deleteMany({ where: { id } }); // generations cascade
+  }
 }
 
 export class PrismaPromptRepository implements PromptRepository {
   constructor(private readonly db: Db) {}
 
-  async list() {
-    const rows = await this.db.prompt.findMany();
+  async list(channelId: string) {
+    const rows = await this.db.prompt.findMany({ where: { channelId } });
     return rows.flatMap((r) => {
       try {
         return [PromptMapper.toDomain(r)];
@@ -64,8 +72,8 @@ export class PrismaPromptRepository implements PromptRepository {
     });
   }
 
-  async findByKey(key: string) {
-    const row = await this.db.prompt.findUnique({ where: { key } });
+  async findByKey(channelId: string, key: string) {
+    const row = await this.db.prompt.findUnique({ where: { channelId_key: { channelId, key } } });
     return row ? PromptMapper.toDomain(row) : undefined;
   }
 
@@ -82,18 +90,24 @@ export class PrismaPromptRepository implements PromptRepository {
   }
 
   async saveRevision(prompt: Prompt, revision: PromptRevision, expectedPreviousVersion: number) {
-    const { key, template, version } = PromptMapper.toPersistence(prompt);
+    const { channelId, key, template, version } = PromptMapper.toPersistence(prompt);
     await this.db.$transaction(async (tx) => {
       // Optimistic concurrency: two editors saving at once can't silently overwrite each other.
-      const res = await tx.prompt.updateMany({ where: { key, version: expectedPreviousVersion }, data: { template, version } });
+      const res = await tx.prompt.updateMany({ where: { channelId, key, version: expectedPreviousVersion }, data: { template, version } });
       if (res.count !== 1) throw new ConflictError(`Prompt "${key}" was changed by someone else; reload and try again`);
-      await tx.promptVersion.create({ data: { key, version: revision.version, template: revision.template, note: revision.note } });
+      await tx.promptVersion.create({ data: { channelId, key, version: revision.version, template: revision.template, note: revision.note } });
     });
   }
 
-  async history(key: string, limit = 50) {
-    const rows = await this.db.promptVersion.findMany({ where: { key }, orderBy: { version: "desc" }, take: limit });
+  async history(channelId: string, key: string, limit = 50) {
+    const rows = await this.db.promptVersion.findMany({ where: { channelId, key }, orderBy: { version: "desc" }, take: limit });
     return rows.map(PromptMapper.revisionToDomain);
+  }
+
+  async deleteChannelCopies(channelId: string, key?: string) {
+    if (!channelId) return 0; // never the shared prompts
+    const res = await this.db.prompt.deleteMany({ where: { channelId, ...(key ? { key } : {}) } }); // versions cascade
+    return res.count;
   }
 }
 
@@ -107,6 +121,71 @@ export class PrismaGenerationRepository implements GenerationRepository {
   async listByProject(projectId: string, limit = 200) {
     const rows = await this.db.generation.findMany({ where: { projectId }, orderBy: { id: "desc" }, take: limit });
     return rows.map(GenerationMapper.toDomain);
+  }
+}
+
+export class PrismaChannelKitRepository implements ChannelKitRepository {
+  constructor(private readonly db: Db) {}
+
+  async findById(id: string) {
+    const row = await this.db.channelKit.findUnique({ where: { id } });
+    return row ? ChannelKitMapper.toDomain(row) : undefined;
+  }
+
+  async list(limit = 100) {
+    const rows = await this.db.channelKit.findMany({ orderBy: { updatedAt: "desc" }, take: limit });
+    return rows.map(ChannelKitMapper.toDomain);
+  }
+
+  async exists(id: string) {
+    return (await this.db.channelKit.count({ where: { id } })) > 0;
+  }
+
+  async create(kit: ChannelKit) {
+    try {
+      await this.db.channelKit.create({ data: ChannelKitMapper.toPersistence(kit) });
+    } catch (err) {
+      if (isUniqueViolation(err)) throw new ConflictError(`Channel kit "${kit.id}" already exists`);
+      throw err;
+    }
+  }
+
+  async save(kit: ChannelKit) {
+    const { id, createdAt: _c, ...data } = ChannelKitMapper.toPersistence(kit);
+    await this.db.channelKit.update({ where: { id }, data });
+  }
+
+  async delete(id: string) {
+    await this.db.channelKit.deleteMany({ where: { id } });
+  }
+}
+
+export class PrismaContentPlanRepository implements ContentPlanRepository {
+  constructor(private readonly db: Db) {}
+
+  async findByMonth(channelId: string, month: string) {
+    const row = await this.db.contentPlan.findUnique({ where: { channelId_month: { channelId, month } } });
+    return row ? ContentPlanMapper.toDomain(row) : undefined;
+  }
+
+  async list(channelId: string, limit = 100) {
+    const rows = await this.db.contentPlan.findMany({ where: { channelId }, orderBy: { month: "desc" }, take: limit });
+    return rows.map(ContentPlanMapper.toDomain);
+  }
+
+  async save(plan: ContentPlan) {
+    const { channelId, month, createdAt, ...data } = ContentPlanMapper.toPersistence(plan);
+    await this.db.contentPlan.upsert({ where: { channelId_month: { channelId, month } }, create: { channelId, month, createdAt, ...data }, update: data });
+  }
+
+  async deleteChannel(channelId: string) {
+    return (await this.db.contentPlan.deleteMany({ where: { channelId } })).count;
+  }
+
+  async reassign(fromChannelId: string, toChannelId: string) {
+    const taken = new Set((await this.db.contentPlan.findMany({ where: { channelId: toChannelId }, select: { month: true } })).map((r) => r.month));
+    const res = await this.db.contentPlan.updateMany({ where: { channelId: fromChannelId, month: { notIn: [...taken] } }, data: { channelId: toChannelId } });
+    return res.count;
   }
 }
 

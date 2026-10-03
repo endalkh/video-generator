@@ -51,7 +51,7 @@ describe("HTTP API", () => {
     const stale = await fetch(`${base}/api/prompts/poem`, json("PUT", { template: "again", expectedVersion: 1 }));
     expect(stale.status).toBe(409);
 
-    const preview = await (await fetch(`${base}/api/prompts/poem/preview`, json("POST", { input: { topic: "Colors" } }))).json();
+    const preview = await (await fetch(`${base}/api/prompts/poem/preview`, json("POST", { input: { reviewMode: "auto", topic: "Colors" } }))).json();
     expect(preview.text).toBe("Poem about Colors");
     const reset = await (await fetch(`${base}/api/prompts/poem/reset`, json("POST", {}))).json();
     expect(reset.isDefault).toBe(true);
@@ -59,7 +59,7 @@ describe("HTTP API", () => {
   });
 
   it("creates a project, runs it, and serves the video with range requests", async () => {
-    const res = await fetch(`${base}/api/projects`, json("POST", { input: { topic: "Brushing teeth", sceneCount: 2 }, provider: "mock" }));
+    const res = await fetch(`${base}/api/projects`, json("POST", { input: { reviewMode: "auto", topic: "Brushing teeth", sceneCount: 2 }, provider: "mock" }));
     expect(res.status).toBe(201);
     const { id } = await res.json();
     await c.projectService.idle();
@@ -121,7 +121,7 @@ describe("HTTP API", () => {
   });
 
   it("rejects bad input, non-JSON writes, and foreign hosts/origins", async () => {
-    expect((await fetch(`${base}/api/projects`, json("POST", { input: { topic: "x" }, provider: "mock" }))).status).toBe(400);
+    expect((await fetch(`${base}/api/projects`, json("POST", { input: { reviewMode: "auto", topic: "x" }, provider: "mock" }))).status).toBe(400);
     expect((await fetch(`${base}/api/projects`, { method: "POST", body: "topic=x", headers: { "content-type": "application/x-www-form-urlencoded" } })).status).toBe(415);
     expect((await fetch(`${base}/api/projects`, { headers: { origin: "https://evil.example" } })).status).toBe(403);
   });

@@ -4,7 +4,7 @@ import { ConflictError } from "../src/domain/errors.js";
 import { Project } from "../src/domain/project/project.entity.js";
 import { ProjectInputSchema } from "../src/domain/project/project.model.js";
 import { createPrismaClient, type Db } from "../src/infrastructure/prisma.js";
-import { PrismaGenerationRepository, PrismaModelSettingRepository, PrismaProjectRepository, PrismaPromptRepository } from "../src/repositories/prisma/prisma.repositories.js";
+import { PrismaChannelKitRepository, PrismaContentPlanRepository, PrismaGenerationRepository, PrismaModelSettingRepository, PrismaProjectRepository, PrismaPromptRepository } from "../src/repositories/prisma/prisma.repositories.js";
 import { PromptService } from "../src/services/prompt.service.js";
 
 /** Runs against TEST_DATABASE_URL (migrated with `prisma migrate deploy`); the tables are wiped. */
@@ -15,7 +15,7 @@ describe.skipIf(!url)("Prisma repositories (Postgres)", () => {
   let db: Db;
   beforeAll(async () => {
     db = createPrismaClient(url);
-    await db.$executeRawUnsafe("TRUNCATE generations, projects, prompt_versions, prompts, model_settings RESTART IDENTITY CASCADE");
+    await db.$executeRawUnsafe("TRUNCATE generations, projects, prompt_versions, prompts, model_settings, channel_kits, content_plans RESTART IDENTITY CASCADE");
   });
   afterAll(async () => db?.$disconnect());
 
@@ -65,5 +65,37 @@ describe.skipIf(!url)("Prisma repositories (Postgres)", () => {
     const repo = new PrismaGenerationRepository(db);
     await repo.add({ projectId: "db-test", step: "poem", sceneIndex: null, promptKey: "poem", promptVersion: 1, prompt: "hi", provider: "mock", model: "gemini-3.8-flash" });
     expect((await repo.listByProject("db-test"))[0]).toMatchObject({ promptKey: "poem", prompt: "hi" });
+  });
+
+  it("round-trips a YouTube channel kit", async () => {
+    const { ChannelKit, parseChannelInput } = await import("../src/domain/channel/channel.entity.js");
+    const repo = new PrismaChannelKitRepository(db);
+    const kit = ChannelKit.create({ id: "db-channel", input: parseChannelInput({ brief: "ፊደል ዘፈኖች", language: "am" }), provider: "mock", hasPhoto: false });
+    await repo.create(kit);
+    await expect(repo.create(kit)).rejects.toBeInstanceOf(ConflictError);
+    expect((await repo.findById("db-channel"))!.details).toBeNull();
+    kit.setDetails({ name: "ፊደል", handle: "fidel", description: "d", keywords: ["a"] });
+    await repo.save(kit);
+    const loaded = (await repo.findById("db-channel"))!;
+    expect([loaded.input.brief, loaded.details?.handle, loaded.channelName]).toEqual(["ፊደል ዘፈኖች", "fidel", "ፊደል"]);
+    expect((await repo.list()).map((k) => k.id)).toEqual(["db-channel"]);
+  });
+
+  it("stores monthly plans", async () => {
+    const { ContentPlan, parsePlanInput } = await import("../src/domain/plan/plan.entity.js");
+    const repo = new PrismaContentPlanRepository(db);
+    const input = parsePlanInput({ about: "Kids songs", postDays: [6] });
+    const idea = { date: "2026-11-07", time: "09:00", language: "am" as const, title: "ሀ", topic: "Letters", lesson: "l", audioMode: "song" as const, sceneCount: 4, thumbnailTitle: "t", videoDescription: "d", tags: ["a"], projectId: null };
+    const plan = ContentPlan.create("ch-1", "2026-11", input, "Letters", [idea]);
+    await repo.save(plan);
+    plan.linkProject(0, "db-test");
+    await repo.save(plan); // upsert
+    const loaded = (await repo.findByMonth("ch-1", "2026-11"))!;
+    expect([loaded.theme, loaded.ideas[0]!.projectId, loaded.input.timezone]).toEqual(["Letters", "db-test", "Africa/Addis_Ababa"]);
+    expect((await repo.list("ch-1")).map((p) => p.month)).toEqual(["2026-11"]);
+    expect(await repo.list("other")).toEqual([]);
+    expect(await repo.reassign("ch-1", "ch-2")).toBe(1);
+    expect((await repo.findByMonth("ch-2", "2026-11"))!.channelId).toBe("ch-2");
+    expect(await repo.deleteChannel("ch-2")).toBe(1);
   });
 });

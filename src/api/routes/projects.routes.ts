@@ -19,18 +19,27 @@ const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : undefined);
 /** Project endpoints: thin controllers that delegate to ProjectService. */
 export function projectRoutes(router: Router, projects: ProjectService): void {
   router
-    .get("/api/projects", () => projects.list())
+    .get("/api/projects", ({ url }) => projects.list(url.searchParams.get("channel") || undefined))
     .post(
       "/api/projects",
       async ({ body }) => {
         const b = await body();
-        const project = await projects.create(b.input, str(b.provider) ?? "gemini");
+        const project = await projects.create(b.input, str(b.provider) ?? "gemini", { channelId: str(b.channelId) });
         await projects.start(project.id);
         return project;
       },
       201,
     )
     .get("/api/projects/:id", ({ params }) => projects.get(params.id!))
+    .del("/api/projects/:id", async ({ params }) => {
+      await projects.delete(params.id!);
+      return { deleted: params.id };
+    })
+    .put("/api/projects/:id/channel", async ({ params, body }) => {
+      const channelId = str((await body()).channelId);
+      if (!channelId) throw new HttpError(400, "channelId is required");
+      return projects.moveToChannel(params.id!, channelId);
+    })
     .get("/api/projects/:id/generations", ({ params }) => projects.generationsOf(params.id!))
     .post(
       "/api/projects/:id/resume",
@@ -57,20 +66,32 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
     }, 202)
     .post("/api/projects/:id/regenerate", async ({ params, body }) => {
       const b = await body();
-      await projects.regenerate(params.id!, String(b.step ?? ""), { provider: str(b.provider) });
+      await projects.regenerate(params.id!, String(b.step ?? ""), { provider: str(b.provider), keepVisuals: b.keepVisuals === true });
       return { id: params.id };
     }, 202)
     .post("/api/projects/:id/steps/:step/generate", async ({ params, body }) => {
       const b = await body();
-      await projects.generateStep(params.id!, params.step!, { provider: str(b.provider) });
+      await projects.generateStep(params.id!, params.step!, { provider: str(b.provider), keepVisuals: b.keepVisuals === true });
       return { id: params.id, step: params.step };
     }, 202)
     .post("/api/projects/:id/scenes/:index/redo", async ({ params }) => {
       await projects.redoScene(params.id!, Number(params.index) - 1);
       return { id: params.id };
     }, 202)
+    .put("/api/projects/:id/subtitles", async ({ params, body }) => projects.setSubtitles(params.id!, (await body()).on))
+    .put("/api/projects/:id/settings", async ({ params, body }) => {
+      const b = await body();
+      return projects.changeSettings(params.id!, b.settings, { keepPoem: b.keepPoem === true });
+    })
     .put("/api/projects/:id/review-mode", async ({ params, body }) => projects.setReviewMode(params.id!, String((await body()).mode ?? "")))
-    .put("/api/projects/:id/poem", async ({ params, body }) => projects.editPoem(params.id!, (await body()).poem))
+    .put("/api/projects/:id/poem", async ({ params, body }) => {
+      const b = await body();
+      return projects.editPoem(params.id!, b.poem, { keepVisuals: b.keepVisuals === true });
+    })
+    .post("/api/projects/:id/poem/stanzas/:n/rewrite", async ({ params, body }) => {
+      const b = await body();
+      return projects.rewriteStanza(params.id!, Number(params.n) - 1, { draft: b.poem, hint: str(b.hint), provider: str(b.provider) });
+    })
     .put("/api/projects/:id/scenes", async ({ params, body }) => projects.editScenes(params.id!, (await body()).scenes))
     .put("/api/projects/:id/character/upload", async ({ params, body }) => {
       // base64 grows the picture by ~4/3, plus room for the name/description.

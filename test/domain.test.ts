@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ConflictError, ValidationError } from "../src/domain/errors.js";
-import { songTimeline, mmss } from "../src/domain/ports/generator.port.js";
+import { songParts, songTimeline, mmss } from "../src/domain/ports/generator.port.js";
 import { Project } from "../src/domain/project/project.entity.js";
 import { ProjectInputSchema } from "../src/domain/project/project.model.js";
 import { DEFAULT_PROMPTS, PROMPT_FLAGS, allowedVars, promptDefinition } from "../src/domain/prompt/prompt.defaults.js";
@@ -11,10 +11,37 @@ const input = ProjectInputSchema.parse({ topic: "brushing teeth" });
 
 describe("ProjectInput", () => {
   it("applies defaults", () => {
-    expect(input).toMatchObject({ language: "en", audioMode: "song", videoMode: "still", sceneCount: 4, aspectRatio: "16:9" });
+    expect(input).toMatchObject({ language: "en", audioMode: "song", videoMode: "still", sceneCount: 4, aspectRatio: "16:9", reviewMode: "manual" });
   });
   it("rejects bad scene counts", () => {
-    expect(ProjectInputSchema.safeParse({ topic: "abc", sceneCount: 40 }).success).toBe(false);
+    expect(ProjectInputSchema.safeParse({ topic: "abc", sceneCount: 41 }).success).toBe(false);
+    expect(ProjectInputSchema.safeParse({ topic: "abc", sceneCount: 1 }).success).toBe(false);
+  });
+  it("picks the scene count from the video length", () => {
+    expect(ProjectInputSchema.parse({ topic: "abc", lengthSeconds: 300 })).toMatchObject({ sceneCount: 30, songSeconds: 300, lengthSeconds: 300 });
+    expect(ProjectInputSchema.parse({ topic: "abc", lengthSeconds: 300, audioMode: "narration" }).sceneCount).toBe(25);
+    expect(ProjectInputSchema.parse({ topic: "abc", lengthSeconds: 300, sceneCount: 12 }).sceneCount).toBe(12);
+    expect(ProjectInputSchema.safeParse({ topic: "abc", lengthSeconds: 601 }).success).toBe(false);
+  });
+});
+
+describe("songParts", () => {
+  const scenes = Array.from({ length: 30 }, (_, i) => ({ text: `verse ${i} `.repeat(1 + (i % 3)) }));
+  it("keeps short songs in one part", () => {
+    expect(songParts(scenes.slice(0, 4), 30)).toEqual([{ scenes: [0, 1, 2, 3], seconds: 30 }]);
+  });
+  it("splits a 5-minute song into parts the model can make, covering every scene once", () => {
+    const parts = songParts(scenes, 300);
+    expect(parts).toHaveLength(2);
+    expect(parts.flatMap((p) => p.scenes)).toEqual(scenes.map((_, i) => i));
+    expect(parts.every((p) => p.seconds <= 180)).toBe(true);
+    expect(parts.reduce((n, p) => n + p.seconds, 0)).toBeCloseTo(300, -1);
+  });
+  it("uses exact 30 s parts for fixed-length models", () => {
+    const parts = songParts(scenes, 300, { fixedLength: 30 });
+    expect(parts).toHaveLength(10);
+    expect(parts.every((p) => p.seconds === 30 && p.scenes.length >= 1)).toBe(true);
+    expect(parts.flatMap((p) => p.scenes)).toEqual(scenes.map((_, i) => i));
   });
 });
 
@@ -40,7 +67,7 @@ describe("Project entity", () => {
   });
   it("validates id and input", () => {
     expect(() => Project.create({ id: "Bad Id!", input, provider: "mock" })).toThrow(ValidationError);
-    expect(() => Project.create({ id: "ok", input: { topic: "x" } as never, provider: "mock" })).toThrow(ValidationError);
+    expect(() => Project.create({ id: "ok", input: { reviewMode: "auto", topic: "x" } as never, provider: "mock" })).toThrow(ValidationError);
   });
   it("normalises scene indices", () => {
     const p = Project.create({ id: "s", input, provider: "mock" });
@@ -80,6 +107,15 @@ describe("Prompt entity", () => {
     const p = Prompt.fromDefault(promptDefinition("poem"));
     expect(() => p.revise("{{visual_prompt}}")).toThrow(ValidationError);
     expect(p.version).toBe(1);
+  });
+});
+
+describe("singing pace", () => {
+  it("estimates syllables for Ge'ez and English", async () => {
+    const { estimateSyllables, singableSeconds } = await import("../src/domain/ports/generator.port.js");
+    expect(estimateSyllables("Twinkle twinkle little star, how I wonder what you are")).toBe(14);
+    expect(estimateSyllables("ቢጫ ቀሚስ ለብሼ ትንሽ በትሬን ይዤ")).toBe(14); // 17 fidel
+    expect(singableSeconds(["ቢጫ ቀሚስ ለብሼ ትንሽ በትሬን ይዤ", "Twinkle twinkle little star, how I wonder what you are"])).toBe(Math.ceil(28 / 2.5 + 4));
   });
 });
 

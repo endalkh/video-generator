@@ -9,6 +9,8 @@ import { guardLocal, readJsonBody, Router, send, sendJson, toHttpError } from ".
 import { projectRoutes } from "./routes/projects.routes.js";
 import { promptRoutes } from "./routes/prompts.routes.js";
 import { modelRoutes } from "./routes/models.routes.js";
+import { channelRoutes } from "./routes/channels.routes.js";
+import { planRoutes } from "./routes/plans.routes.js";
 
 /** public/ sits at the package root, both for src/api (tsx) and dist/api (build). */
 export const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../public");
@@ -26,7 +28,7 @@ const STATIC_TYPES: Record<string, string> = {
 
 /** Resolve a URL path to a file inside public/ (generated Tailwind CSS, JS, images…), or undefined. */
 function staticFile(pathname: string): string | undefined {
-  if (pathname.startsWith("/api/") || pathname.startsWith("/media/")) return undefined;
+  if (pathname.startsWith("/api/") || pathname.startsWith("/media/") || pathname.startsWith("/channel-media/")) return undefined;
   let rel: string;
   try {
     rel = decodeURIComponent(pathname === "/" ? "/index.html" : pathname);
@@ -47,6 +49,8 @@ export function createApp(c: Container): http.Server {
   projectRoutes(router, c.projectService);
   promptRoutes(router, c.promptService);
   modelRoutes(router, c.modelSettingsService);
+  channelRoutes(router, c.channelService);
+  planRoutes(router, c.planService);
 
   return http.createServer(async (req, res) => {
     try {

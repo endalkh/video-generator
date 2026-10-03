@@ -13,7 +13,7 @@ export interface ModelTaskDefinition {
   envVar: string;
 }
 
-export const MODEL_TASK_IDS = ["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video"] as const;
+export const MODEL_TASK_IDS = ["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "channel_text", "channel_image", "plan_text"] as const;
 export type ModelTask = (typeof MODEL_TASK_IDS)[number];
 
 /** Every task in the pipeline that calls an AI model, in pipeline order. */
@@ -26,6 +26,9 @@ export const MODEL_TASKS: readonly (ModelTaskDefinition & { task: ModelTask })[]
   { task: "song", title: "Song", description: "Composes and sings the whole song (Song mode).", capability: "music", defaultModel: "lyria-3-clip-preview", envVar: "GEMINI_MUSIC_MODEL" },
   { task: "narration", title: "Narration / TTS", description: "Reads each scene aloud (Narration mode).", capability: "tts", defaultModel: "gemini-3.8-flash-tts", envVar: "GEMINI_TTS_MODEL" },
   { task: "scene_video", title: "Scene animation", description: "Animates each scene (Visuals = Veo).", capability: "video", defaultModel: "veo-3.1-fast-generate-preview", envVar: "GEMINI_VIDEO_MODEL" },
+  { task: "channel_text", title: "Channel name & description", description: "Writes the YouTube channel name, handle, description and keywords (Channel page).", capability: "text", defaultModel: "gemini-3.8-flash", envVar: "GEMINI_CHANNEL_TEXT_MODEL" },
+  { task: "channel_image", title: "Channel art", description: "Draws the YouTube logo, banner and thumbnail (Channel page).", capability: "image", defaultModel: "gemini-3.1-flash-image", envVar: "GEMINI_CHANNEL_IMAGE_MODEL" },
+  { task: "plan_text", title: "Monthly ideas & schedule", description: "Plans a month of video ideas for the posting schedule (Ideas & schedule page).", capability: "text", defaultModel: "gemini-3.8-flash", envVar: "GEMINI_PLAN_MODEL" },
 ];
 
 

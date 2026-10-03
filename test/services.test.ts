@@ -1,8 +1,9 @@
 import { readFile, stat, unlink } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConflictError, ValidationError } from "../src/domain/errors.js";
-import { probeDuration } from "../src/infrastructure/media/ffmpeg.js";
+import { probeDuration, probeStreams } from "../src/infrastructure/media/ffmpeg.js";
 import { mediaPaths } from "../src/services/pipeline.service.js";
+import { fileExists } from "../src/util/fs.js";
 import { makeTestContainer, mockProvider } from "./helpers.js";
 
 let c: Awaited<ReturnType<typeof makeTestContainer>>;
@@ -97,7 +98,7 @@ describe("one step at a time", () => {
   it("generates each step on its own, in order, and remakes a done step", async () => {
     c = await makeTestContainer();
     const ps = c.projectService;
-    const { id } = await ps.create({ topic: "feeding the chickens", sceneCount: 2 }, "mock");
+    const { id } = await ps.create({ reviewMode: "auto", topic: "feeding the chickens", sceneCount: 2 }, "mock");
     const gen = async (step: string) => { await ps.generateStep(id, step, { provider: "mock" }); await ps.idle(); return ps.get(id); };
 
     await expect(ps.generateStep(id, "scenes")).rejects.toBeInstanceOf(ConflictError); // poem first
@@ -126,7 +127,7 @@ describe("one step at a time", () => {
   it("uses an uploaded character picture, describing it with AI when no description is given", async () => {
     c = await makeTestContainer();
     const ps = c.projectService;
-    const { id } = await ps.create({ topic: "herding the goats", sceneCount: 2 }, "mock");
+    const { id } = await ps.create({ reviewMode: "auto", topic: "herding the goats", sceneCount: 2 }, "mock");
     const picture = await mockProvider().image("x", { model: "m", ctx: { input: (await ps.get(id)).input } });
     const dataUrl = `data:image/png;base64,${picture.toString("base64")}`;
 
@@ -156,6 +157,58 @@ describe("one step at a time", () => {
     expect((await ps.get(id)).media.final).toBeNull();
   }, 60_000);
 
+  it("changes the poem and music while keeping the pictures and Veo videos", async () => {
+    c = await makeTestContainer();
+    const ps = c.projectService;
+    const { id } = await ps.create({ reviewMode: "auto", topic: "goats in the rain", sceneCount: 2, videoMode: "veo" }, "mock");
+    await runToEnd(id);
+    const media = mediaPaths(c.pipelineService.mediaDir(id));
+    const visuals = [media.sceneImage(0), media.sceneVideo(0), media.sceneImage(1), media.sceneVideo(1)];
+    const stamps = async () => Promise.all(visuals.map(async (f) => (await stat(f)).mtimeMs));
+    const keep = await stamps();
+    const keys = () => c.generations.items.map((g) => g.promptKey);
+    const visualCalls = () => keys().filter((k) => k === "scene_image" || k === "scene_video" || k === "scenes").length;
+    const calls = visualCalls();
+
+    // 1) New song only.
+    await ps.generateStep(id, "audio");
+    await ps.idle();
+    expect(await stamps()).toEqual(keep);
+    await runToEnd(id);
+
+    // 2) Edited poem, keep visuals: scenes get the new words, no new pictures/videos/plan.
+    const visual = (await ps.get(id)).scenes!.scenes.map((s) => s.visualPrompt);
+    await ps.editPoem(id, { title: "Rain Song", stanzas: [{ lines: ["Drip drop", "on the hill"] }, { lines: ["Goats jump", "in the puddles"] }] }, { keepVisuals: true });
+    let p = await runToEnd(id);
+    expect(p.status).toBe("done");
+    expect(p.scenes!.scenes.map((s) => [s.text, s.visualPrompt])).toEqual([["Drip drop\non the hill", visual[0]], ["Goats jump\nin the puddles", visual[1]]]);
+    expect(keys().filter((k) => k === "song").length).toBe(3); // a new song each time
+
+    // 3) AI writes a new poem, keep visuals.
+    await ps.generateStep(id, "poem", { keepVisuals: true });
+    await ps.idle();
+    p = await ps.get(id);
+    expect([p.completed, p.scenes!.scenes.length]).toEqual([["poem"], 2]);
+    p = await runToEnd(id);
+    expect(p.status).toBe("done");
+    expect(p.scenes!.scenes[0]!.text).toBe(p.poem!.stanzas[0]!.lines.join("\n"));
+    expect(await stamps()).toEqual(keep);
+    expect(visualCalls()).toBe(calls);
+
+    // Editing one scene's picture description redoes only that scene's picture and video.
+    const plan = (await ps.get(id)).scenes!;
+    await ps.editScenes(id, { scenes: plan.scenes.map((s) => (s.index === 1 ? { ...s, visualPrompt: "goats under a rainbow" } : s)) });
+    expect([await fileExists(media.sceneImage(0)), await fileExists(media.sceneVideo(0)), await fileExists(media.sceneImage(1)), await fileExists(media.sceneVideo(1))]).toEqual([true, true, false, false]);
+    await runToEnd(id);
+    expect(visualCalls()).toBe(calls + 2); // 1 picture + 1 video
+
+    // 4) Without keepVisuals the scenes are planned again and the pictures are made again.
+    await ps.editPoem(id, { title: "New", stanzas: [{ lines: ["One"] }, { lines: ["Two"] }] });
+    expect((await ps.get(id)).scenes).toBeNull();
+    await runToEnd(id);
+    expect(visualCalls()).toBeGreaterThan(calls);
+  }, 60_000);
+
   it("in manual mode, generating the next step approves the earlier ones", async () => {
     c = await makeTestContainer();
     const ps = c.projectService;
@@ -174,7 +227,7 @@ describe("ModelSettingsService", () => {
   it("lists, updates, resets and groups available models", async () => {
     c = await makeTestContainer();
     const list = await c.modelSettingsService.list();
-    expect(list.map((s) => s.task)).toEqual(["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video"]);
+    expect(list.map((s) => s.task)).toEqual(["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "channel_text", "channel_image", "plan_text"]);
     expect((await c.modelSettingsService.update("poem", "gemini-3.1-pro-preview")).isDefault).toBe(false);
     await expect(c.modelSettingsService.update("poem", "lyria-3.5")).rejects.toBeInstanceOf(ValidationError);
     expect((await c.modelSettingsService.reset("poem")).model).toBe("gemini-3.8-flash");
@@ -189,7 +242,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
     c = await makeTestContainer();
     await c.modelSettingsService.update("poem", "gemini-3.1-pro-preview");
     await c.modelSettingsService.update("scene_image", "gemini-3-pro-image");
-    const created = await c.projectService.create({ topic: "sharing is caring", sceneCount: 2 }, "mock");
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "sharing is caring", sceneCount: 2 }, "mock");
     await runToEnd(created.id);
     const byKey = (k: string) => c.generations.items.filter((g) => g.promptKey === k).map((g) => g.model);
     expect(byKey("poem")).toEqual(["gemini-3.1-pro-preview"]);
@@ -201,7 +254,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
   it("renders a song video using DB prompts, then resumes from checkpoints", async () => {
     c = await makeTestContainer();
     await c.promptService.update("song", "SONG PROMPT for {{title}}:\n{{timed_lyrics}}");
-    const created = await c.projectService.create({ topic: "washing hands", sceneCount: 2, audioMode: "song" }, "mock");
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "washing hands", sceneCount: 2, audioMode: "song" }, "mock");
 
     const done = await runToEnd(created.id);
     expect(done.status).toBe("done");
@@ -226,7 +279,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
 
   it("narration mode renders per-scene audio; redo-from wipes stale media", async () => {
     c = await makeTestContainer();
-    const created = await c.projectService.create({ topic: "counting goats", sceneCount: 2, audioMode: "narration", aspectRatio: "9:16" }, "mock");
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "counting goats", sceneCount: 2, audioMode: "narration", aspectRatio: "9:16" }, "mock");
     await runToEnd(created.id);
     const p = mediaPaths(c.pipelineService.mediaDir(created.id));
     expect(await probeDuration(p.final)).toBeCloseTo(3, 0); // 2 × (1s + 0.5s tail)
@@ -238,9 +291,52 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
     expect(imageCalls()).toBe(before + 2); // scene images regenerated, not reused
   }, 60_000);
 
+  it("subtitles are off by default and can be added (only the final video is rebuilt)", async () => {
+    c = await makeTestContainer();
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "singing birds", sceneCount: 2 }, "mock");
+    expect(created.input.subtitles).toBe(false);
+    await runToEnd(created.id);
+    const p = mediaPaths(c.pipelineService.mediaDir(created.id));
+    expect(await probeStreams(p.final)).not.toContain("subtitle");
+    expect(await stat(p.srt)).toBeTruthy(); // the .srt is still there to download
+
+    const calls = c.generations.items.length;
+    await c.projectService.setSubtitles(created.id, true);
+    await c.projectService.idle();
+    let got = await c.projectService.get(created.id);
+    expect([got.status, got.input.subtitles]).toEqual(["done", true]);
+    expect(await probeStreams(p.final)).toContain("subtitle");
+    expect(c.generations.items.length).toBe(calls); // no AI calls
+
+    await c.projectService.setSubtitles(created.id, false);
+    await c.projectService.idle();
+    got = await c.projectService.get(created.id);
+    expect(got.status).toBe("done");
+    expect(await probeStreams(p.final)).not.toContain("subtitle");
+    await expect(c.projectService.setSubtitles(created.id, "yes")).rejects.toBeInstanceOf(ValidationError);
+  }, 60_000);
+
+  it("makes the song long enough to sing the words clearly when the model allows it", async () => {
+    const { MockProvider } = await import("../src/infrastructure/providers/mock.js");
+    c = await makeTestContainer({ provider: () => new MockProvider({ songLengthSec: null, imageSize: [320, 180] }) });
+    const ps = c.projectService;
+    await c.modelSettingsService.update("song", "lyria-3-pro-preview");
+    const { id } = await ps.create({ reviewMode: "auto", topic: "ዶሮዎችና ጫጩቶች", language: "am", sceneCount: 2, songSeconds: 10 }, "mock");
+    await ps.generateStep(id, "poem");
+    await ps.idle();
+    const long = { title: "ዶሮ", stanzas: [{ lines: ["ዶሮዎቻችን በጠዋት ተነስተው ይጮኻሉ", "ጫጩቶቻቸውን ይዘው ወደ ሜዳ ይሄዳሉ"] }, { lines: ["ጥራጥሬ ለቅመው በደስታ ይበላሉ", "ማታ ሲሆን ወደ ቤታቸው ይመለሳሉ"] }] };
+    await ps.editPoem(id, long);
+    const p = await runToEnd(id);
+    const need = Math.ceil(long.stanzas.flatMap((s) => s.lines).join("").replace(/\s/g, "").length * 0.8 / 2.5 + 4);
+    expect(p.song!.duration).toBeGreaterThan(10);
+    expect(p.song!.duration).toBeCloseTo(need, 0);
+    const prompt = c.generations.items.find((g) => g.promptKey === "song")!.prompt;
+    expect(prompt).toContain(`about ${need} seconds long`);
+  }, 60_000);
+
   it("switching visuals re-renders only clips and final", async () => {
     c = await makeTestContainer();
-    const created = await c.projectService.create({ topic: "goats on the hill", sceneCount: 2 }, "mock");
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "goats on the hill", sceneCount: 2 }, "mock");
     await runToEnd(created.id);
     const before = c.generations.items.map((g) => g.promptKey);
     await c.projectService.changeVisuals(created.id, "veo");
@@ -255,7 +351,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
 
   it("a failed video clip fails the run with the error (no fallback to pictures)", async () => {
     c = await makeTestContainer();
-    const created = await c.projectService.create({ topic: "goats and sheep", sceneCount: 2, videoMode: "veo" }, "mock");
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "goats and sheep", sceneCount: 2, videoMode: "veo" }, "mock");
     const { MockProvider } = await import("../src/infrastructure/providers/mock.js");
     MockProvider.prototype.video = async () => { throw new Error("quota exceeded"); };
     try {
@@ -271,7 +367,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
   it("fails clearly when the poem ignores the scene count", async () => {
     c = await makeTestContainer();
     await c.promptService.update("poem", "Write exactly 8 stanzas about {{topic}}.");
-    const created = await c.projectService.create({ topic: "counting sheep", sceneCount: 3 }, "mock");
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "counting sheep", sceneCount: 3 }, "mock");
     const { MockProvider } = await import("../src/infrastructure/providers/mock.js");
     const orig = MockProvider.prototype.text;
     MockProvider.prototype.text = async function (kind, prompt, opts) {
@@ -289,7 +385,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
 
   it("cancels, then resumes to completion", async () => {
     c = await makeTestContainer();
-    const created = await c.projectService.create({ topic: "sharing toys", sceneCount: 2 }, "mock");
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "sharing toys", sceneCount: 2 }, "mock");
     await c.projectService.start(created.id);
     c.projectService.cancel(created.id);
     await c.projectService.idle();
@@ -299,8 +395,8 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
 
   it("rejects invalid input and concurrent runs", async () => {
     c = await makeTestContainer();
-    await expect(c.projectService.create({ topic: "x" }, "mock")).rejects.toBeInstanceOf(ValidationError);
-    const created = await c.projectService.create({ topic: "tidy up time", sceneCount: 2 }, "mock");
+    await expect(c.projectService.create({ reviewMode: "auto", topic: "x" }, "mock")).rejects.toBeInstanceOf(ValidationError);
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "tidy up time", sceneCount: 2 }, "mock");
     await c.projectService.start(created.id);
     await expect(c.projectService.start(created.id)).rejects.toBeInstanceOf(ConflictError);
     await c.projectService.idle();

@@ -2,7 +2,12 @@ import { ValidationError } from "../errors.js";
 import { allowedVars, PROMPT_FLAGS, promptDefinition, type PromptDefinition } from "./prompt.defaults.js";
 import { renderTemplate, validateTemplate, type PromptFlags, type PromptVars } from "./prompt.template.js";
 
+/** "" = the shared prompt every channel uses unless it has its own copy. */
+export const SHARED = "";
+
 export interface PromptProps {
+  /** SHARED, or the channel that has its own copy. */
+  channelId: string;
   key: string;
   template: string;
   version: number;
@@ -10,6 +15,7 @@ export interface PromptProps {
 }
 
 export interface PromptRevision {
+  channelId: string;
   key: string;
   version: number;
   template: string;
@@ -22,7 +28,12 @@ export class Prompt {
   private constructor(private props: PromptProps) {}
 
   static fromDefault(def: PromptDefinition, now = new Date()): Prompt {
-    return new Prompt({ key: def.key, template: def.template, version: 1, updatedAt: now });
+    return new Prompt({ channelId: SHARED, key: def.key, template: def.template, version: 1, updatedAt: now });
+  }
+
+  /** A channel's own copy of a (shared) prompt, starting at version 1 with the same text. */
+  static copyFor(channelId: string, from: Prompt, now = new Date()): Prompt {
+    return new Prompt({ channelId, key: from.key, template: from.template, version: 1, updatedAt: now });
   }
 
   static restore(props: PromptProps): Prompt {
@@ -30,6 +41,7 @@ export class Prompt {
     return new Prompt({ ...props });
   }
 
+  get channelId() { return this.props.channelId; }
   get key() { return this.props.key; }
   get template() { return this.props.template; }
   get version() { return this.props.version; }
@@ -47,15 +59,15 @@ export class Prompt {
     this.props.template = normalized;
     this.props.version += 1;
     this.props.updatedAt = new Date();
-    return { key: this.key, version: this.version, template: normalized, note, createdAt: this.props.updatedAt };
+    return { channelId: this.channelId, key: this.key, version: this.version, template: normalized, note, createdAt: this.props.updatedAt };
   }
 
   resetToDefault(): PromptRevision | null {
     return this.revise(this.definition.template, "reset to default");
   }
 
-  initialRevision(): PromptRevision {
-    return { key: this.key, version: this.version, template: this.template, note: "default", createdAt: this.updatedAt };
+  initialRevision(note = "default"): PromptRevision {
+    return { channelId: this.channelId, key: this.key, version: this.version, template: this.template, note, createdAt: this.updatedAt };
   }
 
   render(vars: PromptVars, flags: PromptFlags): string {

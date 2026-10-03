@@ -12,7 +12,7 @@ import type { GenerationRepository, ProjectRepository } from "../repositories/re
 import { imageToPng } from "../infrastructure/media/ffmpeg.js";
 import { fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
-import { mediaPaths, wipeMediaFrom, wipeRenders, wipeScene, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
+import { mediaPaths, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
 
 export type ProviderFactory = (name: string) => Provider;
 
@@ -51,15 +51,19 @@ export class ProjectService {
     if (n) log.warn(`${n} interrupted project(s) marked as paused; resume them from the UI or with --resume`);
   }
 
-  async create(rawInput: unknown, providerName: string): Promise<ProjectDto> {
+  /** Throws NotFoundError for unknown channels (set by the container). */
+  assertChannel: (channel: string) => Promise<void> = async () => {};
+
+  async create(rawInput: unknown, providerName: string, opts: { channelId?: string | null } = {}): Promise<ProjectDto> {
     const parsed = ProjectInputSchema.safeParse(rawInput);
     if (!parsed.success) throw new ValidationError("Invalid project input", parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`));
     this.providers(providerName); // validate provider (e.g. missing API key) before creating anything
+    if (opts.channelId) await this.assertChannel(opts.channelId);
     const base = slugify(parsed.data.topic);
     for (let n = 1; n < 1000; n++) {
       const id = n === 1 ? base : `${base}-${n}`;
       if (await this.projects.exists(id)) continue;
-      const project = Project.create({ id, input: parsed.data, provider: providerName });
+      const project = Project.create({ id, input: parsed.data, provider: providerName, channelId: opts.channelId ?? null });
       try {
         await this.projects.create(project);
         return ProjectMapper.toDto(project);
@@ -70,8 +74,10 @@ export class ProjectService {
     throw new ConflictError("Could not allocate a project id");
   }
 
-  async list(): Promise<(ProjectSummaryDto & { running: boolean; hasVideo: boolean })[]> {
-    const all = await this.projects.list();
+  /** Videos of a channel (or every video when `channel` is undefined), newest first. */
+  async list(channel?: string): Promise<(ProjectSummaryDto & { running: boolean; hasVideo: boolean })[]> {
+    if (channel) await this.assertChannel(channel);
+    const all = await this.projects.list({ channelId: channel, limit: 500 });
     return Promise.all(
       all.map(async (p) => ({ ...ProjectMapper.toSummaryDto(p), running: this.jobs.has(p.id), hasVideo: await fileExists(mediaPaths(this.pipeline.mediaDir(p.id)).final) })),
     );
@@ -146,6 +152,62 @@ export class ProjectService {
     return ProjectMapper.toDto(project);
   }
 
+  /**
+   * Change settings (length, scenes, language, song/story, style, shape…) after the video was started.
+   * Only the steps that depend on what changed are made again; nothing is generated until asked for.
+   */
+  async changeSettings(id: string, patch: unknown, opts: { keepPoem?: boolean } = {}): Promise<{ project: ProjectDto; redoFrom: StepName | null }> {
+    if (typeof patch !== "object" || patch === null || Array.isArray(patch)) throw new ValidationError("settings must be an object");
+    const project = await this.loadIdle(id);
+    const from = project.changeSettings(patch as Record<string, unknown>, opts);
+    if (from) {
+      const media = this.media(id);
+      if (from === "poem") {
+        // New words and scenes, same character: keep the character picture, repaint the scenes.
+        await wipeMediaFrom(media, "audio");
+        await wipePictures(media);
+      } else await wipeMediaFrom(media, from);
+      await this.projects.save(project);
+    }
+    return { project: ProjectMapper.toDto(project), redoFrom: from };
+  }
+
+  /** Move a video to another channel; it keeps everything it made, and its next runs use that channel's prompts. */
+  async moveToChannel(id: string, channel: string): Promise<ProjectDto> {
+    await this.assertChannel(channel);
+    const project = await this.loadIdle(id);
+    project.moveTo(channel);
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Delete a video: its database row, prompt log and every media file. */
+  async delete(id: string): Promise<void> {
+    await this.loadIdle(id);
+    await this.projects.delete(id);
+    await rm(this.pipeline.mediaDir(id), { recursive: true, force: true });
+    this.lastEvents.delete(id);
+  }
+
+  /** Every video of a channel (all of them, for moving or deleting a channel). */
+  async idsInChannel(channel: string | null): Promise<string[]> {
+    return (await this.projects.list({ channelId: channel, limit: 100_000 })).map((p) => p.id);
+  }
+
+  isRunning(id: string): boolean {
+    return this.jobs.has(id);
+  }
+
+  /** Show or hide the lyrics/caption subtitles; rebuilds only the final video if the clips are ready. */
+  async setSubtitles(id: string, on: unknown): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    project.setSubtitles(on as boolean);
+    await rm(this.media(id).final, { force: true });
+    await this.projects.save(project);
+    if (project.isStepDone("clips")) await this.start(id, { until: "final" });
+    return ProjectMapper.toDto(project);
+  }
+
   // ---------- Manual review ----------
 
   /** Approve the step under review and continue to the next one. */
@@ -163,24 +225,44 @@ export class ProjectService {
     return ProjectMapper.toDto(project);
   }
 
-  /** Save an edited poem. Scenes (and later steps) will be planned again from it; the character is kept. */
-  async editPoem(id: string, raw: unknown): Promise<ProjectDto> {
+  /**
+   * Save an edited poem. The character is kept. By default the scenes are planned again (new pictures);
+   * with `keepVisuals` the pictures and Veo videos stay, and only the audio, clip timing and final video are redone.
+   */
+  async editPoem(id: string, raw: unknown, opts: { keepVisuals?: boolean } = {}): Promise<ProjectDto> {
     const poem = parse(PoemSchema, raw, "poem");
     const project = await this.loadIdle(id);
-    project.editPoem(poem);
+    project.editPoem(poem, { keepVisuals: opts.keepVisuals === true });
     await wipeMediaFrom(this.media(id), "audio");
+    if (!opts.keepVisuals) await wipePictures(this.media(id));
     await this.projects.save(project);
     return ProjectMapper.toDto(project);
   }
 
-  /** Save edited scene texts / picture descriptions. Song, pictures and clips will be made again. */
+  /** Save edited scene words / picture descriptions. The audio and clips are redone; only scenes whose picture description changed get new pictures. */
   async editScenes(id: string, raw: unknown): Promise<ProjectDto> {
     const plan = parse(ScenePlanSchema, raw, "scenes");
     const project = await this.loadIdle(id);
+    const before = project.scenes?.scenes ?? [];
     project.editScenes(plan);
-    await wipeMediaFrom(this.media(id), "audio");
+    const media = this.media(id);
+    await wipeMediaFrom(media, "audio");
+    for (const s of project.scenes!.scenes) if (s.visualPrompt !== before[s.index]?.visualPrompt) await wipeScene(media, s.index);
     await this.projects.save(project);
     return ProjectMapper.toDto(project);
+  }
+
+  /**
+   * Write one stanza (scene) again without touching the rest of the poem. `draft` is the poem as it is in the
+   * editor (may have unsaved edits). Returns the new lines only; saving them is the normal "Save changes".
+   */
+  async rewriteStanza(id: string, index: number, opts: { draft?: unknown; hint?: string; provider?: string } = {}): Promise<{ index: number; lines: string[] }> {
+    const project = await this.loadIdle(id);
+    const poem = opts.draft === undefined ? project.poem : parse(PoemSchema, opts.draft, "poem");
+    if (!poem) throw new ConflictError("Write the poem first");
+    if (!Number.isInteger(index) || index < 0 || index >= poem.stanzas.length) throw new ValidationError(`No stanza ${index + 1}`);
+    const provider = this.providers(opts.provider ?? project.provider);
+    return { index, lines: await this.pipeline.rewriteStanza(project, poem, index, provider, opts.hint) };
   }
 
   /** Save an edited character and redraw its picture, then stop so it can be checked. */
@@ -218,11 +300,10 @@ export class ProjectService {
   }
 
   /** Throw away a step's output and generate it again (only that step; later steps must be made again). */
-  async regenerate(id: string, step: string, opts: { provider?: string } = {}): Promise<void> {
+  async regenerate(id: string, step: string, opts: { provider?: string; keepVisuals?: boolean } = {}): Promise<void> {
     const name = this.step(step);
     const project = await this.loadIdle(id);
-    project.regenerate(name);
-    await wipeMediaFrom(this.media(id), name);
+    await this.makeFresh(project, name, opts.keepVisuals === true);
     await this.projects.save(project);
     await this.start(id, { provider: opts.provider, until: name });
   }
@@ -231,19 +312,23 @@ export class ProjectService {
    * Generate one step on its own (each step has its own page in the UI). The steps before it must be done;
    * asking for the next step counts as approving them. A step that's already done is made again from scratch.
    */
-  async generateStep(id: string, step: string, opts: { provider?: string } = {}): Promise<void> {
+  async generateStep(id: string, step: string, opts: { provider?: string; keepVisuals?: boolean } = {}): Promise<void> {
     const name = this.step(step);
     const project = await this.loadIdle(id);
     const missing = STEP_NAMES.slice(0, STEP_NAMES.indexOf(name)).find((s) => !project.isStepDone(s));
     if (missing) throw new ConflictError(`Make the ${missing} first`);
     if (opts.provider) this.providers(opts.provider); // fail fast (e.g. missing API key) before wiping anything
     for (const s of STEP_NAMES.slice(0, STEP_NAMES.indexOf(name))) project.approve(s);
-    if (project.isStepDone(name)) {
-      project.regenerate(name);
-      await wipeMediaFrom(this.media(id), name);
-    }
+    if (project.isStepDone(name)) await this.makeFresh(project, name, opts.keepVisuals === true);
     await this.projects.save(project);
     await this.start(id, { provider: opts.provider, until: name });
+  }
+
+  /** Forget a step's output and delete its media. A new poem with `keepVisuals` keeps the pictures and videos. */
+  private async makeFresh(project: Project, step: StepName, keepVisuals: boolean): Promise<void> {
+    const keep = keepVisuals && step === "poem";
+    project.regenerate(step, { keepVisuals: keep });
+    await wipeMediaFrom(this.media(project.id), keep ? "audio" : step);
   }
 
   /** Make one scene's picture and clip again, keeping the others. */
@@ -313,7 +398,7 @@ export class ProjectService {
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 /** Decode a base64 / data-URL picture and normalise it to PNG (also rejects anything that isn't an image). */
-async function toPng(image: unknown): Promise<Buffer> {
+export async function toPng(image: unknown): Promise<Buffer> {
   if (typeof image !== "string" || !image) throw new ValidationError("Choose a picture to upload");
   const m = /^data:(image\/(png|jpeg|webp));base64,(.*)$/s.exec(image);
   if (image.startsWith("data:") && !m) throw new ValidationError("Upload a PNG, JPEG or WebP picture");

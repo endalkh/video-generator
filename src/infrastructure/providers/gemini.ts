@@ -4,13 +4,15 @@ import path from "node:path";
 import { GoogleGenAI, VideoGenerationReferenceType } from "@google/genai";
 import { z } from "zod";
 import { pcmToWav, GEMINI_TTS_FORMAT } from "../media/wav.js";
-import { CharacterSchema, PoemSchema, ScenePlanSchema } from "../../domain/project/project.model.js";
+import { ChannelDetailsSchema } from "../../domain/channel/channel.model.js";
+import { PlanTextSchema } from "../../domain/plan/plan.model.js";
+import { CharacterSchema, PoemSchema, ScenePlanSchema, StanzaSchema } from "../../domain/project/project.model.js";
 import { log } from "../../util/log.js";
 import { isTransientError, sleep, withRetry } from "../../util/retry.js";
 import { type AvailableModel, type GenContext, type Provider, type SongResult, type TextKind, type TextOutputs } from "../../domain/ports/generator.port.js";
 
 
-const SCHEMAS: { [K in TextKind]: z.ZodType<TextOutputs[K]> } = { poem: PoemSchema, scenes: ScenePlanSchema, character: CharacterSchema };
+const SCHEMAS: { [K in TextKind]: z.ZodType<TextOutputs[K]> } = { poem: PoemSchema, scenes: ScenePlanSchema, character: CharacterSchema, stanza: StanzaSchema, channel: ChannelDetailsSchema, plan: PlanTextSchema };
 
 type InlinePart = { inlineData?: { data?: string; mimeType?: string }; text?: string };
 

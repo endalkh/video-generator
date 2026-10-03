@@ -12,16 +12,20 @@
   <div class="md:grid md:grid-cols-[272px_1fr]">
     <!-- Sidebar: brand + sections + contextual list. Sticky, full height, scrolls on its own. -->
     <aside class="flex flex-col border-b border-orange-100 bg-white md:sticky md:top-0 md:h-screen md:border-r md:border-b-0" aria-label="Sidebar">
-      <div class="flex items-center gap-2.5 px-5 pt-5 pb-4">
-        <span aria-hidden="true" class="grid size-9 place-items-center rounded-xl bg-coral/15 text-xl">🎈</span>
-        <div class="leading-tight">
-          <p class="font-bold">Kids Animation</p>
-          <p class="text-xs text-stone-500">Studio</p>
+      <div id="channel-switcher" class="px-4 pt-4 pb-3">
+        <div class="flex items-center gap-2.5 px-1">
+          <span aria-hidden="true" class="grid size-9 place-items-center rounded-xl bg-coral/15 text-xl">🎈</span>
+          <div class="leading-tight">
+            <p class="font-bold">Kids Animation</p>
+            <p class="text-xs text-stone-500">Studio</p>
+          </div>
         </div>
       </div>
       <nav aria-label="Sections" class="px-3">
         <ul class="space-y-0.5">
           <li><a href="#/new" data-nav="videos" class="nav-link"><span aria-hidden="true">🎬</span> Videos</a></li>
+          <li><a href="#/channel" data-nav="channel" class="nav-link"><span aria-hidden="true">📺</span> Channel &amp; branding</a></li>
+          <li><a href="#/plan" data-nav="plan" class="nav-link"><span aria-hidden="true">🗓️</span> Ideas &amp; schedule</a></li>
           <li><a href="#/prompts" data-nav="prompts" class="nav-link"><span aria-hidden="true">📝</span> Prompts</a></li>
           <li><a href="#/models" data-nav="models" class="nav-link"><span aria-hidden="true">🧠</span> Models</a></li>
           <li><a href="https://aistudio.google.com/billing" target="_blank" rel="noopener noreferrer" class="nav-link" title="Gemini API billing, credits and payments in Google AI Studio (opens in a new tab)"><span aria-hidden="true">💳</span> Billing <span class="ml-auto text-xs text-stone-400" aria-hidden="true">↗</span><span class="sr-only">(opens in a new tab)</span></a></li>

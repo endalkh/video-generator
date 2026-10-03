@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AspectRatio, Scene } from "../../domain/project/project.model.js";
 import { log } from "../../util/log.js";
@@ -46,9 +46,39 @@ export async function imageToPng(input: string, out: string): Promise<void> {
   await runFfmpeg(["-i", input, "-frames:v", "1", "-vf", "scale=w=1024:h=1024:force_original_aspect_ratio=decrease", "-f", "image2", "-c:v", "png", out]);
 }
 
+/**
+ * Scale and centre-crop a picture to exactly `width`×`height` (e.g. YouTube's 2560×1440 banner).
+ * JPEG output steps the quality down until the file fits `maxBytes`; returns the file size.
+ */
+export async function fitImage(opts: { input: string; out: string; width: number; height: number; maxBytes?: number }): Promise<number> {
+  const { width: w, height: h } = opts;
+  const vf = `scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${w}:${h},setsar=1`;
+  const jpeg = /\.jpe?g$/i.test(opts.out);
+  for (const q of jpeg ? [2, 4, 6, 9, 13] : [0]) {
+    await runFfmpeg(["-i", opts.input, "-frames:v", "1", "-vf", jpeg ? `${vf},format=yuvj444p` : vf, "-f", "image2", ...(jpeg ? ["-c:v", "mjpeg", "-q:v", String(q)] : ["-c:v", "png"]), opts.out]);
+    const size = (await stat(opts.out)).size;
+    if (!opts.maxBytes || size <= opts.maxBytes) return size;
+    if (!jpeg) break;
+  }
+  throw new Error(`${path.basename(opts.out)} is larger than ${Math.round(opts.maxBytes! / 1024)} kB`);
+}
+
+/** Join audio files (any format/rate) into one WAV, in order. */
+export async function concatAudio(inputs: string[], out: string): Promise<void> {
+  const norm = inputs.map((_, i) => `[${i}:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[a${i}]`).join(";");
+  const join = `${inputs.map((_, i) => `[a${i}]`).join("")}concat=n=${inputs.length}:v=0:a=1[a]`;
+  await runFfmpeg([...inputs.flatMap((f) => ["-i", f]), "-filter_complex", `${norm};${join}`, "-map", "[a]", "-c:a", "pcm_s16le", "-f", "wav", out]);
+}
+
 export async function assertFfmpegAvailable(): Promise<void> {
   await run(FFMPEG, ["-version"]);
   await run(FFPROBE, ["-version"]);
+}
+
+/** Stream types in a media file, e.g. ["video", "audio", "subtitle"]. */
+export async function probeStreams(file: string): Promise<string[]> {
+  const out = await run(FFPROBE, ["-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", file]);
+  return out.split("\n").map((l) => l.trim()).filter(Boolean);
 }
 
 export async function probeDuration(file: string): Promise<number> {

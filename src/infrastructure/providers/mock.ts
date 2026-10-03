@@ -13,12 +13,13 @@ const MOTIONS: Scene["motion"][] = ["zoom-in", "pan-right", "zoom-out", "pan-lef
 /** Offline provider: deterministic text, tones and placeholder art. Tests the whole pipeline without API keys. */
 export class MockProvider implements Provider {
   readonly name = "mock";
-  readonly songLengthSec: number;
+  /** Fixed song length like Lyria 3 Clip; `null` = follow the requested length like Lyria 3 Pro / 3.5. */
+  readonly songLengthSec: number | undefined;
   /** Every prompt received (with the model it was sent to), for tests. */
   readonly prompts: { kind: string; prompt: string; model?: string }[] = [];
 
-  constructor(private readonly opts: { audioSecondsPerScene?: number; songLengthSec?: number; imageSize?: [number, number] } = {}) {
-    this.songLengthSec = opts.songLengthSec ?? 8;
+  constructor(private readonly opts: { audioSecondsPerScene?: number; songLengthSec?: number | null; imageSize?: [number, number] } = {}) {
+    this.songLengthSec = opts.songLengthSec === null ? undefined : (opts.songLengthSec ?? 8);
   }
 
   async listModels(): Promise<AvailableModel[]> {
@@ -47,6 +48,33 @@ export class MockProvider implements Provider {
         })),
       }),
       character: () => ({ name: input.language === "am" ? "ቡቡ" : "Bubu", description: input.characterHint ?? "a round, friendly pink creature with big dark eyes" }),
+      stanza: () => {
+        const n = (ctx.stanzaIndex ?? 0) + 1;
+        return { lines: input.language === "am" ? [`አዲስ ክፍል ${n}`, "በደስታ እንዘምር"] : [`A brand new verse ${n}`, "We sing it all day long"] };
+      },
+      channel: () => {
+        const name = ctx.channelName ?? (input.language === "am" ? "ደስተኛ ልጆች" : "Happy Kids TV");
+        return {
+          name,
+          handle: "happykidstv",
+          tagline: input.language === "am" ? "እንማር እንጫወት" : "Learn and play every day",
+          description: `${name}: songs and stories about ${input.topic}.`,
+          keywords: ["kids songs", "nursery rhymes", input.topic],
+        };
+      },
+      plan: () => ({
+        theme: "Good habits",
+        ideas: (ctx.planSlots ?? []).map((s, i) => ({
+          title: s.language === "am" ? `ጥሩ ልማድ ${i + 1}` : `Good habit ${i + 1}`,
+          topic: s.language === "am" ? `ጥሩ ልማድ ቁጥር ${i + 1}` : `Good habit number ${i + 1} for little kids`,
+          lesson: "Be kind",
+          audioMode: i % 3 === 2 ? ("narration" as const) : ("song" as const),
+          sceneCount: 4,
+          thumbnailTitle: `Habit ${i + 1}!`,
+          videoDescription: `Video ${i + 1} on ${s.date}.`,
+          tags: ["kids songs", "good habits"],
+        })),
+      }),
     };
     return out[kind]();
   }
