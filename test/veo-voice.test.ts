@@ -75,3 +75,31 @@ describe("fitting an animation to its scene", () => {
     }
   }, 60_000);
 });
+
+describe("uploading a scene's video by hand", () => {
+  it("uses the file instead of generating it, and re-makes only the clips", async () => {
+    const { mock, p } = await run({ videoMode: "veo" });
+    expect(p.status).toBe("done");
+    const dir = await mkdtemp(path.join(os.tmpdir(), "up-"));
+    try {
+      await runFfmpeg(["-f", "lavfi", "-i", "testsrc=s=320x180:d=3:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(dir, "mine.mp4")]);
+      const { readFile } = await import("node:fs/promises");
+      const dataUrl = `data:video/mp4;base64,${(await readFile(path.join(dir, "mine.mp4"))).toString("base64")}`;
+      const before = mock.prompts.filter((x) => x.kind === "video").length;
+
+      const up = await c.projectService.uploadSceneVideo(p.id, 1, { video: dataUrl });
+      expect(up.completed).not.toContain("clips");
+      expect(await probeDuration(media(p.id).sceneVideo(1))).toBeCloseTo(3, 0);
+      expect(await fileExists(media(p.id).sceneClip(1))).toBe(false);
+
+      await c.projectService.start(p.id);
+      await c.projectService.idle();
+      expect((await c.projectService.get(p.id)).status).toBe("done");
+      expect(mock.prompts.filter((x) => x.kind === "video").length).toBe(before); // nothing re-generated
+      await expect(c.projectService.uploadSceneVideo(p.id, 5, { video: dataUrl })).rejects.toThrow(/No scene 6/);
+      await expect(c.projectService.uploadSceneVideo(p.id, 0, { video: "data:video/mp4;base64,AAAA" })).rejects.toThrow(/empty/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -71,3 +71,18 @@ describe("changing settings after the video was started", () => {
     await c.projectService.idle();
   }, 60_000);
 });
+
+describe("video quality", () => {
+  it("defaults from VIDEO_RESOLUTION, and changing it only re-renders the clips", async () => {
+    c = await makeTestContainer();
+    const p = await c.projectService.create({ reviewMode: "auto", topic: "Sharing toys", sceneCount: 2 }, "mock");
+    expect(p.input.resolution).toBe("720p"); // vitest.config sets VIDEO_RESOLUTION=720p
+    const done = await runToEnd(p.id);
+    expect(done.status).toBe("done");
+    const r = await c.projectService.changeSettings(p.id, { resolution: "4k" });
+    expect(r.redoFrom).toBe("clips");
+    expect(r.project.input.resolution).toBe("4k");
+    expect(r.project.poem).toEqual(done.poem);
+    await expect(c.projectService.changeSettings(p.id, { resolution: "8k" })).rejects.toThrow(ValidationError);
+  });
+});

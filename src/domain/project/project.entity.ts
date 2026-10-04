@@ -43,7 +43,7 @@ export interface ProjectProps {
 const stepIndex = (s: StepName) => STEP_NAMES.indexOf(s);
 
 /** Settings that can be changed after a video was started (Video settings panel). */
-export const SETTING_KEYS = ["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio"] as const;
+export const SETTING_KEYS = ["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio", "resolution"] as const;
 
 /**
  * Aggregate root for a video project. Owns the pipeline progress rules:
@@ -298,7 +298,7 @@ export class Project {
    * - topic, language, song/story, length, scenes, age → the poem (the character is kept);
    *   with `keepPoem`, a new length with the same number of scenes keeps the poem and pictures and only redoes the audio
    * - art style, character → the character and what comes after it
-   * - voice → the audio · shape → the pictures and clips
+   * - voice → the audio · shape → the pictures and clips · quality → the clips
    * `sceneCount: null` means "pick it from the length"; `lengthSeconds: null` removes the target length.
    */
   changeSettings(patch: Record<string, unknown>, opts: { keepPoem?: boolean } = {}): StepName | null {
@@ -321,7 +321,7 @@ export class Project {
       from = opts.keepPoem && onlyLength && this.props.poem && this.isStepDone("scenes") ? "audio" : "poem";
     } else if (has(["style", "characterHint"])) from = "character";
     else if (has(["voice", "singer"])) from = "audio";
-    else from = "clips"; // aspectRatio
+    else from = "clips"; // aspectRatio, resolution
 
     this.props.input = input;
     if (from === "poem") {

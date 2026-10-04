@@ -263,6 +263,8 @@ const TTS_VOICES = {
 };
 const VOICE_OPTIONS = [["", "Matching the singer (recommended)"], ...Object.entries(TTS_VOICES).map(([v, d]) => [v, `${v} — ${d}`])];
 const AUDIO_LABEL = { song: "song", music_voice: "rhyme over music", narration: "narrated story", character: "the character speaks" };
+const QUALITY_OPTIONS = [["4k", "4K — 3840×2160, sharpest (slower; Veo 4K costs more)"], ["1080p", "Full HD — 1920×1080"], ["720p", "HD — 1280×720 (fastest)"]];
+const QUALITY_HINT = "Veo 3.1 makes real 4K clips; Veo Lite and Seedance make 1080p, scaled up. Thumbnails stay 1280×720 (YouTube's size).";
 const SINGER_HINT = "Songs: the singer is described to the music AI (it has no voice setting, so it's a strong hint). Rhyme over music and narration: also picks a matching voice.";
 
 // Same rules as the server (src/domain/project/project.model.ts): ½–10 minutes, one scene per ~10 s (song) / ~12 s (story).
@@ -297,6 +299,7 @@ async function showNewVideo() {
         "From ½ to 10 minutes."),
       field("f-age", "Age range", h("input", { id: "f-age", name: "ageRange", value: d.ageRange ?? "3-6", class: "field" })),
       field("f-aspect", "Shape", select("f-aspect", "aspectRatio", [["16:9", "Landscape 16:9 (YouTube)"], ["9:16", "Portrait 9:16 (Shorts)"]])),
+      field("f-quality", "Quality", select("f-quality", "resolution", QUALITY_OPTIONS, config.videoResolution ?? "4k"), QUALITY_HINT),
       h("div", { class: "flex items-start gap-2 self-end pb-2" },
         h("input", { id: "f-subs", name: "subtitles", type: "checkbox", value: "on", class: "mt-1 size-4 accent-coral" }),
         h("label", { for: "f-subs", class: "text-sm" }, h("span", { class: "font-semibold", text: "Show lyrics on the video" }),
@@ -475,7 +478,7 @@ async function renderProject(id, keepStatus = false) {
 
   const header = h("section", { class: "card" },
     h("div", { class: "flex flex-wrap items-center gap-3" }, h("h2", { class: "text-2xl font-bold", lang, text: p.poem?.title || p.topic }), badge(p.running ? "running" : p.status)),
-    h("p", { class: "mt-1 text-sm text-stone-500", text: [manual ? "manual review" : "auto", lang === "am" ? "አማርኛ" : "English", AUDIO_LABEL[p.input.audioMode] ?? p.input.audioMode, p.song?.source === "upload" ? "your recording" : null, p.input.lengthSeconds ? `${formatLength(p.input.lengthSeconds)} target` : null, `${p.input.sceneCount} scenes`, p.input.videoMode === "veo" ? "Veo video" : "animated pictures", p.input.aspectRatio, `provider: ${p.provider}`].filter(Boolean).join(" · ") }),
+    h("p", { class: "mt-1 text-sm text-stone-500", text: [manual ? "manual review" : "auto", lang === "am" ? "አማርኛ" : "English", AUDIO_LABEL[p.input.audioMode] ?? p.input.audioMode, p.song?.source === "upload" ? "your recording" : null, p.input.lengthSeconds ? `${formatLength(p.input.lengthSeconds)} target` : null, `${p.input.sceneCount} scenes`, p.input.videoMode === "veo" ? "Veo video" : "animated pictures", p.input.aspectRatio, p.input.resolution ?? null, `provider: ${p.provider}`].filter(Boolean).join(" · ") }),
     controls,
     p.running ? null : settingsPanel(p),
     p.running ? null : videoAdmin(p),
@@ -659,7 +662,8 @@ function stepPage(p, step, keepVideo, videoKey) {
             const cost = p.input.videoMode === "veo" ? " This makes 1 new Veo clip (paid)." : "";
             if (!confirm(`Remake scene ${sc.index + 1} (new picture and clip)?${cost}`)) return SKIP;
             await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/redo`);
-          }) }, "↻ Remake") : null));
+          }) }, "↻ Remake") : null,
+          idle && p.input.videoMode === "veo" ? sceneVideoUpload(p, sc, act) : null));
     }));
     if (idle && p.completed.includes("audio")) extra = [visualsSwitch(p, act)];
   } else if (step === "final" && p.media.final) {
@@ -835,6 +839,7 @@ function settingsPanel(p) {
     sceneCount: h("input", { id: "ps-sceneCount", type: "number", min: 2, max: 40, class: "field", value: inp.sceneCount, placeholder: "Auto" }),
     ageRange: h("input", { id: "ps-ageRange", class: "field", value: inp.ageRange }),
     aspectRatio: sel("aspectRatio", [["16:9", "Landscape 16:9 (YouTube)"], ["9:16", "Portrait 9:16 (Shorts)"]], inp.aspectRatio),
+    resolution: sel("resolution", QUALITY_OPTIONS, inp.resolution ?? "4k"),
     characterHint: h("input", { id: "ps-characterHint", class: "field", value: inp.characterHint ?? "", placeholder: "a curious little goat named Abeba" }),
     style: h("input", { id: "ps-style", class: "field", value: inp.style }),
   };
@@ -849,7 +854,7 @@ function settingsPanel(p) {
     const minutes = Number(els.length.value);
     return {
       topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, ageRange: els.ageRange.value.trim() || "3-6",
-      aspectRatio: els.aspectRatio.value, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
+      aspectRatio: els.aspectRatio.value, resolution: els.resolution.value, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
       singer: els.singer.value, voice: els.voice.value || null,
       lengthSeconds: minutes ? lengthSecondsOf(minutes) : null,
       sceneCount: els.sceneCount.value ? Number(els.sceneCount.value) : null,
@@ -921,6 +926,7 @@ function settingsPanel(p) {
       f("topic", "What is the video about?", els.topic),
       h("div", { class: "grid gap-4 sm:grid-cols-3" },
         f("language", "Language", els.language), f("audioMode", "Audio", els.audioMode), f("aspectRatio", "Shape", els.aspectRatio)),
+      f("resolution", "Quality", els.resolution, QUALITY_HINT),
       h("div", { class: "grid gap-4 sm:grid-cols-2" }, f("singer", "Singer / voice", els.singer, SINGER_HINT), f("voice", "Exact voice (rhyme over music, narration)", els.voice)),
       h("div", { class: "grid gap-4 sm:grid-cols-3" },
         f("length", "Video length (minutes)", els.length, "½ to 10 minutes."),
@@ -1057,6 +1063,28 @@ function audioUpload(p, act, done) {
     h("p", { id: "au-help", class: "mt-2 text-sm text-stone-600", text: `Sing or read the poem yourself (or with your child), record it on your phone, and upload it here: MP3, M4A, WAV, OGG or WebM, up to ${MAX_AUDIO_MB} MB. Sing the stanzas in order; each scene gets a share of the time that matches its words. The pictures are kept, the clips are timed to your recording.` }),
     h("div", { class: "mt-3 space-y-2" }, h("label", { for: "au-file", class: "label", text: "Recording" }), file, preview),
     h("div", { class: "mt-3 flex flex-wrap items-center gap-3" }, useIt, msg));
+}
+
+const MAX_VIDEO_MB = 200;
+
+/**
+ * Use a video file you have (e.g. downloaded from inference.sh when the app couldn't fetch it) as one scene's
+ * animation, instead of paying to generate it again. Only the clips and final video are re-made.
+ */
+function sceneVideoUpload(p, sc, act) {
+  const n = sc.index + 1;
+  const file = h("input", { type: "file", accept: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm", class: "sr-only", "aria-label": `Video file for scene ${n}`, tabindex: -1 });
+  const btn = h("button", { type: "button", class: "btn-soft shrink-0 px-3 py-1 text-xs", title: "Use a video file you already have (MP4, MOV or WebM) — nothing is generated or paid for", onclick: () => file.click() }, "📤 Upload video");
+  file.addEventListener("change", act(async () => {
+    const f = file.files[0];
+    file.value = "";
+    if (!f) return SKIP;
+    if (f.size > MAX_VIDEO_MB * 1024 * 1024) { alert(`That video is too big (max ${MAX_VIDEO_MB} MB).`); return SKIP; }
+    const had = p.media.scenes.find((x) => x.index === sc.index)?.video;
+    if (had && !confirm(`Replace scene ${n}'s video with "${f.name}"? The clips and final video are made again.`)) return SKIP;
+    await post(`/api/projects/${enc(p.id)}/scenes/${n}/video`, { video: await fileToDataUrl(f) }, "PUT");
+  }, false));
+  return h("span", { class: "contents" }, btn, file);
 }
 
 /** Upload your own picture as the main character (instead of, or replacing, the designed one). */

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AspectRatio, Scene } from "../../domain/project/project.model.js";
+import { VIDEO_RESOLUTIONS, videoResolution, type AspectRatio, type Scene, type VideoResolution } from "../../domain/project/project.model.js";
 import { log } from "../../util/log.js";
 
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
@@ -13,8 +13,11 @@ export interface VideoFormat {
   fps: number;
 }
 
-export function formatFor(aspect: AspectRatio): VideoFormat {
-  return aspect === "9:16" ? { width: 720, height: 1280, fps: 25 } : { width: 1280, height: 720, fps: 25 };
+/** Final video size: 4k = 3840×2160, 1080p = 1920×1080, 720p = 1280×720 (swapped for 9:16). */
+export function formatFor(aspect: AspectRatio, resolution: VideoResolution = videoResolution()): VideoFormat {
+  const short = VIDEO_RESOLUTIONS[resolution];
+  const long = Math.round((short * 16) / 9);
+  return aspect === "9:16" ? { width: short, height: long, fps: 25 } : { width: long, height: short, fps: 25 };
 }
 
 function run(bin: string, args: string[]): Promise<string> {
@@ -118,7 +121,7 @@ export async function probeDuration(file: string): Promise<number> {
 /** Pause after each scene's audio so lines don't run into each other. */
 export const SCENE_TAIL_SEC = 0.5;
 
-const ENCODE_ARGS = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"];
+const ENCODE_ARGS = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"];
 
 /** Ken Burns style zoompan expressions for a clip of N frames. */
 export function zoompanFilter(motion: Scene["motion"], frames: number, fmt: VideoFormat): string {
@@ -131,8 +134,9 @@ export function zoompanFilter(motion: Scene["motion"], frames: number, fmt: Vide
     "pan-right": `z='1.15':x='(iw-iw/zoom)*on/${N}':y='ih/2-(ih/zoom/2)'`,
     static: `z='1':${center}`,
   };
-  // Upscale first so the zoom stays smooth (zoompan rounds to integer pixels).
-  const up = `scale=${fmt.width * 2}:${fmt.height * 2}:force_original_aspect_ratio=increase,crop=${fmt.width * 2}:${fmt.height * 2}`;
+  // Upscale first so the zoom stays smooth (zoompan rounds to integer pixels); at 4K the pixels are already small enough.
+  const k = fmt.width * fmt.height > 1920 * 1080 ? 1 : 2;
+  const up = `scale=${fmt.width * k}:${fmt.height * k}:force_original_aspect_ratio=increase:flags=lanczos,crop=${fmt.width * k}:${fmt.height * k}`;
   return `${up},zoompan=${exprs[motion]}:d=${frames}:s=${fmt.width}x${fmt.height}:fps=${fmt.fps},setsar=1,format=yuv420p`;
 }
 
@@ -173,7 +177,7 @@ export async function stillToClip(opts: ClipTiming & { image: string; out: strin
 /** Fit a generated video (e.g. Veo) to the target format and scene length, looping if it's too short. */
 export async function videoToClip(opts: ClipTiming & { video: string; out: string; fmt: VideoFormat; /** Keep the video's own sound (a speaking character) at its natural length. */ keepAudio?: boolean }): Promise<number> {
   const { width: w, height: h, fps } = opts.fmt;
-  const fit = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},fps=${fps},setsar=1,format=yuv420p`;
+  const fit = `scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${w}:${h},fps=${fps},setsar=1,format=yuv420p`;
   if (opts.keepAudio) {
     const dur = await probeDuration(opts.video);
     const hasAudio = (await probeStreams(opts.video)).includes("audio");

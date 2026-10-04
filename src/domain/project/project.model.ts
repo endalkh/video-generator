@@ -21,6 +21,21 @@ export type ReviewMode = z.infer<typeof ReviewModeSchema>;
 export const AspectRatioSchema = z.enum(["16:9", "9:16"]);
 export type AspectRatio = z.infer<typeof AspectRatioSchema>;
 
+/** Output resolution of the final video (short side in pixels). Chosen per video ("Quality"); VIDEO_RESOLUTION sets the default. */
+export const VIDEO_RESOLUTIONS = { "720p": 720, "1080p": 1080, "4k": 2160 } as const;
+export const VideoResolutionSchema = z.enum(["720p", "1080p", "4k"]);
+export type VideoResolution = z.infer<typeof VideoResolutionSchema>;
+
+export function videoResolution(env = process.env.VIDEO_RESOLUTION): VideoResolution {
+  const v = env?.trim().toLowerCase();
+  if (!v) return "4k";
+  if (v in VIDEO_RESOLUTIONS) return v as VideoResolution;
+  throw new Error(`VIDEO_RESOLUTION must be one of ${Object.keys(VIDEO_RESOLUTIONS).join(", ")} (got "${env}")`);
+}
+
+/** The lower of two resolutions (e.g. what a model can make vs. what the video needs). */
+export const minResolution = (a: VideoResolution, b: VideoResolution): VideoResolution => (VIDEO_RESOLUTIONS[a] <= VIDEO_RESOLUTIONS[b] ? a : b);
+
 /** What the user asks for (from the UI form, --input JSON, or CLI flags). */
 const tidy = (v: string) => v.replace(/\s+/g, " ").trim();
 
@@ -70,6 +85,8 @@ const ProjectInputObject = z.object({
   /** Target length of the whole video in seconds (song or narration). Songs over ~3 minutes are made in parts. */
   lengthSeconds: z.number().int().min(10).max(MAX_VIDEO_SECONDS).optional(),
   aspectRatio: AspectRatioSchema.default("16:9"),
+  /** Final video quality. Veo 3.1 makes 4K clips; Veo Lite and Seedance make 1080p, scaled up. */
+  resolution: VideoResolutionSchema.default(() => videoResolution()),
   /** Show the lyrics / narration as subtitles in the final video. Off unless asked for. */
   subtitles: z.boolean().default(false),
   characterHint: z.string().transform(tidy).optional(),

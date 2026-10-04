@@ -267,9 +267,19 @@ The words of the video:
 
 "title" = a catchy YouTube title in {{language_name}}, at most 70 characters, with the main keyword near the start. Honest (no clickbait), no ALL CAPS, at most one emoji.
 "description" = in {{language_name}}: a warm first line (a hook with the main keyword); 2-3 short sentences for parents about what the child sees and learns; then the words of the video under a short heading (lyrics or story); then a friendly invitation to subscribe{{#if has_channel_name}} to {{channel_name}}{{/if}}; end with 3 hashtags. Under 1500 characters. No links.
-"tags" = 12-20 search tags in {{language_name}}{{#if am}} plus some in English{{/if}}, most important first, without #.
+"tags" = 12-20 search tags, most important first, without #.{{#if am}} Mix three kinds: Amharic in Ge'ez script (e.g. "የልጆች መዝሙር"); the same Amharic phrases written in English letters the way Ethiopians type them when searching (e.g. "ye lijoch mezmur", "Ye lijoch song", "konjo zefen"); and a few in English (e.g. "amharic kids songs").{{else}} In {{language_name}}.{{/if}}
 "thumbnailTitle" = 2-4 big, simple words for the thumbnail, in {{language_name}}.
 {{safety}}`,
+    previousTemplates: [`Write the YouTube upload text for a finished kids' video{{#if has_channel_name}} on the channel "{{channel_name}}" (YouTube handle: {{channel_handle}}){{/if}}.
+Working title: "{{title}}". Topic: {{topic}}. Audience: children aged {{age_range}} and their parents. Length: {{video_length}}.
+The words of the video:
+{{lyrics}}
+
+"title" = a catchy YouTube title in {{language_name}}, at most 70 characters, with the main keyword near the start. Honest (no clickbait), no ALL CAPS, at most one emoji.
+"description" = in {{language_name}}: a warm first line (a hook with the main keyword); 2-3 short sentences for parents about what the child sees and learns; then the words of the video under a short heading (lyrics or story); then a friendly invitation to subscribe{{#if has_channel_name}} to {{channel_name}}{{/if}}; end with 3 hashtags. Under 1500 characters. No links.
+"tags" = 12-20 search tags in {{language_name}}{{#if am}} plus some in English{{/if}}, most important first, without #.
+"thumbnailTitle" = 2-4 big, simple words for the thumbnail, in {{language_name}}.
+{{safety}}`],
   },
   {
     key: "video_thumbnail",
@@ -355,7 +365,7 @@ For each video:
 "sceneCount" = 3 to 6.
 "thumbnailTitle" = 2 to 4 big words for the thumbnail, in the slot's language.
 "videoDescription" = the YouTube description in the slot's language: 2 short sentences for parents about what the child learns, then an invitation to subscribe. No links.
-"tags" = 8 to 12 search tags (in the slot's language{{#if am}}, plus a few in English{{/if}}).
+"tags" = 8 to 12 search tags in the slot's language{{#if am}}; for Amharic slots, also the key Amharic phrases written in English letters the way Ethiopians search (e.g. "ye lijoch mezmur", "Ye lijoch song"), plus a few in English{{/if}}.
 
 Make the month varied and balanced: good habits, feelings and kindness, numbers and letters, colours and shapes, animals and nature, family and friends. Build a gentle weekly rhythm and repeat favourite formats, but never repeat a topic.
 {{#if am}}Where it fits naturally, include Ethiopian holidays and seasons that fall in this month (for example Enkutatash, Meskel, Genna, Timkat, Fasika, the rainy season or harvest), placed in the slots just before the date.{{/if}}
@@ -364,6 +374,30 @@ Topics already used in earlier months (do not repeat them): {{previous_topics}}
 "theme" = a short name for the month's overall theme.
 {{safety}}`,
     previousTemplates: [`Plan {{month_name}} for a YouTube kids' channel{{#if has_channel_name}} called "{{channel_name}}"{{/if}}.
+What the channel is about: {{topic}}
+Audience: children aged {{age_range}} and their parents.
+{{#if has_character_hint}}Every video stars the same main character: {{character_hint}}.{{/if}}
+Each video is an animated song or story made with an app: it writes a poem from the topic, plans scenes, draws the character and makes the song or a narration. Each video is {{video_length}} long, so pick topics with enough to say for that length.
+
+Plan exactly {{video_count}} videos, one per posting slot below, in the same order:
+{{schedule}}
+
+For each video:
+"title" = a short, catchy YouTube title in the slot's language (at most 60 characters).
+"topic" = exactly what to type in the app's "What is the video about?" field, in the slot's language: one or two sentences naming the subject, the one lesson, and where it happens (outdoors), e.g. "Washing hands with soap before eating, by the water jug in the garden".
+"lesson" = the one habit, skill or value it teaches, in English (for the planner).
+"audioMode" = "song" for catchy sing-along topics (most videos), "narration" for small stories.
+"sceneCount" = 3 to 6.
+"thumbnailTitle" = 2 to 4 big words for the thumbnail, in the slot's language.
+"videoDescription" = the YouTube description in the slot's language: 2 short sentences for parents about what the child learns, then an invitation to subscribe. No links.
+"tags" = 8 to 12 search tags (in the slot's language{{#if am}}, plus a few in English{{/if}}).
+
+Make the month varied and balanced: good habits, feelings and kindness, numbers and letters, colours and shapes, animals and nature, family and friends. Build a gentle weekly rhythm and repeat favourite formats, but never repeat a topic.
+{{#if am}}Where it fits naturally, include Ethiopian holidays and seasons that fall in this month (for example Enkutatash, Meskel, Genna, Timkat, Fasika, the rainy season or harvest), placed in the slots just before the date.{{/if}}
+Special requests for this month: {{notes}}
+Topics already used in earlier months (do not repeat them): {{previous_topics}}
+"theme" = a short name for the month's overall theme.
+{{safety}}`, `Plan {{month_name}} for a YouTube kids' channel{{#if has_channel_name}} called "{{channel_name}}"{{/if}}.
 What the channel is about: {{topic}}
 Audience: children aged {{age_range}} and their parents.
 {{#if has_character_hint}}Every video stars the same main character: {{character_hint}}.{{/if}}

@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROVIDER_NAMES, type Container } from "../container.js";
-import { STEP_NAMES } from "../domain/project/project.model.js";
+import { STEP_NAMES, videoResolution } from "../domain/project/project.model.js";
 import { log } from "../util/log.js";
 import { guardLocal, readJsonBody, Router, send, sendJson, toHttpError } from "./http.js";
 import { projectRoutes } from "./routes/projects.routes.js";
@@ -44,6 +44,7 @@ export function createApp(c: Container): http.Server {
   router.get("/api/config", () => ({
     providers: PROVIDER_NAMES,
     hasApiKey: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
+    videoResolution: videoResolution(),
     steps: STEP_NAMES,
   }));
   projectRoutes(router, c.projectService);

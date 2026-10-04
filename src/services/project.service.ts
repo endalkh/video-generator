@@ -9,9 +9,9 @@ import { Project } from "../domain/project/project.entity.js";
 import { ProjectMapper, type ProjectDto, type ProjectSummaryDto } from "../domain/project/project.mapper.js";
 import { CharacterSchema, MAX_VIDEO_SECONDS, PoemSchema, ProjectInputSchema, ScenePlanSchema, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
-import { audioToWav, imageToPng, probeDuration } from "../infrastructure/media/ffmpeg.js";
+import { audioToWav, imageToPng, probeDuration, probeStreams, runFfmpeg } from "../infrastructure/media/ffmpeg.js";
 import { songTimeline } from "../domain/ports/generator.port.js";
-import { fileExists, slugify, writeFileAtomic } from "../util/fs.js";
+import { ensureDir, fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
 import { mediaPaths, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
 
@@ -368,6 +368,43 @@ export class ProjectService {
     }
   }
 
+  /**
+   * Use your own video file as one scene's animation (e.g. a clip downloaded from inference.sh or Veo by hand),
+   * instead of generating it. Only the clips and final video are made again; nothing is paid for.
+   */
+  async uploadSceneVideo(id: string, index: number, raw: { video?: unknown }): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    const count = project.scenes?.scenes.length ?? 0;
+    if (!Number.isInteger(index) || index < 0 || index >= count) throw new ValidationError(`No scene ${index + 1}`);
+    if (project.input.videoMode !== "veo") throw new ConflictError("Switch Visuals to moving video clips first (Clips page)");
+    const m = typeof raw.video === "string" ? /^data:(video\/[\w.+-]+|application\/octet-stream)(?:;[^,]*)?;base64,(.*)$/s.exec(raw.video) : null;
+    if (!m) throw new ValidationError("Upload a video file (MP4, MOV or WebM)");
+    const bytes = Buffer.from(m[2]!, "base64");
+    if (bytes.length < 1000) throw new ValidationError("That video is empty");
+    if (bytes.length > MAX_VIDEO_UPLOAD_BYTES) throw new ValidationError(`The video is too big (max ${MAX_VIDEO_UPLOAD_BYTES / 1024 / 1024} MB)`);
+    const dir = await mkdtemp(path.join(os.tmpdir(), "kids-studio-video-"));
+    try {
+      const tmp = path.join(dir, "in");
+      await writeFile(tmp, bytes);
+      const streams = await probeStreams(tmp).catch(() => [] as string[]);
+      if (!streams.includes("video")) throw new ValidationError("Couldn't read that video; upload an MP4, MOV or WebM file");
+      // Store as MP4 (the clips step reads video.mp4); MP4s are kept as they are.
+      const out = path.join(dir, "video.mp4");
+      if (m[1] === "video/mp4") await writeFile(out, bytes);
+      else await runFfmpeg(["-i", tmp, "-c:v", "libx264", "-crf", "16", "-preset", "medium", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out]);
+      if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is running; stop it first`);
+      const media = this.media(id);
+      await ensureDir(media.sceneDir(index));
+      await writeFileAtomic(media.sceneVideo(index), await readFile(out));
+      await Promise.all([media.sceneVideoTask(index), media.sceneClip(index), media.final, media.srt].map((f) => rm(f, { force: true })));
+      project.redoFrom("clips");
+      await this.projects.save(project);
+      return ProjectMapper.toDto(project);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
   /** Throw away a step's output and generate it again (only that step; later steps must be made again). */
   async regenerate(id: string, step: string, opts: { provider?: string; keepVisuals?: boolean } = {}): Promise<void> {
     const name = this.step(step);
@@ -466,6 +503,8 @@ export class ProjectService {
 
 
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+/** A scene's video clip uploaded by hand (e.g. downloaded from inference.sh when the app couldn't fetch it). */
+export const MAX_VIDEO_UPLOAD_BYTES = 200 * 1024 * 1024;
 export const MAX_AUDIO_UPLOAD_BYTES = 30 * 1024 * 1024;
 
 /** Decode a base64 / data-URL picture and normalise it to PNG (also rejects anything that isn't an image). */

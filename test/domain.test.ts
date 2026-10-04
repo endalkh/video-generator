@@ -140,6 +140,23 @@ describe("ModelSetting entity", () => {
     expect(() => s.change("veo-3.1-fast-generate-preview")).toThrow(/needs a text model/);
     expect(() => s.change("bad id!")).toThrow(ValidationError);
     expect(() => ModelSetting.default("nope")).toThrow(/Unknown model task/);
+    const v = ModelSetting.default("scene_video");
+    v.change("inference.sh/bytedance/seedance-2-5");
+    expect(v.model).toBe("inference.sh/bytedance/seedance-2-5");
+    expect(() => s.change("inference.sh/bytedance/seedance-2-5")).toThrow(/needs a text model/);
+    expect(() => v.change("other.host/bytedance/seedance-2-5")).toThrow(ValidationError);
+    expect([capabilityOf("inference.sh/bytedance/seedance-2-5"), capabilityOf("inference.sh/google/veo-3-1")]).toEqual(["video", undefined]);
     expect([capabilityOf("lyria-3.5"), capabilityOf("gemini-3.8-flash-tts"), capabilityOf("gemini-3-pro-image"), capabilityOf("text-embedding-004")]).toEqual(["music", "tts", "image", undefined]);
+  });
+});
+
+describe("YouTube tags prompt", () => {
+  it("asks for Amharic in English letters (e.g. 'Ye lijoch song') only on Amharic videos", () => {
+    const def = promptDefinition("video_publish");
+    const tagsLine = (am: boolean) => def.template.split("\n").find((l) => l.startsWith('"tags"'))!.replace(/\{\{#if am\}\}(.*?)\{\{else\}\}(.*?)\{\{\/if\}\}/, (_m, yes: string, no: string) => (am ? yes : no));
+    expect(tagsLine(true)).toMatch(/English letters.*Ye lijoch song/);
+    expect(tagsLine(false)).not.toMatch(/lijoch/);
+    expect(def.previousTemplates?.some((t) => t.includes("plus some in English"))).toBe(true);
+    expect(promptDefinition("content_plan").template).toMatch(/English letters.*ye lijoch mezmur/);
   });
 });

@@ -47,6 +47,8 @@ export function defaultModelFor(task: string): string {
 /** Guess what a model can do from its id (the Gemini API doesn't expose output modalities). */
 export function capabilityOf(modelId: string): ModelCapability | undefined {
   const id = modelId.toLowerCase();
+  // inference.sh apps ("inference.sh/bytedance/seedance-2-5"): only its Seedance video apps are wired up.
+  if (id.startsWith("inference.sh/")) return /\/seedance/.test(id) ? "video" : undefined;
   if (/embedding|aqa|live|native-audio|realtime|robotics|computer-use|deep-research|customtools/.test(id)) return undefined;
   if (id.startsWith("veo")) return "video";
   if (id.startsWith("lyria")) return "music";
@@ -83,7 +85,7 @@ export class ModelSetting {
 
   change(model: string): void {
     const id = model.trim().replace(/^models\//, "");
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,120}$/.test(id)) throw new ValidationError(`"${model}" is not a valid model id`);
+    if (!/^(inference\.sh\/[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{1,120}$/.test(id)) throw new ValidationError(`"${model}" is not a valid model id`);
     const cap = capabilityOf(id);
     if (cap && cap !== this.definition.capability) {
       throw new ValidationError(`"${id}" looks like a ${cap} model, but "${this.definition.title}" needs a ${this.definition.capability} model`);

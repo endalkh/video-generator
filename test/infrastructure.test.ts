@@ -4,6 +4,10 @@ import { encodePng } from "../src/infrastructure/media/png.js";
 import { pcmToWav, toneWav, wavDurationSeconds } from "../src/infrastructure/media/wav.js";
 import { srtToVtt } from "../src/api/routes/projects.routes.js";
 import { mapLimit } from "../src/services/pipeline.service.js";
+import { maxVeoResolution, supportsImageSize, supportsReferenceImages } from "../src/infrastructure/providers/gemini.js";
+import { formatFor } from "../src/infrastructure/media/ffmpeg.js";
+import { minResolution, videoResolution } from "../src/domain/project/project.model.js";
+import { InferenceShVideo } from "../src/infrastructure/providers/inference-sh.js";
 import { slugify } from "../src/util/fs.js";
 import { isTransientError, withRetry } from "../src/util/retry.js";
 
@@ -80,5 +84,129 @@ describe("mapLimit", () => {
 describe("slugify length", () => {
   it("cuts long topics at a word boundary", () => {
     expect(slugify("Washing our hands with soap before we eat lunch")).toBe("washing-our-hands-with-soap-before-we");
+  });
+});
+
+describe("supportsReferenceImages", () => {
+  it("is true for Veo 3.1 standard/fast and false for Lite and older models", () => {
+    expect(supportsReferenceImages("veo-3.1-generate-preview")).toBe(true);
+    expect(supportsReferenceImages("veo-3.1-fast-generate-preview")).toBe(true);
+    expect(supportsReferenceImages("veo-3.1-lite-generate-preview")).toBe(false);
+    expect(supportsReferenceImages("veo-3.0-generate-001")).toBe(false);
+  });
+});
+
+describe("inference.sh Seedance video", () => {
+  const MP4 = Buffer.alloc(4096, 7);
+  const mime = () => "image/png";
+  const still = Buffer.from("still");
+  const character = Buffer.from("char");
+  const model = "inference.sh/bytedance/seedance-2-5";
+  const base = { still, aspectRatio: "16:9", label: "scene 1 video", mime, model };
+
+  it("uses the character sheet + scene picture as references, or the scene picture as first frame", () => {
+    const refs = InferenceShVideo.input("dance", { ...base, character });
+    expect(refs.app).toBe("bytedance/seedance-2-5");
+    expect(refs.input).toMatchObject({ resolution: "720p", ratio: "16:9", duration: 8, generate_audio: true, watermark: false });
+    expect(refs.input.task_type).toBeUndefined();
+    expect(refs.input.prompt).toMatch(/^@Image1 .*@Image2 .*\n\ndance$/s);
+    expect(refs.input.reference_images).toEqual([{ bytes: character, contentType: "image/png" }, { bytes: still, contentType: "image/png" }]);
+    expect(refs.input.image).toBeUndefined();
+
+    const first = InferenceShVideo.input("dance", base);
+    expect(first.input).toMatchObject({ prompt: "dance", ratio: "adaptive", image: { bytes: still, contentType: "image/png" } });
+    expect(first.input.reference_images).toBeUndefined();
+
+    expect(() => InferenceShVideo.input("p", { ...base, model: "inference.sh/google/veo-3-1" })).toThrow(/Unknown inference.sh video app/);
+  });
+
+  /** Fake inference.sh API: records calls; the task finishes on the second status poll. */
+  function fakeApi(final: { status: number | string; output?: unknown; error?: string }) {
+    const calls: { method: string; url: string; body?: unknown; auth?: string }[] = [];
+    let polls = 0;
+    const ok = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 });
+    const impl = (async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      const auth = (init?.headers as Record<string, string> | undefined)?.Authorization;
+      calls.push({ method, url, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined, auth });
+      if (url.endsWith("/files")) return ok([{ uri: `https://cloud.inference.sh/u/${calls.length}.png`, upload_url: `https://upload.example/${calls.length}` }]);
+      if (url.startsWith("https://upload.example/")) return new Response(null, { status: 200 });
+      if (url.endsWith("/apps/run")) return ok({ id: "t1", status: 2 });
+      if (url.endsWith("/tasks/t1/status")) return ok({ status: ++polls < 2 ? "running" : final.status });
+      if (url.endsWith("/tasks/t1")) return ok(final);
+      if (url === "https://cloud.inference.sh/v.mp4") return new Response(MP4);
+      return new Response("nope", { status: 404 });
+    }) as unknown as typeof fetch;
+    return { calls, impl };
+  }
+
+  it("uploads the pictures, runs the app, polls, and downloads the video", async () => {
+    const api = fakeApi({ status: 10, output: { video: "https://cloud.inference.sh/v.mp4" } });
+    const v = new InferenceShVideo("inf_test", api.impl, { pollMs: 1, retryDelayMs: 1 });
+    expect((await v.video("p", { ...base, character })).equals(MP4)).toBe(true);
+    const run = api.calls.find((c) => c.url.endsWith("/apps/run"))!;
+    expect(run.body).toMatchObject({ app: "bytedance/seedance-2-5", input: { reference_images: [expect.stringMatching(/^https:\/\/cloud\.inference\.sh\//), expect.stringMatching(/^https:\/\/cloud\.inference\.sh\//)] } });
+    expect(api.calls.filter((c) => c.url.startsWith("https://api.inference.sh")).every((c) => c.auth === "Bearer inf_test")).toBe(true);
+    expect(api.calls.find((c) => c.url.startsWith("https://upload.example/"))!.auth).toBeUndefined();
+    expect(v.listModels().map((m) => m.id)).toEqual([model]);
+  });
+
+  it("remembers the task, retries the download, and resumes a finished task instead of paying again", async () => {
+    // Download fails twice (502), then works: retried without re-running the task.
+    let downloads = 0;
+    const api = fakeApi({ status: 10, output: { video: "https://cloud.inference.sh/v.mp4" } });
+    const flaky = (async (url: string, init?: RequestInit) => {
+      if (url === "https://cloud.inference.sh/v.mp4" && ++downloads <= 2) return new Response("bad gateway", { status: 502 });
+      return api.impl(url, init);
+    }) as unknown as typeof fetch;
+    const started: string[] = [];
+    const v = new InferenceShVideo("k", flaky, { pollMs: 1, retryDelayMs: 1 });
+    const mp4 = await v.video("p", { ...base, onTaskStarted: (id) => void started.push(id) });
+    expect(mp4.equals(MP4)).toBe(true);
+    expect([started, downloads]).toEqual([["t1"], 3]);
+
+    // Resume: a finished task is just downloaded; no upload, no new run.
+    const again = fakeApi({ status: 10, output: { video: "https://cloud.inference.sh/v.mp4" } });
+    const r = new InferenceShVideo("k", again.impl, { pollMs: 1, retryDelayMs: 1 });
+    expect((await r.video("p", { ...base, resumeTaskId: "t1" })).equals(MP4)).toBe(true);
+    expect(again.calls.some((c) => c.url.endsWith("/apps/run") || c.url.endsWith("/files"))).toBe(false);
+
+    // A failed earlier task: start a new one.
+    const fresh = fakeApi({ status: 10, output: { video: "https://cloud.inference.sh/v.mp4" } });
+    let first = true;
+    const prevFailed = (async (url: string, init?: RequestInit) => {
+      if (first && url.endsWith("/tasks/old/status")) return (first = false), new Response(JSON.stringify({ data: { status: 11 } }));
+      return fresh.impl(url, init);
+    }) as unknown as typeof fetch;
+    const n = new InferenceShVideo("k", prevFailed, { pollMs: 1, retryDelayMs: 1 });
+    expect((await n.video("p", { ...base, resumeTaskId: "old" })).equals(MP4)).toBe(true);
+    expect(fresh.calls.some((c) => c.url.endsWith("/apps/run"))).toBe(true);
+  });
+
+  it("surfaces failed tasks and HTTP errors with their status", async () => {
+    const failed = new InferenceShVideo("k", fakeApi({ status: 11, error: "content rejected" }).impl, { pollMs: 1, retryDelayMs: 1 });
+    await expect(failed.video("p", base)).rejects.toThrow(/task t1 failed: content rejected/);
+
+    const limited = new InferenceShVideo("k", (async () => new Response(JSON.stringify({ detail: "slow down" }), { status: 429 })) as unknown as typeof fetch);
+    await expect(limited.video("p", base)).rejects.toMatchObject({ status: 429, message: expect.stringMatching(/slow down/) });
+  });
+});
+
+describe("video resolution", () => {
+  it("defaults to 4k and validates VIDEO_RESOLUTION", () => {
+    expect([videoResolution(""), videoResolution(" 1080P "), videoResolution("720p")]).toEqual(["4k", "1080p", "720p"]);
+    expect(() => videoResolution("8k")).toThrow(/VIDEO_RESOLUTION must be one of/);
+    expect(minResolution("4k", "1080p")).toBe("1080p");
+  });
+  it("sizes the final video", () => {
+    expect(formatFor("16:9", "4k")).toEqual({ width: 3840, height: 2160, fps: 25 });
+    expect(formatFor("9:16", "1080p")).toEqual({ width: 1080, height: 1920, fps: 25 });
+    expect(formatFor("16:9", "720p")).toMatchObject({ width: 1280, height: 720 });
+  });
+  it("caps each model at what it can make", () => {
+    expect([maxVeoResolution("veo-3.1-fast-generate-preview"), maxVeoResolution("veo-3.1-lite-generate-preview"), maxVeoResolution("veo-3.0-generate-001")]).toEqual(["4k", "1080p", "720p"]);
+    expect([supportsImageSize("gemini-3.1-flash-image"), supportsImageSize("gemini-3-pro-image"), supportsImageSize("gemini-2.5-flash-image")]).toEqual([true, true, false]);
+    const sd = InferenceShVideo.input("p", { model: "inference.sh/bytedance/seedance-2-5", still: Buffer.from("s"), aspectRatio: "16:9", label: "x", mime: () => "image/png", resolution: "4k" });
+    expect(sd.input.resolution).toBe("1080p");
   });
 });

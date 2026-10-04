@@ -3,7 +3,7 @@ import path from "node:path";
 import type { GenContext, Provider } from "../domain/ports/generator.port.js";
 import { MAX_SONG_PART_SEC, mmss, singableSeconds, songParts, songTimeline } from "../domain/ports/generator.port.js";
 import type { Project } from "../domain/project/project.entity.js";
-import { defaultVoice, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
+import { defaultVoice, minResolution, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { assertFfmpegAvailable, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
@@ -71,6 +71,8 @@ export function mediaPaths(dir: string) {
     sceneAudio: (i: number) => path.join(sceneDir(i), "audio.wav"),
     sceneImage: (i: number) => path.join(sceneDir(i), "image.png"),
     sceneVideo: (i: number) => path.join(sceneDir(i), "video.mp4"),
+    /** Remote task that is making / made this scene's video (inference.sh), so a failed download isn't paid for twice. */
+    sceneVideoTask: (i: number) => path.join(sceneDir(i), "video-task.json"),
     sceneClip: (i: number) => path.join(sceneDir(i), "clip.mp4"),
   };
 }
@@ -81,11 +83,11 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   const at = (s: StepName) => STEP_NAMES.indexOf(s) >= STEP_NAMES.indexOf(from);
   const files: string[] = [];
   const perScene: ((i: number) => string)[] = [];
-  if (at("character")) files.push(p.characterImage, p.thumbnail), perScene.push(p.sceneImage, p.sceneVideo);
+  if (at("character")) files.push(p.characterImage, p.thumbnail), perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);
   if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio);
   // Pictures and Veo videos don't depend on the audio: a new song only re-times (re-renders) the clips.
   if (at("clips")) perScene.push(p.sceneClip);
-  if (from === "clips") perScene.push(p.sceneImage, p.sceneVideo);
+  if (from === "clips") perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);
   if (at("final")) files.push(p.final, p.srt);
   if (at("audio")) {
     const top = await readdir(p.dir).catch(() => [] as string[]);
@@ -123,7 +125,7 @@ export async function wipePictures(p: MediaPaths): Promise<void> {
 
 /** Delete one scene's picture, video and clip (plus the final video) so only that scene is made again. */
 export async function wipeScene(p: MediaPaths, i: number): Promise<void> {
-  await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneClip(i), p.final, p.srt].map((f) => rm(f, { force: true })));
+  await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.final, p.srt].map((f) => rm(f, { force: true })));
 }
 
 /** Run async tasks with bounded parallelism, preserving result order. */
@@ -481,7 +483,10 @@ export class PipelineService {
       }
       const timeline = project.song;
 
-      const fmt = formatFor(input.aspectRatio);
+      const resolution = input.resolution;
+      const fmt = formatFor(input.aspectRatio, resolution);
+      // Scene pictures: as sharp as the video for animated pictures; 2K is plenty as Veo input (and keeps requests small).
+      const pictureSize = ({ "4k": "4K", "1080p": "2K", "720p": "1K" } as const)[input.videoMode === "veo" ? minResolution(resolution, "1080p") : resolution];
       const useVeo = input.videoMode === "veo";
       if (useVeo && typeof provider.video !== "function") throw new Error(`Provider "${provider.name}" can't generate video clips; choose Visuals = Animated pictures or another provider`);
       const timing = (i: number) => {
@@ -494,20 +499,28 @@ export class PipelineService {
         await perScene("clips", p.sceneClip, "rendered", async (s) => {
           const i = s.index;
           const vars = { scene_number: i + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description };
-          if (!(await fileExists(p.sceneImage(i)))) {
+          // An uploaded (or already made) Veo video doesn't need a picture: don't pay for one.
+          if (!(await fileExists(p.sceneImage(i))) && !(useVeo && (await fileExists(p.sceneVideo(i))))) {
             const r = await prompt("clips", "scene_image", "scene_image", vars, i);
-            await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references: [reference], label: `scene ${i + 1} image`, ctx: ctx({ scene: s }) }));
+            await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references: [reference], label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
           }
           checkCancel();
           if (useVeo && !(await fileExists(p.sceneVideo(i)))) {
             const r = await prompt("clips", "scene_video", "scene_video", vars, i);
             try {
-              const mp4 = await provider.video!(r.text, { model: r.model, character: reference, still: await readFile(p.sceneImage(i)), aspectRatio: input.aspectRatio, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }) });
+              const taskFile = p.sceneVideoTask(i);
+              const saved = await readFile(taskFile, "utf8").then((t) => JSON.parse(t) as { taskId?: string; model?: string }).catch(() => null);
+              const mp4 = await provider.video!(r.text, {
+                model: r.model, character: reference, still: await readFile(p.sceneImage(i)), aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
+                resumeTaskId: saved?.model === r.model ? saved.taskId : undefined,
+                onTaskStarted: (taskId) => writeFileAtomic(taskFile, JSON.stringify({ taskId, model: r.model, startedAt: new Date().toISOString() })),
+              });
               await writeFileAtomic(p.sceneVideo(i), mp4);
+              await rm(taskFile, { force: true });
             } catch (err) {
               // No fallback to pictures: surface the error so it can be fixed and retried.
               const hint = (err as { status?: number }).status === 429
-                ? ` — Google's request limit for ${r.model} on your account was reached. Finished clips are kept: wait a few minutes (or until tomorrow for a daily limit), then click "Make the clips" on the Clips page. A cheaper Veo model (fast or lite, on the Models page) has higher limits.`
+                ? ` — the request limit for ${r.model} on your account was reached. Finished clips are kept: wait a few minutes (or until tomorrow for a daily limit), then click "Make the clips" on the Clips page. A cheaper Veo model (fast or lite, on the Models page) has higher limits.`
                 : "";
               throw new Error(`Scene ${i + 1} video (${r.model}) failed: ${(err as Error).message}${hint}`);
             }

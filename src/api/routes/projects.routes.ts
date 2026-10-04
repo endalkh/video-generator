@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { MAX_AUDIO_UPLOAD_BYTES, MAX_UPLOAD_BYTES, type ProjectService } from "../../services/project.service.js";
+import { MAX_AUDIO_UPLOAD_BYTES, MAX_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_BYTES, type ProjectService } from "../../services/project.service.js";
 import type { PipelineEvent } from "../../services/pipeline.service.js";
 import { HttpError, send, type Router } from "../http.js";
 
@@ -82,6 +82,8 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
       await projects.redoScene(params.id!, Number(params.index) - 1);
       return { id: params.id };
     }, 202)
+    .put("/api/projects/:id/scenes/:index/video", async ({ params, body }) =>
+      projects.uploadSceneVideo(params.id!, Number(params.index) - 1, await body(Math.ceil(MAX_VIDEO_UPLOAD_BYTES * 1.4) + 64_000)))
     .put("/api/projects/:id/subtitles", async ({ params, body }) => projects.setSubtitles(params.id!, (await body()).on))
     .put("/api/projects/:id/settings", async ({ params, body }) => {
       const b = await body();

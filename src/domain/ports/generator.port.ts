@@ -1,6 +1,6 @@
 import type { ChannelDetails } from "../channel/channel.model.js";
 import type { PlanText } from "../plan/plan.model.js";
-import type { Character, Poem, ProjectInput, PublishInfo, Scene, ScenePlan, Stanza } from "../project/project.model.js";
+import type { Character, Poem, ProjectInput, PublishInfo, Scene, ScenePlan, Stanza, VideoResolution } from "../project/project.model.js";
 
 /** A time window within the song where a scene's lyrics are sung. */
 export interface SongSlot {
@@ -63,7 +63,7 @@ export interface Provider {
   /** JSON generation validated against the step's schema. `model` comes from the per-task settings. */
   text<K extends TextKind>(kind: K, prompt: string, opts: { model: string; ctx: GenContext; /** Pictures to look at (e.g. an uploaded character). */ images?: Buffer[] }): Promise<TextOutputs[K]>;
   /** Image (PNG/JPEG). `references` are attached images (e.g. the character sheet). */
-  image(prompt: string, opts: { model: string; aspectRatio: string; references?: Buffer[]; label: string; ctx: GenContext }): Promise<Buffer>;
+  image(prompt: string, opts: { model: string; aspectRatio: string; references?: Buffer[]; label: string; ctx: GenContext; /** Wanted size, for models that support it (e.g. scene pictures for a 4K video). */ size?: "1K" | "2K" | "4K" }): Promise<Buffer>;
   /** Speech as WAV. */
   speech(prompt: string, opts: { model: string; voice: string; label: string; ctx: GenContext }): Promise<Buffer>;
   /** One continuous song (optional; without it song mode falls back to per-scene sung TTS). */
@@ -71,7 +71,20 @@ export interface Provider {
   /** Animated MP4 seeded by a still (optional; used when videoMode === "veo"). */
   video?(
     prompt: string,
-    opts: { model: string; still: Buffer; aspectRatio: string; label: string; ctx: GenContext; /** Character sheet, so the character stays consistent. */ character?: Buffer },
+    opts: {
+      model: string;
+      still: Buffer;
+      aspectRatio: string;
+      label: string;
+      ctx: GenContext;
+      /** Character sheet, so the character stays consistent. */
+      character?: Buffer;
+      /** Wanted resolution; providers cap it at what the model can make. */
+      resolution?: VideoResolution;
+      /** Remote task started earlier for this clip (providers that support it finish/download it instead of re-generating). */
+      resumeTaskId?: string;
+      onTaskStarted?: (taskId: string) => Promise<void> | void;
+    },
   ): Promise<Buffer>;
 }
 
