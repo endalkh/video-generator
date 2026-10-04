@@ -157,6 +157,29 @@ describe("one step at a time", () => {
     expect((await ps.get(id)).media.final).toBeNull();
   }, 60_000);
 
+  it("designs a new character from an uploaded picture (the picture is the reference, not the sheet)", async () => {
+    const mock = mockProvider();
+    const refs: Buffer[][] = [];
+    const image = mock.image.bind(mock);
+    mock.image = async (prompt, opts) => (refs.push((opts as { references?: Buffer[] }).references ?? []), image(prompt, opts));
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ reviewMode: "auto", topic: "a day at the market", sceneCount: 2 }, "mock");
+    for (const s of ["poem", "scenes"]) { await ps.generateStep(id, s); await ps.idle(); }
+    const photo = await mockProvider().image("x", { model: "m", ctx: { input: (await ps.get(id)).input } });
+
+    const p = await ps.uploadCharacter(id, { image: `data:image/png;base64,${photo.toString("base64")}`, name: "Milcah", design: true });
+    expect([p.character!.name, p.completed]).toEqual(["Milcah", ["poem", "scenes", "character"]]);
+    // Looked at the picture, then drew a sheet with the character prompt + the picture attached.
+    const drawn = c.generations.items.filter((g) => g.promptKey === "character_image");
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0]!.prompt).toContain("Base the character on the attached picture");
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toHaveLength(1);
+    const sheet = await readFile(mediaPaths(c.pipelineService.mediaDir(id)).characterImage);
+    expect(sheet.equals(refs[0]![0]!)).toBe(false); // the AI's new sheet, not the uploaded picture
+  }, 60_000);
+
   it("changes the poem and music while keeping the pictures and Veo videos", async () => {
     c = await makeTestContainer();
     const ps = c.projectService;
@@ -336,7 +359,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
 
   it("switching visuals re-renders only clips and final", async () => {
     c = await makeTestContainer();
-    const created = await c.projectService.create({ reviewMode: "auto", topic: "goats on the hill", sceneCount: 2 }, "mock");
+    const created = await c.projectService.create({ reviewMode: "auto", topic: "goats on the hill", sceneCount: 2, videoMode: "still" }, "mock");
     await runToEnd(created.id);
     const before = c.generations.items.map((g) => g.promptKey);
     await c.projectService.changeVisuals(created.id, "veo");
@@ -353,6 +376,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
     c = await makeTestContainer();
     const created = await c.projectService.create({ reviewMode: "auto", topic: "goats and sheep", sceneCount: 2, videoMode: "veo" }, "mock");
     const { MockProvider } = await import("../src/infrastructure/providers/mock.js");
+    const orig = MockProvider.prototype.video;
     MockProvider.prototype.video = async () => { throw new Error("quota exceeded"); };
     try {
       const p = await runToEnd(created.id);
@@ -360,7 +384,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
       expect(p.error).toMatch(/^Scene \d video \(veo-3.1-fast-generate-preview\) failed: quota exceeded$/);
       expect(p.media.final).toBeNull();
     } finally {
-      delete (MockProvider.prototype as { video?: unknown }).video;
+      MockProvider.prototype.video = orig; // put the real one back for the next tests
     }
   }, 60_000);
 
@@ -390,7 +414,8 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
     c.projectService.cancel(created.id);
     await c.projectService.idle();
     expect((await c.projectService.get(created.id)).status).toBe("paused");
-    expect((await runToEnd(created.id)).status).toBe("done");
+    const end = await runToEnd(created.id);
+    expect([end.status, end.error]).toEqual(["done", null]);
   }, 60_000);
 
   it("rejects invalid input and concurrent runs", async () => {

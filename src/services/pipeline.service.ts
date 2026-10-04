@@ -6,7 +6,8 @@ import type { Project } from "../domain/project/project.entity.js";
 import { defaultVoice, minResolution, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
-import { assertFfmpegAvailable, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
+import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
+import { assertFfmpegAvailable, audioPiece, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, SCENE_TAIL_SEC, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
 import { ensureDir, fileExists, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
@@ -69,6 +70,8 @@ export function mediaPaths(dir: string) {
     songPart: (j: number, ext: string) => path.join(dir, `song-part-${String(j + 1).padStart(2, "0")}.${ext}`),
     sceneDir,
     sceneAudio: (i: number) => path.join(sceneDir(i), "audio.wav"),
+    /** The scene's own piece of the soundtrack (cut from the song, or its voice + the clip's tail), as MP3. */
+    scenePiece: (i: number) => path.join(sceneDir(i), "scene-audio.mp3"),
     sceneImage: (i: number) => path.join(sceneDir(i), "image.png"),
     sceneVideo: (i: number) => path.join(sceneDir(i), "video.mp4"),
     /** Remote task that is making / made this scene's video (inference.sh), so a failed download isn't paid for twice. */
@@ -84,7 +87,7 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   const files: string[] = [];
   const perScene: ((i: number) => string)[] = [];
   if (at("character")) files.push(p.characterImage, p.thumbnail), perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);
-  if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio);
+  if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio, p.scenePiece);
   // Pictures and Veo videos don't depend on the audio: a new song only re-times (re-renders) the clips.
   if (at("clips")) perScene.push(p.sceneClip);
   if (from === "clips") perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);
@@ -128,17 +131,61 @@ export async function wipeScene(p: MediaPaths, i: number): Promise<void> {
   await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.final, p.srt].map((f) => rm(f, { force: true })));
 }
 
+/**
+ * Make (or reuse) one scene's own audio piece, timed exactly like its clip: the scene's slot of the song
+ * (song and rhyme-over-music modes) or its voice plus the clip's tail (narration). Returns null when the
+ * video has no soundtrack of its own to cut (the character speaks inside Veo) or the audio isn't made yet.
+ */
+export async function ensureScenePiece(p: MediaPaths, project: Project, i: number): Promise<string | null> {
+  if (project.input.audioMode === "character") return null;
+  const out = p.scenePiece(i);
+  if (await fileExists(out)) return out;
+  const slot = project.song?.slots[i];
+  const tmp = `${out}.part.mp3`;
+  await ensureDir(p.sceneDir(i));
+  if (project.song && slot) {
+    const song = path.join(p.dir, project.song.file);
+    if (!(await fileExists(song))) return null;
+    await audioPiece({ input: song, out: tmp, start: slot.start, end: slot.end });
+  } else {
+    if (!(await fileExists(p.sceneAudio(i)))) return null;
+    await audioPiece({ input: p.sceneAudio(i), out: tmp, padSec: SCENE_TAIL_SEC });
+  }
+  await rename(tmp, out);
+  return out;
+}
+
+/**
+ * How many scene videos to make at the same time: the video's own setting ("Videos at the same time"), else
+ * VIDEO_CONCURRENCY, else auto. inference.sh runs tasks in parallel (4); Google's Veo has low per-minute request
+ * limits (a 429 is waited out and retried), so it gets 2.
+ */
+export function videoConcurrency(model: string, env = process.env.VIDEO_CONCURRENCY, setting?: number): number {
+  if (setting && setting >= 1) return Math.min(setting, 10);
+  const n = Number.parseInt(env ?? "", 10);
+  if (Number.isInteger(n) && n >= 1) return Math.min(n, 10);
+  return isInferenceShModel(model) ? 4 : 2;
+}
+
 /** Run async tasks with bounded parallelism, preserving result order. */
 export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
+  let failure: { err: unknown } | undefined;
   const worker = async () => {
-    while (next < items.length) {
+    // After a failure no new items start, but the ones already running finish (and save their output),
+    // so a quick retry never pays for a video that is still being made.
+    while (!failure && next < items.length) {
       const i = next++;
-      results[i] = await fn(items[i]!, i);
+      try {
+        results[i] = await fn(items[i]!, i);
+      } catch (err) {
+        failure ??= { err };
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  if (failure) throw failure.err;
   return results;
 }
 
@@ -181,6 +228,17 @@ export class PipelineService {
     await this.generations.add({ projectId: project.id, step: "character", sceneIndex: null, promptKey: r.key, promptVersion: r.version, prompt: r.text, provider: provider.name, model: models.character });
     const out = await provider.text("character", r.text, { model: models.character, images: [picture], ctx: { input: project.input, poem: project.poem ?? undefined } });
     return name ? { ...out, name } : out;
+  }
+
+  /**
+   * Draw a new character sheet *from* a picture (a photo of your child, a drawing, a toy…): the picture is the
+   * reference, the result is in the video's art style. Uses the Character image prompt with has_reference on.
+   */
+  async designCharacterSheet(project: Project, picture: Buffer, character: Character, provider: Provider): Promise<Buffer> {
+    const [models, prompts] = await Promise.all([this.modelSettings.snapshot(), this.promptService.snapshotFor(project.input, { channel: project.channelId, flags: { has_reference: true } })]);
+    const r = prompts.render("character_image", { character_name: character.name, character_description: character.description });
+    await this.generations.add({ projectId: project.id, step: "character", sceneIndex: null, promptKey: r.key, promptVersion: r.version, prompt: r.text, provider: provider.name, model: models.character_image });
+    return provider.image(r.text, { model: models.character_image, aspectRatio: "1:1", references: [picture], label: "character image (from your picture)", ctx: { input: project.input, poem: project.poem ?? undefined } });
   }
 
   /**
@@ -327,8 +385,8 @@ export class PipelineService {
         let done = 0;
         const report = (message: string) => emit({ type: "progress", step: name, done, total: scenes.length, message });
         report("starting");
-        // Veo allows only a few requests per minute, so make clips one at a time.
-        const limit = name === "clips" && input.videoMode === "veo" ? 1 : concurrency;
+        // Video clips: as many at once as the video model's service allows (see videoConcurrency).
+        const limit = name === "clips" && input.videoMode === "veo" ? videoConcurrency(models.scene_video, process.env.VIDEO_CONCURRENCY, input.videoConcurrency) : concurrency;
         await mapLimit(scenes, limit, async (s) => {
           checkCancel();
           if (!(await fileExists(file(s.index)))) {
@@ -482,6 +540,9 @@ export class PipelineService {
         });
       }
       const timeline = project.song;
+      // Each scene's own piece of the audio: downloadable, and the input for audio-driven video models (Kling Avatar).
+      // Only audio-driven models need them, so a failure here never stops the video.
+      for (const s of scenes) await ensureScenePiece(p, project, s.index).catch((err: unknown) => log.warn(`scene ${s.index + 1} audio piece: ${(err as Error).message}`));
 
       const resolution = input.resolution;
       const fmt = formatFor(input.aspectRatio, resolution);
@@ -510,8 +571,12 @@ export class PipelineService {
             try {
               const taskFile = p.sceneVideoTask(i);
               const saved = await readFile(taskFile, "utf8").then((t) => JSON.parse(t) as { taskId?: string; model?: string }).catch(() => null);
+              const piece = await ensureScenePiece(p, project, i);
+              const t = timing(i);
+              // The scene's length on screen (unknown when the character speaks inside the clip: there's no separate audio).
+              const durationSec = t.duration ?? (t.audio && (await fileExists(t.audio)) ? (await probeDuration(t.audio)) + SCENE_TAIL_SEC : undefined);
               const mp4 = await provider.video!(r.text, {
-                model: r.model, character: reference, still: await readFile(p.sceneImage(i)), aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
+                model: r.model, character: reference, audio: piece ? await readFile(piece) : undefined, durationSec, still: await readFile(p.sceneImage(i)), aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
                 resumeTaskId: saved?.model === r.model ? saved.taskId : undefined,
                 onTaskStarted: (taskId) => writeFileAtomic(taskFile, JSON.stringify({ taskId, model: r.model, startedAt: new Date().toISOString() })),
               });

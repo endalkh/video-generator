@@ -86,3 +86,35 @@ describe("video quality", () => {
     await expect(c.projectService.changeSettings(p.id, { resolution: "8k" })).rejects.toThrow(ValidationError);
   });
 });
+
+describe("visuals in the video settings", () => {
+  it("defaults to moving video clips and can be switched before anything is made", async () => {
+    c = await makeTestContainer();
+    const p = await c.projectService.create({ reviewMode: "manual", topic: "Colours of a butterfly", sceneCount: 2 }, "mock");
+    expect(p.input.videoMode).toBe("veo");
+    for (const s of ["poem", "scenes", "character"]) { await c.projectService.generateStep(p.id, s); await c.projectService.idle(); }
+    const r = await c.projectService.changeSettings(p.id, { videoMode: "still" });
+    expect([r.redoFrom, r.project.input.videoMode, r.project.completed]).toEqual(["clips", "still", ["poem", "scenes", "character"]]);
+    await expect(c.projectService.changeSettings(p.id, { videoMode: "hologram" })).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("settings that keep what was made", () => {
+  it("videos at the same time changes nothing; visuals/quality keep the pictures and video clips", async () => {
+    c = await makeTestContainer();
+    const p = await c.projectService.create({ reviewMode: "auto", topic: "Counting ducks", sceneCount: 2, videoMode: "veo" }, "mock");
+    const done = await runToEnd(p.id);
+    expect(done.status).toBe("done");
+
+    const a = await c.projectService.changeSettings(p.id, { videoConcurrency: 6 });
+    expect([a.redoFrom, a.project.input.videoConcurrency, a.project.status]).toEqual([null, 6, "done"]);
+    expect((await c.projectService.get(p.id)).input.videoConcurrency).toBe(6); // saved
+    expect((await c.projectService.changeSettings(p.id, { videoConcurrency: null })).project.input.videoConcurrency).toBeUndefined();
+    await expect(c.projectService.changeSettings(p.id, { videoConcurrency: 11 })).rejects.toThrow(ValidationError);
+
+    const m = media(p.id);
+    const b = await c.projectService.changeSettings(p.id, { resolution: "1080p", videoMode: "still" });
+    expect(b.redoFrom).toBe("clips");
+    expect([await fileExists(m.sceneImage(0)), await fileExists(m.sceneVideo(0)), await fileExists(m.sceneClip(0)), await fileExists(m.final)]).toEqual([true, true, false, false]);
+  });
+});

@@ -151,11 +151,15 @@ If a name is given above, use it exactly. Otherwise give them a short, friendly 
   {
     key: "character_image",
     title: "Character reference image",
-    description: "Image prompt for the character sheet that keeps every scene consistent.",
+    description: "Image prompt for the character sheet that keeps every scene consistent. When you design the character from your own picture (Character page), that picture is attached and has_reference is on.",
     vars: ["character_name", "character_description"],
     template: `Character model sheet for a 3D animated kids' movie: {{character_name}}, {{character_description}}.
-Full body, front view, friendly expressive pose, big expressive eyes, soft studio lighting, plain light background.
+{{#if has_reference}}Base the character on the attached picture: the same person or creature, recognisable at a glance (face shape, skin tone, hair, eyes, clothes, colours and any distinctive features), redrawn as a lovable animated character in the style below. Not a copy of the photo.
+{{/if}}Full body, front view, friendly expressive pose, big expressive eyes, soft studio lighting, plain light background.
 Style: {{style}}. No text. {{safety}}`,
+    previousTemplates: [`Character model sheet for a 3D animated kids' movie: {{character_name}}, {{character_description}}.
+Full body, front view, friendly expressive pose, big expressive eyes, soft studio lighting, plain light background.
+Style: {{style}}. No text. {{safety}}`],
   },
   {
     key: "scene_image",

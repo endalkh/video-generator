@@ -263,6 +263,9 @@ const TTS_VOICES = {
 };
 const VOICE_OPTIONS = [["", "Matching the singer (recommended)"], ...Object.entries(TTS_VOICES).map(([v, d]) => [v, `${v} — ${d}`])];
 const AUDIO_LABEL = { song: "song", music_voice: "rhyme over music", narration: "narrated story", character: "the character speaks" };
+const CONCURRENCY_OPTIONS = [["", "Auto — 4 on inference.sh, 2 on Google Veo"], ...[1, 2, 3, 4, 5, 6, 8, 10].map((n) => [String(n), n === 1 ? "1 — one at a time (safest for rate limits)" : `${n} at a time`])];
+const CONCURRENCY_HINT = "How many scene videos are made at once. More is faster; Google Veo may answer \"too many requests\" (the app waits and retries).";
+const VISUALS_OPTIONS = [["veo", "Moving video clips — AI video per scene (Veo, Seedance or Kling on the Models page; paid)"], ["still", "Animated pictures — still images with camera motion (fast, free)"]];
 const QUALITY_OPTIONS = [["4k", "4K — 3840×2160, sharpest (slower; Veo 4K costs more)"], ["1080p", "Full HD — 1920×1080"], ["720p", "HD — 1280×720 (fastest)"]];
 const QUALITY_HINT = "Veo 3.1 makes real 4K clips; Veo Lite and Seedance make 1080p, scaled up. Thumbnails stay 1280×720 (YouTube's size).";
 const SINGER_HINT = "Songs: the singer is described to the music AI (it has no voice setting, so it's a strong hint). Rhyme over music and narration: also picks a matching voice.";
@@ -292,7 +295,7 @@ async function showNewVideo() {
       field("f-audio", "Audio", select("f-audio", "audioMode", AUDIO_MODES, d.audioMode ?? (lang === "am" ? "music_voice" : "song"))),
       field("f-singer", "Singer / voice", select("f-singer", "singer", SINGERS, d.singer ?? "auto"), SINGER_HINT),
       field("f-voice", "Exact voice (optional)", select("f-voice", "voice", VOICE_OPTIONS, d.voice ?? ""), "For rhyme over music and narrated stories."),
-      field("f-video", "Visuals", select("f-video", "videoMode", [["still", "Animated pictures — still images with camera motion (fast)"], ["veo", "Moving video clips — Veo (slow, uses more credits)"]])),
+      field("f-video", "Visuals", select("f-video", "videoMode", VISUALS_OPTIONS, "veo")),
       field("f-scenes", "Scenes", h("input", { id: "f-scenes", name: "sceneCount", type: "number", min: 2, max: 40, class: "field", placeholder: "Auto" }),
         "Leave empty: one picture about every 10 s (song) or 12 s (story)."),
       field("f-length", "Video length (minutes)", h("input", { id: "f-length", name: "lengthMinutes", type: "number", min: 0.5, max: 10, step: 0.5, value: d.videoMinutes ?? 0.5, class: "field", "aria-describedby": "f-length-plan" }),
@@ -300,6 +303,7 @@ async function showNewVideo() {
       field("f-age", "Age range", h("input", { id: "f-age", name: "ageRange", value: d.ageRange ?? "3-6", class: "field" })),
       field("f-aspect", "Shape", select("f-aspect", "aspectRatio", [["16:9", "Landscape 16:9 (YouTube)"], ["9:16", "Portrait 9:16 (Shorts)"]])),
       field("f-quality", "Quality", select("f-quality", "resolution", QUALITY_OPTIONS, config.videoResolution ?? "4k"), QUALITY_HINT),
+      field("f-conc", "Videos at the same time", select("f-conc", "videoConcurrency", CONCURRENCY_OPTIONS, ""), CONCURRENCY_HINT),
       h("div", { class: "flex items-start gap-2 self-end pb-2" },
         h("input", { id: "f-subs", name: "subtitles", type: "checkbox", value: "on", class: "mt-1 size-4 accent-coral" }),
         h("label", { for: "f-subs", class: "text-sm" }, h("span", { class: "font-semibold", text: "Show lyrics on the video" }),
@@ -321,6 +325,7 @@ async function showNewVideo() {
     const fd = new FormData(form);
     const input = Object.fromEntries([...fd.entries()].filter(([k, v]) => k !== "provider" && k !== "lengthMinutes" && String(v).trim() !== ""));
     if (input.sceneCount) input.sceneCount = Number(input.sceneCount);
+    if (input.videoConcurrency) input.videoConcurrency = Number(input.videoConcurrency);
     input.subtitles = fd.get("subtitles") === "on";
     input.lengthSeconds = lengthSecondsOf(fd.get("lengthMinutes"));
     const btn = $("button[type=submit]", form);
@@ -663,6 +668,7 @@ function stepPage(p, step, keepVideo, videoKey) {
             if (!confirm(`Remake scene ${sc.index + 1} (new picture and clip)?${cost}`)) return SKIP;
             await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/redo`);
           }) }, "↻ Remake") : null,
+          p.completed.includes("audio") && p.input.audioMode !== "character" ? scenePieceButton(p, sc, m) : null,
           idle && p.input.videoMode === "veo" ? sceneVideoUpload(p, sc, act) : null));
     }));
     if (idle && p.completed.includes("audio")) extra = [visualsSwitch(p, act)];
@@ -840,6 +846,8 @@ function settingsPanel(p) {
     ageRange: h("input", { id: "ps-ageRange", class: "field", value: inp.ageRange }),
     aspectRatio: sel("aspectRatio", [["16:9", "Landscape 16:9 (YouTube)"], ["9:16", "Portrait 9:16 (Shorts)"]], inp.aspectRatio),
     resolution: sel("resolution", QUALITY_OPTIONS, inp.resolution ?? "4k"),
+    videoMode: sel("videoMode", VISUALS_OPTIONS, inp.videoMode ?? "veo"),
+    videoConcurrency: sel("videoConcurrency", CONCURRENCY_OPTIONS, inp.videoConcurrency ? String(inp.videoConcurrency) : ""),
     characterHint: h("input", { id: "ps-characterHint", class: "field", value: inp.characterHint ?? "", placeholder: "a curious little goat named Abeba" }),
     style: h("input", { id: "ps-style", class: "field", value: inp.style }),
   };
@@ -854,7 +862,8 @@ function settingsPanel(p) {
     const minutes = Number(els.length.value);
     return {
       topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, ageRange: els.ageRange.value.trim() || "3-6",
-      aspectRatio: els.aspectRatio.value, resolution: els.resolution.value, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
+      aspectRatio: els.aspectRatio.value, resolution: els.resolution.value, videoMode: els.videoMode.value,
+      videoConcurrency: els.videoConcurrency.value ? Number(els.videoConcurrency.value) : null, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
       singer: els.singer.value, voice: els.voice.value || null,
       lengthSeconds: minutes ? lengthSecondsOf(minutes) : null,
       sceneCount: els.sceneCount.value ? Number(els.sceneCount.value) : null,
@@ -875,6 +884,7 @@ function settingsPanel(p) {
   };
   const redoFrom = (keys) => {
     if (!keys.length) return null;
+    if (keys.every((k) => k === "videoConcurrency")) return "none";
     const has = (list) => keys.some((k) => list.includes(k));
     if (has(["topic", "language", "audioMode", "lengthSeconds", "sceneCount", "ageRange"])) return lengthOnly() && keepBox.checked ? "audio" : "poem";
     if (has(["style", "characterHint"])) return "character";
@@ -888,12 +898,14 @@ function settingsPanel(p) {
     keepRow.hidden = !lengthOnly();
     const from = redoFrom(keys);
     const scenesNote = keys.includes("lengthSeconds") && !keys.includes("sceneCount") && from === "poem" ? ` It will have ${auto} scenes for this length.` : "";
-    const later = from ? config.steps.slice(config.steps.indexOf(from)).filter((s) => p.completed.includes(s)) : [];
+    const later = from && from !== "none" ? config.steps.slice(config.steps.indexOf(from)).filter((s) => p.completed.includes(s)) : [];
     impact.textContent = !from ? "Nothing changed yet."
+      : from === "none" ? "Only how many videos are made at once changes. Nothing is made again."
       : from === "poem" ? `A new poem is written for these settings, then the scenes, audio and clips are made again.${scenesNote} The character (${p.character?.name ?? "not made yet"}) is kept.${later.length ? "" : " Nothing has been made yet, so nothing is lost."}`
       : from === "character" ? "The poem and scenes are kept. The character is drawn again in the new style, then the audio and clips are made again."
       : from === "audio" ? "The poem and pictures are kept. The song or voice is made again with the new length or voice, and the clips are re-timed."
-      : "The poem, character and audio are kept. The pictures and clips are made again in the new shape.";
+      : keys.includes("aspectRatio") ? "The poem, character and audio are kept. The pictures and clips are made again in the new shape."
+      : "The poem, character, audio, pictures and video clips already made are kept. Only the clips are put together again.";
   };
   for (const el of Object.values(els)) el.addEventListener("input", update);
   keepBox.addEventListener("change", update);
@@ -902,7 +914,7 @@ function settingsPanel(p) {
     const keys = changedKeys();
     if (!keys.length) { status.textContent = "Nothing changed."; return; }
     const from = redoFrom(keys);
-    const lost = config.steps.slice(config.steps.indexOf(from)).filter((s) => p.completed.includes(s));
+    const lost = from === "none" ? [] : config.steps.slice(config.steps.indexOf(from)).filter((s) => p.completed.includes(s));
     if (lost.length && !confirm(`Save the new settings? ${lost.map((s) => STEP_LABELS[s]).join(", ")} will need to be made again.`)) return;
     save.disabled = true;
     mount(status, "Saving…");
@@ -926,7 +938,7 @@ function settingsPanel(p) {
       f("topic", "What is the video about?", els.topic),
       h("div", { class: "grid gap-4 sm:grid-cols-3" },
         f("language", "Language", els.language), f("audioMode", "Audio", els.audioMode), f("aspectRatio", "Shape", els.aspectRatio)),
-      f("resolution", "Quality", els.resolution, QUALITY_HINT),
+      h("div", { class: "grid gap-4 sm:grid-cols-3" }, f("videoMode", "Visuals", els.videoMode, "Switching keeps the pictures and video clips already made."), f("resolution", "Quality", els.resolution, QUALITY_HINT), f("videoConcurrency", "Videos at the same time", els.videoConcurrency, CONCURRENCY_HINT)),
       h("div", { class: "grid gap-4 sm:grid-cols-2" }, f("singer", "Singer / voice", els.singer, SINGER_HINT), f("voice", "Exact voice (rhyme over music, narration)", els.voice)),
       h("div", { class: "grid gap-4 sm:grid-cols-3" },
         f("length", "Video length (minutes)", els.length, "½ to 10 minutes."),
@@ -1067,6 +1079,37 @@ function audioUpload(p, act, done) {
 
 const MAX_VIDEO_MB = 200;
 
+/** Save a file from a URL under a given name (same-origin, so the download attribute works). */
+function saveAs(url, name) {
+  const a = h("a", { href: url, download: name, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+/** Download one scene's own audio (made on first click): exactly that scene's part of the song or voice. */
+function scenePieceButton(p, sc, m) {
+  const n = sc.index + 1;
+  const name = `${p.id}-scene-${String(n).padStart(2, "0")}.mp3`;
+  if (m?.piece) return h("a", { class: "btn-soft shrink-0 px-3 py-1 text-xs", href: mediaUrl(p.id, m.piece, p.updatedAt), download: name, title: "This scene's part of the song or voice, timed like its clip" }, "🎵 Audio");
+  const btn = h("button", { type: "button", class: "btn-soft shrink-0 px-3 py-1 text-xs", title: "This scene's part of the song or voice, timed like its clip" }, "🎵 Audio");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "⏳";
+    try {
+      const { file } = await post(`/api/projects/${enc(p.id)}/scenes/${n}/audio`, {});
+      saveAs(mediaUrl(p.id, file, Date.now()), name);
+      btn.textContent = "🎵 Audio";
+    } catch (err) {
+      btn.textContent = "🎵 Audio";
+      alert(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  return btn;
+}
+
 /**
  * Use a video file you have (e.g. downloaded from inference.sh when the app couldn't fetch it) as one scene's
  * animation, instead of paying to generate it again. Only the clips and final video are re-made.
@@ -1095,6 +1138,17 @@ function characterUpload(p, act, done) {
   const desc = h("textarea", { id: "up-desc", class: "field text-sm", rows: 3, placeholder: "Leave empty and the AI looks at the picture and describes it." });
   const preview = h("img", { alt: "Preview of the chosen picture", hidden: true, class: "max-h-56 self-start rounded-xl border border-orange-100" });
   const msg = h("p", { role: "status", "aria-live": "polite", class: "text-sm" });
+  // Design a new character from the picture (default), or use the picture itself as the character sheet.
+  const designBox = h("input", { type: "radio", name: "up-how", id: "up-design", value: "design", checked: true, class: "mt-1 size-4 accent-coral" });
+  const asIsBox = h("input", { type: "radio", name: "up-how", id: "up-asis", value: "asis", class: "mt-1 size-4 accent-coral" });
+  const how = h("fieldset", { class: "space-y-2" },
+    h("legend", { class: "label", text: "How to use it" }),
+    h("div", { class: "flex items-start gap-2" }, designBox, h("label", { for: "up-design", class: "text-sm" },
+      h("span", { class: "font-semibold", text: "✨ Design a character from it" }),
+      h("span", { class: "block text-stone-600", text: `The AI draws a new character sheet based on your picture (a photo of your child, a drawing, a toy…): same face, hair, clothes and colours, in this video's art style (${p.input.style}). Makes 1 image.` }))),
+    h("div", { class: "flex items-start gap-2" }, asIsBox, h("label", { for: "up-asis", class: "text-sm" },
+      h("span", { class: "font-semibold", text: "Use the picture as it is" }),
+      h("span", { class: "block text-stone-600", text: "Your picture becomes the character sheet unchanged (best when it already looks like a finished cartoon character)." }))));
   let url = null;
   file.addEventListener("change", () => {
     if (url) URL.revokeObjectURL(url);
@@ -1115,19 +1169,24 @@ function characterUpload(p, act, done) {
     if (!f) { msg.textContent = "Choose a picture first."; file.focus(); return SKIP; }
     if (f.size > MAX_UPLOAD_MB * 1024 * 1024) { msg.textContent = `That picture is too big (max ${MAX_UPLOAD_MB} MB).`; return SKIP; }
     const later = ["clips", "final"].filter((s) => p.completed.includes(s));
-    if (later.length && !confirm("Use this picture? The clips and final video will need to be made again (the song is kept).")) return SKIP;
-    msg.textContent = desc.value.trim() ? "Uploading…" : "Uploading… the AI is looking at the picture.";
-    await post(`/api/projects/${enc(id)}/character/upload`, { image: await readDataUrl(f), name: name.value.trim(), description: desc.value.trim(), provider: $("#prov")?.value }, "PUT");
+    const pics = p.media.scenes.filter((m) => m.image).length, vids = p.media.scenes.filter((m) => m.video).length;
+    // The pictures and video clips show the old character, so they're all deleted and made again.
+    const lost = [pics ? `${pics} scene picture${pics === 1 ? "" : "s"}` : null, vids ? `${vids} video clip${vids === 1 ? "" : "s"} (paid to make again)` : null].filter(Boolean).join(" and ");
+    if ((later.length || lost) && !confirm(`Use this picture as the character?${lost ? ` The ${lost} show the old character, so they are deleted and made again with the new one.` : ""} The song is kept.`)) return SKIP;
+    const design = designBox.checked;
+    msg.textContent = design ? "Uploading… the AI is looking at the picture and drawing the character (about a minute)." : desc.value.trim() ? "Uploading…" : "Uploading… the AI is looking at the picture.";
+    await post(`/api/projects/${enc(id)}/character/upload`, { image: await readDataUrl(f), name: name.value.trim(), description: desc.value.trim(), design, provider: $("#prov")?.value }, "PUT");
   }, false) }, "📤 Use this picture");
 
   return h("details", { class: "mt-5 rounded-xl border border-dashed border-orange-200 p-4", open: !done || null },
     h("summary", { class: "cursor-pointer font-semibold", text: done ? "📤 Upload your own character picture instead" : "📤 …or upload your own character picture" }),
-    h("p", { id: "up-help", class: "mt-2 text-sm text-stone-600", text: `PNG, JPEG or WebP, up to ${MAX_UPLOAD_MB} MB. A clear, full-body picture of one character on a plain background works best. Every scene is drawn in the project's art style, using this picture as the reference.` }),
+    h("p", { id: "up-help", class: "mt-2 text-sm text-stone-600", text: `PNG, JPEG or WebP, up to ${MAX_UPLOAD_MB} MB. A clear picture of one person or character works best. Every scene is then drawn from the character sheet, in the project's art style.` }),
     h("div", { class: "mt-3 flex flex-col gap-4 sm:flex-row" },
       h("div", { class: "flex-1 space-y-2" },
         h("label", { for: "up-file", class: "label", text: "Picture" }), file,
         h("label", { for: "up-name", class: "label", text: "Name (optional)" }), name,
-        h("label", { for: "up-desc", class: "label", text: "Look, in English (optional)" }), desc),
+        h("label", { for: "up-desc", class: "label", text: "Look, in English (optional)" }), desc,
+        how),
       preview),
     h("div", { class: "mt-3 flex flex-wrap items-center gap-3" }, useIt, msg));
 }

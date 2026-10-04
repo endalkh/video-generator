@@ -82,6 +82,7 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
       await projects.redoScene(params.id!, Number(params.index) - 1);
       return { id: params.id };
     }, 202)
+    .post("/api/projects/:id/scenes/:index/audio", async ({ params }) => projects.scenePiece(params.id!, Number(params.index) - 1))
     .put("/api/projects/:id/scenes/:index/video", async ({ params, body }) =>
       projects.uploadSceneVideo(params.id!, Number(params.index) - 1, await body(Math.ceil(MAX_VIDEO_UPLOAD_BYTES * 1.4) + 64_000)))
     .put("/api/projects/:id/subtitles", async ({ params, body }) => projects.setSubtitles(params.id!, (await body()).on))

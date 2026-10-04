@@ -74,7 +74,8 @@ const ProjectInputObject = z.object({
   topic: z.string().transform(tidy).pipe(z.string().min(3, "topic must be at least 3 characters")),
   language: LanguageSchema.default("en"),
   audioMode: AudioModeSchema.default("song"),
-  videoMode: VideoModeSchema.default("still"),
+  /** Moving video clips (Veo, Seedance, Kling…) by default; "still" = animated pictures (free, fast). */
+  videoMode: VideoModeSchema.default("veo"),
   ageRange: z.string().default("3-6"),
   style: z.string().transform(tidy).default("colorful 3D animated kids' movie style, Pixar-like, soft cinematic lighting, expressive characters"),
   reviewMode: ReviewModeSchema.default("manual"),
@@ -87,6 +88,8 @@ const ProjectInputObject = z.object({
   aspectRatio: AspectRatioSchema.default("16:9"),
   /** Final video quality. Veo 3.1 makes 4K clips; Veo Lite and Seedance make 1080p, scaled up. */
   resolution: VideoResolutionSchema.default(() => videoResolution()),
+  /** Scene videos made at the same time (1-10). Empty = auto: 4 on inference.sh, 2 on Google Veo (low per-minute limits). */
+  videoConcurrency: z.number().int().min(1).max(10).optional(),
   /** Show the lyrics / narration as subtitles in the final video. Off unless asked for. */
   subtitles: z.boolean().default(false),
   characterHint: z.string().transform(tidy).optional(),

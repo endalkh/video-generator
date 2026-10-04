@@ -43,7 +43,7 @@ export interface ProjectProps {
 const stepIndex = (s: StepName) => STEP_NAMES.indexOf(s);
 
 /** Settings that can be changed after a video was started (Video settings panel). */
-export const SETTING_KEYS = ["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio", "resolution"] as const;
+export const SETTING_KEYS = ["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio", "resolution", "videoMode", "videoConcurrency"] as const;
 
 /**
  * Aggregate root for a video project. Owns the pipeline progress rules:
@@ -306,13 +306,19 @@ export class Project {
     const unknown = Object.keys(patch).filter((k) => !(SETTING_KEYS as readonly string[]).includes(k));
     if (unknown.length) throw new ValidationError(`These can't be changed here: ${unknown.join(", ")}`);
     const next: Record<string, unknown> = { ...this.props.input, ...patch };
-    for (const k of ["sceneCount", "lengthSeconds", "characterHint", "voice", "singer"]) if (next[k] === null || next[k] === "") delete next[k];
+    for (const k of ["sceneCount", "lengthSeconds", "characterHint", "voice", "singer", "videoConcurrency"]) if (next[k] === null || next[k] === "") delete next[k];
     const parsed = ProjectInputSchema.safeParse(next);
     if (!parsed.success) throw new ValidationError("Invalid settings", parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`));
     const input = parsed.data;
     const old = this.props.input;
     const changed = SETTING_KEYS.filter((k) => JSON.stringify(old[k] ?? null) !== JSON.stringify(input[k] ?? null));
     if (!changed.length) return null;
+    // How fast to work changes nothing that was made: just remember it.
+    if (changed.every((k) => k === "videoConcurrency")) {
+      this.props.input = parsed.data;
+      this.touch();
+      return null;
+    }
 
     const has = (keys: readonly string[]) => changed.some((k) => keys.includes(k));
     const onlyLength = changed.every((k) => ["lengthSeconds", "songSeconds", "voice", "singer"].includes(k));
@@ -321,7 +327,7 @@ export class Project {
       from = opts.keepPoem && onlyLength && this.props.poem && this.isStepDone("scenes") ? "audio" : "poem";
     } else if (has(["style", "characterHint"])) from = "character";
     else if (has(["voice", "singer"])) from = "audio";
-    else from = "clips"; // aspectRatio, resolution
+    else from = "clips"; // aspectRatio, resolution, videoMode (pictures and videos already made are kept)
 
     this.props.input = input;
     if (from === "poem") {

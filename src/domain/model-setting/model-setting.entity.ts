@@ -47,8 +47,8 @@ export function defaultModelFor(task: string): string {
 /** Guess what a model can do from its id (the Gemini API doesn't expose output modalities). */
 export function capabilityOf(modelId: string): ModelCapability | undefined {
   const id = modelId.toLowerCase();
-  // inference.sh apps ("inference.sh/bytedance/seedance-2-5"): only its Seedance video apps are wired up.
-  if (id.startsWith("inference.sh/")) return /\/seedance/.test(id) ? "video" : undefined;
+  // inference.sh apps ("inference.sh/bytedance/seedance-2-5", "inference.sh/klingai/avatar"): only these video apps are wired up.
+  if (id.startsWith("inference.sh/")) return /\/seedance|^inference\.sh\/klingai\/(avatar|video-v3)/.test(id) ? "video" : undefined;
   if (/embedding|aqa|live|native-audio|realtime|robotics|computer-use|deep-research|customtools/.test(id)) return undefined;
   if (id.startsWith("veo")) return "video";
   if (id.startsWith("lyria")) return "music";

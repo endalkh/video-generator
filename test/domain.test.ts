@@ -11,7 +11,7 @@ const input = ProjectInputSchema.parse({ topic: "brushing teeth" });
 
 describe("ProjectInput", () => {
   it("applies defaults", () => {
-    expect(input).toMatchObject({ language: "en", audioMode: "song", videoMode: "still", sceneCount: 4, aspectRatio: "16:9", reviewMode: "manual" });
+    expect(input).toMatchObject({ language: "en", audioMode: "song", videoMode: "veo", sceneCount: 4, aspectRatio: "16:9", reviewMode: "manual" });
   });
   it("rejects bad scene counts", () => {
     expect(ProjectInputSchema.safeParse({ topic: "abc", sceneCount: 41 }).success).toBe(false);
@@ -145,7 +145,7 @@ describe("ModelSetting entity", () => {
     expect(v.model).toBe("inference.sh/bytedance/seedance-2-5");
     expect(() => s.change("inference.sh/bytedance/seedance-2-5")).toThrow(/needs a text model/);
     expect(() => v.change("other.host/bytedance/seedance-2-5")).toThrow(ValidationError);
-    expect([capabilityOf("inference.sh/bytedance/seedance-2-5"), capabilityOf("inference.sh/google/veo-3-1")]).toEqual(["video", undefined]);
+    expect([capabilityOf("inference.sh/bytedance/seedance-2-5"), capabilityOf("inference.sh/klingai/avatar-pro"), capabilityOf("inference.sh/klingai/video-v3"), capabilityOf("inference.sh/google/veo-3-1")]).toEqual(["video", "video", "video", undefined]);
     expect([capabilityOf("lyria-3.5"), capabilityOf("gemini-3.8-flash-tts"), capabilityOf("gemini-3-pro-image"), capabilityOf("text-embedding-004")]).toEqual(["music", "tts", "image", undefined]);
   });
 });

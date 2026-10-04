@@ -26,8 +26,10 @@ describe("the video matches the audio", () => {
     expect(p.status).toBe("done");
     const veo = mock.prompts.filter((x) => x.kind === "video");
     expect(veo).toHaveLength(2);
-    expect(veo[0]!.prompt).toContain(`she is singing along to it, singing these words: "${p.scenes!.scenes[0]!.text}"`);
-    expect(veo[0]!.prompt).toContain("No speech, no captions");
+    // Videos are made 2 at a time, so find scene 1's prompt by its words rather than its position.
+    const first = veo.find((x) => x.prompt.includes(p.scenes!.scenes[0]!.text))!;
+    expect(first.prompt).toContain(`she is singing along to it, singing these words: "${p.scenes!.scenes[0]!.text}"`);
+    expect(first.prompt).toContain("No speech, no captions");
   }, 60_000);
 
   it("narration: a storyteller reads, she acts it out without talking", async () => {
@@ -42,9 +44,10 @@ describe("the video matches the audio", () => {
     expect([p.status, p.error]).toEqual(["done", null]);
     expect(p.input.videoMode).toBe("veo"); // forced
     const veo = mock.prompts.filter((x) => x.kind === "video");
-    expect(veo[1]!.prompt).toContain(`saying exactly these words, slowly and clearly, with her lips in sync: "${p.scenes!.scenes[1]!.text}"`);
-    expect(veo[1]!.prompt).toContain("in the voice of a cheerful little girl");
-    expect(veo[1]!.prompt).not.toContain("No speech");
+    const second = veo.find((x) => x.prompt.includes(p.scenes!.scenes[1]!.text))!;
+    expect(second.prompt).toContain(`saying exactly these words, slowly and clearly, with her lips in sync: "${p.scenes!.scenes[1]!.text}"`);
+    expect(second.prompt).toContain("in the voice of a cheerful little girl");
+    expect(second.prompt).not.toContain("No speech");
     expect(mock.prompts.filter((x) => x.kind === "speech")).toHaveLength(0); // no separate narrator
     expect(mock.prompts.find((x) => x.kind === "song")!.prompt).toContain("Instrumental only");
     expect(mock.prompts.find((x) => x.kind === "poem")!.prompt).toContain("The main character says each stanza herself");
@@ -101,5 +104,31 @@ describe("uploading a scene's video by hand", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("each scene's own audio", () => {
+  it("song: cut from the song along the scene timings; narration: the voice plus the clip's tail", async () => {
+    const song = await run({ videoMode: "veo" });
+    expect(song.p.status).toBe("done");
+    // The pieces follow the scene timings, so together they are the whole song, and each matches its clip.
+    const pieces = await Promise.all(song.p.scenes!.scenes.map((s) => probeDuration(media(song.p.id).scenePiece(s.index))));
+    expect(pieces.reduce((a, b) => a + b, 0)).toBeCloseTo(song.p.song!.duration, 0);
+    for (const [i, d] of pieces.entries()) expect(Math.abs(d - (await probeDuration(media(song.p.id).sceneClip(i))))).toBeLessThan(0.1);
+    const dto = await c.projectService.get(song.p.id);
+    expect(dto.media.scenes[0]!.piece).toBe("scenes/01/scene-audio.mp3");
+    expect(await c.projectService.scenePiece(song.p.id, 1)).toEqual({ file: "scenes/02/scene-audio.mp3" });
+    await expect(c.projectService.scenePiece(song.p.id, 9)).rejects.toThrow(/No scene 10/);
+    await c.cleanup();
+
+    const story = await run({ videoMode: "still", audioMode: "narration" });
+    const m = media(story.p.id);
+    expect(await probeDuration(m.scenePiece(0))).toBeCloseTo((await probeDuration(m.sceneAudio(0))) + 0.5, 1);
+  });
+
+  it("the character-speaks mode has no separate scene audio", async () => {
+    const { p } = await run({ audioMode: "character" });
+    expect(await fileExists(media(p.id).scenePiece(0))).toBe(false);
+    await expect(c.projectService.scenePiece(p.id, 0)).rejects.toThrow(/character speaks/);
   });
 });

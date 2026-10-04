@@ -13,7 +13,7 @@ import { audioToWav, imageToPng, probeDuration, probeStreams, runFfmpeg } from "
 import { songTimeline } from "../domain/ports/generator.port.js";
 import { ensureDir, fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
-import { mediaPaths, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
+import { ensureScenePiece, mediaPaths, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
 
 export type ProviderFactory = (name: string) => Provider;
 
@@ -25,7 +25,7 @@ export interface ProjectDetailsDto extends ProjectDto {
     final: string | null;
     subtitles: string | null;
     thumbnail: string | null;
-    scenes: { index: number; image: string | null; clip: string | null; video: string | null; audio: string | null }[];
+    scenes: { index: number; image: string | null; clip: string | null; video: string | null; audio: string | null; /** The scene's own piece of the soundtrack (MP3). */ piece: string | null }[];
   };
 }
 
@@ -99,7 +99,7 @@ export class ProjectService {
         final: await rel(p.final),
         subtitles: await rel(p.srt),
         thumbnail: await rel(p.thumbnail),
-        scenes: await Promise.all((project.scenes?.scenes ?? []).map(async (s) => ({ index: s.index, image: await rel(p.sceneImage(s.index)), clip: await rel(p.sceneClip(s.index)), video: await rel(p.sceneVideo(s.index)), audio: await rel(p.sceneAudio(s.index)) }))),
+        scenes: await Promise.all((project.scenes?.scenes ?? []).map(async (s) => ({ index: s.index, image: await rel(p.sceneImage(s.index)), clip: await rel(p.sceneClip(s.index)), video: await rel(p.sceneVideo(s.index)), audio: await rel(p.sceneAudio(s.index)), piece: await rel(p.scenePiece(s.index)) }))),
       },
     };
   }
@@ -162,6 +162,7 @@ export class ProjectService {
   async changeSettings(id: string, patch: unknown, opts: { keepPoem?: boolean } = {}): Promise<{ project: ProjectDto; redoFrom: StepName | null }> {
     if (typeof patch !== "object" || patch === null || Array.isArray(patch)) throw new ValidationError("settings must be an object");
     const project = await this.loadIdle(id);
+    const before = { ...project.input };
     const from = project.changeSettings(patch as Record<string, unknown>, opts);
     if (from) {
       const media = this.media(id);
@@ -169,9 +170,12 @@ export class ProjectService {
         // New words and scenes, same character: keep the character picture, repaint the scenes.
         await wipeMediaFrom(media, "audio");
         await wipePictures(media);
+      } else if (from === "clips" && before.aspectRatio === project.input.aspectRatio) {
+        // Visuals or quality only: the pictures and paid video clips stay; only the clips are rendered again.
+        await wipeRenders(media);
       } else await wipeMediaFrom(media, from);
-      await this.projects.save(project);
     }
+    if (JSON.stringify(before) !== JSON.stringify(project.input)) await this.projects.save(project);
     return { project: ProjectMapper.toDto(project), redoFrom: from };
   }
 
@@ -315,7 +319,11 @@ export class ProjectService {
    * Use an uploaded picture as the main character. Without a description, the character model looks at the
    * picture and writes one (it's reused in every scene prompt). The audio is kept; clips are made again.
    */
-  async uploadCharacter(id: string, raw: { image?: unknown; name?: unknown; description?: unknown }, opts: { provider?: string } = {}): Promise<ProjectDto> {
+  /**
+   * Your own picture for the main character. `design: true` = the AI designs a character from it (a new
+   * character sheet in the video's art style, based on the picture); otherwise the picture is used as it is.
+   */
+  async uploadCharacter(id: string, raw: { image?: unknown; name?: unknown; description?: unknown; design?: unknown }, opts: { provider?: string } = {}): Promise<ProjectDto> {
     const project = await this.loadIdle(id);
     if (!project.isStepDone("scenes")) throw new ConflictError("Make the scenes first");
     const picture = await toPng(raw.image);
@@ -324,12 +332,13 @@ export class ProjectService {
     const character = description
       ? parse(CharacterSchema, { name: name || project.character?.name, description }, "character")
       : await this.pipeline.describeCharacter(project, picture, this.providers(opts.provider ?? project.provider), name || undefined);
+    const sheet = raw.design === true ? await this.pipeline.designCharacterSheet(project, picture, character, this.providers(opts.provider ?? project.provider)) : picture;
     if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is running; stop it first`); // started while the model was looking
     for (const s of ["poem", "scenes"] as const) project.approve(s);
     project.useCharacter(character);
     const media = this.media(id);
     await wipeMediaFrom(media, "clips");
-    await writeFileAtomic(media.characterImage, picture);
+    await writeFileAtomic(media.characterImage, sheet); // like the character step, the AI's image is stored as it comes
     await this.projects.save(project);
     return ProjectMapper.toDto(project);
   }
@@ -366,6 +375,22 @@ export class ProjectService {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  }
+
+  /**
+   * One scene's own piece of the soundtrack as MP3 (made on first use), e.g. to make that scene's clip on kling.ai
+   * by hand with the exact song part or voice, then upload the result with uploadSceneVideo.
+   */
+  async scenePiece(id: string, index: number): Promise<{ file: string }> {
+    const project = await this.load(id);
+    const count = project.scenes?.scenes.length ?? 0;
+    if (!Number.isInteger(index) || index < 0 || index >= count) throw new ValidationError(`No scene ${index + 1}`);
+    if (project.input.audioMode === "character") throw new ConflictError("In \"the character speaks\" mode the voice is made inside each video, so there's no separate scene audio");
+    if (!project.isStepDone("audio")) throw new ConflictError("Make the audio first");
+    const media = this.media(id);
+    const file = await ensureScenePiece(media, project, index);
+    if (!file) throw new ConflictError("This scene's audio is missing; make the audio again");
+    return { file: path.relative(this.pipeline.mediaDir(id), file).split(path.sep).join("/") };
   }
 
   /**

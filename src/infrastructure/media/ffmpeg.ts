@@ -93,6 +93,16 @@ export async function audioToWav(input: string, out: string): Promise<void> {
   await runFfmpeg(["-i", input, "-vn", "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le", "-f", "wav", out]);
 }
 
+/**
+ * One scene's own audio as an MP3 (for audio-driven video models like Kling Avatar, or to download):
+ * either a cut [start, end) of the whole song, or a scene's voice plus `padSec` of silence (its clip's length).
+ */
+export async function audioPiece(opts: { input: string; out: string; start?: number; end?: number; padSec?: number }): Promise<void> {
+  const cut = opts.start !== undefined && opts.end !== undefined ? ["-ss", opts.start.toFixed(3), "-to", opts.end.toFixed(3)] : [];
+  const pad = opts.padSec ? ["-af", `apad=pad_dur=${opts.padSec.toFixed(3)}`] : [];
+  await runFfmpeg([...cut, "-i", opts.input, "-vn", ...pad, "-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "192k", "-f", "mp3", opts.out]);
+}
+
 /** Join audio files (any format/rate) into one WAV, in order. */
 export async function concatAudio(inputs: string[], out: string): Promise<void> {
   const norm = inputs.map((_, i) => `[${i}:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[a${i}]`).join(";");

@@ -3,11 +3,11 @@ import { buildSrt, zoompanFilter } from "../src/infrastructure/media/ffmpeg.js";
 import { encodePng } from "../src/infrastructure/media/png.js";
 import { pcmToWav, toneWav, wavDurationSeconds } from "../src/infrastructure/media/wav.js";
 import { srtToVtt } from "../src/api/routes/projects.routes.js";
-import { mapLimit } from "../src/services/pipeline.service.js";
+import { mapLimit, videoConcurrency } from "../src/services/pipeline.service.js";
 import { maxVeoResolution, supportsImageSize, supportsReferenceImages } from "../src/infrastructure/providers/gemini.js";
 import { formatFor } from "../src/infrastructure/media/ffmpeg.js";
 import { minResolution, videoResolution } from "../src/domain/project/project.model.js";
-import { InferenceShVideo } from "../src/infrastructure/providers/inference-sh.js";
+import { InferenceShVideo, isAudioDrivenModel } from "../src/infrastructure/providers/inference-sh.js";
 import { slugify } from "../src/util/fs.js";
 import { isTransientError, withRetry } from "../src/util/retry.js";
 
@@ -79,6 +79,25 @@ describe("mapLimit", () => {
     expect(out).toEqual([50, 10, 30, 20]);
     expect(peak).toBe(2);
   });
+  it("on a failure starts nothing new but lets running items finish, then throws", async () => {
+    const finished: number[] = [];
+    const started: number[] = [];
+    await expect(mapLimit([1, 2, 3, 4, 5], 2, async (x) => {
+      started.push(x);
+      if (x === 1) throw new Error("scene 1 failed");
+      await new Promise((r) => setTimeout(r, 20));
+      finished.push(x);
+    })).rejects.toThrow("scene 1 failed");
+    expect(started).toEqual([1, 2]); // 3..5 never started
+    expect(finished).toEqual([2]); // 2 was already running and still finished
+  });
+});
+
+describe("videoConcurrency", () => {
+  it("runs inference.sh tasks 4 at a time, Google Veo 2, and VIDEO_CONCURRENCY overrides", () => {
+    expect([videoConcurrency("inference.sh/klingai/avatar", ""), videoConcurrency("veo-3.1-fast-generate-preview", "")]).toEqual([4, 2]);
+    expect([videoConcurrency("veo-3.1-fast-generate-preview", "6"), videoConcurrency("x", "50"), videoConcurrency("x", "0")]).toEqual([6, 10, 2]);
+  });
 });
 
 describe("slugify length", () => {
@@ -120,6 +139,27 @@ describe("inference.sh Seedance video", () => {
     expect(() => InferenceShVideo.input("p", { ...base, model: "inference.sh/google/veo-3-1" })).toThrow(/Unknown inference.sh video app/);
   });
 
+  it("Kling V3 animates the scene picture, as long as the scene (3-15 s), up to real 4K", () => {
+    const v3 = InferenceShVideo.input("she twirls", { ...base, model: "inference.sh/klingai/video-v3", character, resolution: "4k", durationSec: 9.84 });
+    expect(v3.app).toBe("klingai/video-v3");
+    expect(v3.input).toEqual({ image: { bytes: still, contentType: "image/png" }, prompt: "she twirls", sound: true, multi_shot: false, resolution: "4k", aspect_ratio: "16:9", duration: 10 });
+    expect(InferenceShVideo.input("x", { ...base, model: "inference.sh/klingai/video-v3", durationSec: 1.2 }).input.duration).toBe(3);
+    expect(InferenceShVideo.input("x", { ...base, model: "inference.sh/klingai/video-v3", durationSec: 40 }).input.duration).toBe(15);
+    expect(isAudioDrivenModel("inference.sh/klingai/video-v3")).toBe(false);
+  });
+
+  it("Kling Avatar animates the scene picture to the scene's own audio (standard or pro)", () => {
+    const audio = Buffer.from("mp3");
+    const std = InferenceShVideo.input("she sings", { ...base, model: "inference.sh/klingai/avatar", character, audio });
+    expect(std.app).toBe("klingai/avatar");
+    expect(std.input).toMatchObject({ image: { bytes: still, contentType: "image/png" }, audio: { bytes: audio, contentType: "audio/mpeg" }, mode: "std", aspect_ratio: "16:9" });
+    expect(String(std.input.prompt)).toMatch(/she sings$/);
+    expect(InferenceShVideo.input("x", { ...base, model: "inference.sh/klingai/avatar-pro", audio }).input.mode).toBe("pro");
+    expect(() => InferenceShVideo.input("x", { ...base, model: "inference.sh/klingai/avatar" })).toThrow(/make the audio first/);
+    expect([isAudioDrivenModel("inference.sh/klingai/avatar-pro"), isAudioDrivenModel(model)]).toEqual([true, false]);
+    expect(new InferenceShVideo("k").listModels().map((m) => m.id)).toEqual([model, "inference.sh/klingai/video-v3", "inference.sh/klingai/avatar", "inference.sh/klingai/avatar-pro"]);
+  });
+
   /** Fake inference.sh API: records calls; the task finishes on the second status poll. */
   function fakeApi(final: { status: number | string; output?: unknown; error?: string }) {
     const calls: { method: string; url: string; body?: unknown; auth?: string }[] = [];
@@ -148,7 +188,6 @@ describe("inference.sh Seedance video", () => {
     expect(run.body).toMatchObject({ app: "bytedance/seedance-2-5", input: { reference_images: [expect.stringMatching(/^https:\/\/cloud\.inference\.sh\//), expect.stringMatching(/^https:\/\/cloud\.inference\.sh\//)] } });
     expect(api.calls.filter((c) => c.url.startsWith("https://api.inference.sh")).every((c) => c.auth === "Bearer inf_test")).toBe(true);
     expect(api.calls.find((c) => c.url.startsWith("https://upload.example/"))!.auth).toBeUndefined();
-    expect(v.listModels().map((m) => m.id)).toEqual([model]);
   });
 
   it("remembers the task, retries the download, and resumes a finished task instead of paying again", async () => {
@@ -210,3 +249,4 @@ describe("video resolution", () => {
     expect(sd.input.resolution).toBe("1080p");
   });
 });
+

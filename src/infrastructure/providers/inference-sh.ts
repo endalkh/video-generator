@@ -8,8 +8,23 @@ export const INFERENCE_SH_PREFIX = "inference.sh/";
 
 export const isInferenceShModel = (model: string) => model.startsWith(INFERENCE_SH_PREFIX);
 
-/** Video apps on inference.sh that this app knows how to drive. */
-export const INFERENCE_SH_VIDEO_APPS = [{ app: "bytedance/seedance-2-5", displayName: "Seedance 2.5 (inference.sh)" }] as const;
+/**
+ * Video apps on inference.sh that this app knows how to drive. `id` is what the Models page shows (after the prefix).
+ * - seedance: animates the scene picture (8 s clips, fitted to the scene like Veo).
+ * - kling-v3: Kling V3 animates the scene picture (first frame) with its own sound, up to real 4K, 3-15 s, so
+ *   each clip can be exactly as long as its scene. Billed per second.
+ * - avatar: Kling Avatar animates the scene picture *to the scene's own audio* (lips follow the song/voice),
+ *   so the clip is exactly as long as the scene. Standard $0.056/s, Pro $0.112/s (more body movement).
+ */
+export const INFERENCE_SH_VIDEO_APPS = [
+  { id: "bytedance/seedance-2-5", app: "bytedance/seedance-2-5", kind: "seedance", displayName: "Seedance 2.5 (inference.sh)" },
+  { id: "klingai/video-v3", app: "klingai/video-v3", kind: "kling-v3", displayName: "Kling V3 — animates the scene picture, real 4K, clip as long as the scene (inference.sh)" },
+  { id: "klingai/avatar", app: "klingai/avatar", kind: "avatar", mode: "std", displayName: "Kling Avatar · standard — sings/speaks the scene's audio (inference.sh)" },
+  { id: "klingai/avatar-pro", app: "klingai/avatar", kind: "avatar", mode: "pro", displayName: "Kling Avatar · pro — more natural movement (inference.sh)" },
+] as const;
+
+/** Models that animate to the scene's audio (they need the audio step to be done). */
+export const isAudioDrivenModel = (model: string) => INFERENCE_SH_VIDEO_APPS.some((a) => a.kind === "avatar" && INFERENCE_SH_PREFIX + a.id === model);
 
 /** Clip length; the same 8 s as Veo, so the clips step fits/loops it to each scene like a Veo clip. */
 const CLIP_SECONDS = 8;
@@ -21,6 +36,10 @@ export interface InferenceShVideoOptions {
   label: string;
   character?: Buffer;
   mime: (b: Buffer) => string;
+  /** The scene's own audio (needed by Kling Avatar). */
+  audio?: Buffer;
+  /** How long the scene is on screen (seconds); Kling V3 makes the clip that long (3-15 s). */
+  durationSec?: number;
   /** Wanted resolution; Seedance makes at most 1080p (the final render scales it up). */
   resolution?: VideoResolution;
   /** A task started earlier for this scene: finish/download it instead of paying for a new one. */
@@ -72,7 +91,7 @@ export class InferenceShVideo {
   }
 
   listModels(): AvailableModel[] {
-    return INFERENCE_SH_VIDEO_APPS.map((a) => ({ id: INFERENCE_SH_PREFIX + a.app, displayName: a.displayName }));
+    return INFERENCE_SH_VIDEO_APPS.map((a) => ({ id: INFERENCE_SH_PREFIX + a.id, displayName: a.displayName }));
   }
 
   /**
@@ -80,11 +99,41 @@ export class InferenceShVideo {
    * in the prompt) so the character stays the same across clips. Without one: the scene picture is the first frame.
    */
   static input(prompt: string, opts: InferenceShVideoOptions): { app: string; input: Record<string, unknown> } {
-    const app = opts.model.slice(INFERENCE_SH_PREFIX.length);
-    if (!INFERENCE_SH_VIDEO_APPS.some((a) => a.app === app)) {
-      throw new Error(`Unknown inference.sh video app "${app}" (known: ${INFERENCE_SH_VIDEO_APPS.map((a) => a.app).join(", ")})`);
-    }
+    const id = opts.model.slice(INFERENCE_SH_PREFIX.length);
+    const def = INFERENCE_SH_VIDEO_APPS.find((a) => a.id === id);
+    if (!def) throw new Error(`Unknown inference.sh video app "${id}" (known: ${INFERENCE_SH_VIDEO_APPS.map((a) => a.id).join(", ")})`);
+    const app = def.app;
     const file = (b: Buffer): PendingFile => ({ bytes: b, contentType: opts.mime(b) });
+    if (def.kind === "kling-v3") {
+      return {
+        app,
+        input: {
+          // The scene picture (drawn from the character sheet) is the first frame, so the character stays the same.
+          image: file(opts.still),
+          prompt: prompt.slice(0, 3000),
+          sound: true,
+          multi_shot: false, // one continuous shot per scene
+          resolution: opts.resolution ?? "720p",
+          aspect_ratio: opts.aspectRatio,
+          // Billed per second: as long as the scene (rounded up), within Kling's 3-15 s; longer scenes loop/stretch.
+          duration: Math.min(15, Math.max(3, Math.ceil(opts.durationSec ?? CLIP_SECONDS))),
+        },
+      };
+    }
+    if (def.kind === "avatar") {
+      if (!opts.audio) throw new Error(`${def.displayName} animates to each scene's audio, but this scene has none (make the audio first; "the character speaks" mode has no separate audio)`);
+      return {
+        app,
+        input: {
+          // The scene picture is the face/character; the clip follows this scene's piece of the song or voice.
+          image: file(opts.still),
+          audio: { bytes: opts.audio, contentType: "audio/mpeg" } satisfies PendingFile,
+          prompt: `Lively, cheerful children's animation: the character sings or speaks along to the audio with big friendly expressions and gentle movement, staying in this scene. ${prompt}`.slice(0, 2500),
+          mode: def.mode,
+          aspect_ratio: opts.aspectRatio,
+        },
+      };
+    }
     const common = { resolution: minResolution(opts.resolution ?? "720p", "1080p"), duration: CLIP_SECONDS, generate_audio: true, watermark: false, output_format: "mp4" };
     if (opts.character) {
       return {
@@ -168,9 +217,9 @@ export class InferenceShVideo {
 
   /** Create a file record, PUT the bytes to its presigned URL, and return the file URI for app input. */
   private async upload(f: PendingFile): Promise<string> {
-    const ext = f.contentType.split("/")[1] ?? "bin";
+    const ext = ({ "audio/mpeg": "mp3" } as Record<string, string>)[f.contentType] ?? f.contentType.split("/")[1] ?? "bin";
     const [file] = await this.api<{ uri: string; upload_url?: string }[]>("POST", "/files", {
-      files: [{ uri: "", filename: `image.${ext}`, content_type: f.contentType, size: f.bytes.length }],
+      files: [{ uri: "", filename: `${f.contentType.startsWith("audio/") ? "audio" : "image"}.${ext}`, content_type: f.contentType, size: f.bytes.length }],
     });
     if (!file?.upload_url) throw new Error("inference.sh didn't return an upload URL");
     const put = await this.fetchImpl(file.upload_url, { method: "PUT", body: new Uint8Array(f.bytes), headers: { "Content-Type": f.contentType } });

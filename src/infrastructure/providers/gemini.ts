@@ -147,7 +147,7 @@ export class GeminiProvider implements Provider {
     );
   }
 
-  async video(prompt: string, opts: { model: string; still: Buffer; aspectRatio: string; label: string; character?: Buffer; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
+  async video(prompt: string, opts: { model: string; still: Buffer; aspectRatio: string; label: string; character?: Buffer; audio?: Buffer; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
     const { label } = opts;
     if (isInferenceShModel(opts.model)) return this.inferenceShVideo().video(prompt, { ...opts, mime: sniffImageMime });
     const img = (b: Buffer) => ({ imageBytes: b.toString("base64"), mimeType: sniffImageMime(b) });

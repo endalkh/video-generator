@@ -81,6 +81,10 @@ export interface Provider {
       character?: Buffer;
       /** Wanted resolution; providers cap it at what the model can make. */
       resolution?: VideoResolution;
+      /** The scene's own audio (MP3), for models that animate to given audio (Kling Avatar). */
+      audio?: Buffer;
+      /** How long the scene is on screen (seconds), for models that can make a clip that long (Kling V3). */
+      durationSec?: number;
       /** Remote task started earlier for this clip (providers that support it finish/download it instead of re-generating). */
       resumeTaskId?: string;
       onTaskStarted?: (taskId: string) => Promise<void> | void;
