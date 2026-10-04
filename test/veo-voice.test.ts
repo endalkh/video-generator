@@ -132,3 +132,38 @@ describe("each scene's own audio", () => {
     await expect(c.projectService.scenePiece(p.id, 0)).rejects.toThrow(/character speaks/);
   });
 });
+
+describe("approving uploaded videos", () => {
+  it("needs a video for every scene, then makes the final video without generating anything", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "Butterfly colours", sceneCount: 3, reviewMode: "manual", videoMode: "veo" }, "mock");
+    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+
+    const dir = await mkdtemp(path.join(os.tmpdir(), "up-"));
+    try {
+      await runFfmpeg(["-f", "lavfi", "-i", "testsrc=s=320x180:d=3:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p", path.join(dir, "v.mp4")]);
+      const { readFile } = await import("node:fs/promises");
+      const video = `data:video/mp4;base64,${(await readFile(path.join(dir, "v.mp4"))).toString("base64")}`;
+      await ps.uploadSceneVideo(id, 0, { video });
+
+      await expect(ps.approveVideos(id)).rejects.toThrow(/^Scenes 2 and 3 have no video yet/);
+      await ps.uploadSceneVideo(id, 1, { video });
+      await expect(ps.approveVideos(id)).rejects.toThrow(/^Scene 3 has no video yet/);
+      await ps.uploadSceneVideo(id, 2, { video });
+
+      const sceneMedia = () => c.generations.items.filter((g) => g.promptKey === "scene_video" || g.promptKey === "scene_image").length;
+      const paid = sceneMedia();
+      await ps.approveVideos(id);
+      await ps.idle();
+      const p = await ps.get(id);
+      expect([p.status, p.error, p.media.final]).toEqual(["done", null, "final.mp4"]);
+      expect(p.completed).toContain("clips");
+      expect(sceneMedia()).toBe(paid); // no scene video or picture was generated (only the usual YouTube thumbnail)
+      expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

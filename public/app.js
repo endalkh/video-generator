@@ -556,7 +556,8 @@ function stepPage(p, step, keepVideo, videoKey) {
     : null;
   const generate = (label = MAKE_LABEL[step], cls = "btn") => h("button", { type: "button", class: cls, onclick: act(async () => {
     if (done && !confirm(`Throw this ${STEP_LABELS[step].toLowerCase()} away and make a new one?${changeNote()}`)) return SKIP;
-    if (step === "clips" && p.input.videoMode === "veo" && !confirm(`This makes ${p.scenes.scenes.length} Veo video requests (slow, uses paid credits). Continue?`)) return SKIP;
+    const missingVideos = step === "clips" && p.input.videoMode === "veo" ? p.scenes.scenes.length - p.media.scenes.filter((m) => m.video).length : 0;
+    if (missingVideos > 0 && !confirm(`This makes ${missingVideos} new video${missingVideos === 1 ? "" : "s"} (slow, uses paid credits). Scenes that already have a video keep it. Continue?`)) return SKIP;
     await post(`/api/projects/${enc(id)}/steps/${step}/generate`, { provider: provider(), keepVisuals: keeping(), audioRequest: wish ? wish.value : undefined });
   }) }, label);
 
@@ -672,6 +673,13 @@ function stepPage(p, step, keepVideo, videoKey) {
           idle && p.input.videoMode === "veo" ? sceneVideoUpload(p, sc, act) : null));
     }));
     if (idle && p.completed.includes("audio")) extra = [visualsSwitch(p, act)];
+    // Videos uploaded by hand (or made earlier): approve them as they are and go on, without generating anything.
+    const withVideo = p.media.scenes.filter((m) => m.video).length;
+    if (idle && p.completed.includes("audio") && p.input.videoMode === "veo" && withVideo > 0 && !done) {
+      extra.unshift(h("button", { type: "button", class: "btn", title: "Put the clips together from the scene videos you have and make the final video. Nothing is generated or paid for.", onclick: act(async () => {
+        await post(`/api/projects/${enc(id)}/clips/approve-videos`);
+      }) }, `✅ Approve these videos and continue (${withVideo} of ${p.scenes.scenes.length})`));
+    }
   } else if (step === "final" && p.media.final) {
     const video = keepVideo || h("video", { id: "final-video", "data-key": videoKey, controls: true, preload: "metadata", class: "w-full rounded-xl bg-black", src: mediaUrl(id, p.media.final, p.updatedAt) },
       p.media.subtitles && p.input.subtitles ? h("track", { kind: "subtitles", label: p.input.audioMode === "song" ? "Lyrics" : "Captions", srclang: lang, src: mediaUrl(id, "subtitles.vtt", p.updatedAt), default: true }) : null);

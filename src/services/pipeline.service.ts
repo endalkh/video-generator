@@ -7,7 +7,7 @@ import { defaultVoice, minResolution, STEP_NAMES, type Character, type Poem, typ
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
-import { assertFfmpegAvailable, audioPiece, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, SCENE_TAIL_SEC, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
+import { addEndCard, assertFfmpegAvailable, audioPiece, canDrawText, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, SCENE_TAIL_SEC, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
 import { ensureDir, fileExists, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
@@ -167,6 +167,14 @@ export function videoConcurrency(model: string, env = process.env.VIDEO_CONCURRE
   return isInferenceShModel(model) ? 4 : 2;
 }
 
+/** Runs local renders one after another (across all videos being made), in the order they ask. */
+let renderQueue: Promise<unknown> = Promise.resolve();
+export function renderOneAtATime<T>(fn: () => Promise<T>): Promise<T> {
+  const run = renderQueue.then(fn, fn);
+  renderQueue = run.catch(() => undefined);
+  return run;
+}
+
 /** Run async tasks with bounded parallelism, preserving result order. */
 export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
@@ -194,6 +202,9 @@ export interface RunOptions {
   from?: StepName;
   /** Stop after this step instead of running to the final video (generate one step on its own). */
   until?: StepName;
+  /** Clips step: use only the scene videos that exist (uploaded or made earlier); never generate one. The clips are
+   *  then approved, so a manual-review run goes on to the final video. A missing video fails the run with an error. */
+  noNewVideos?: boolean;
   concurrency?: number;
   signal?: AbortSignal;
   onEvent?: (e: PipelineEvent) => void;
@@ -213,6 +224,9 @@ export class PipelineService {
     private readonly modelSettings: ModelSettingsService,
     private readonly mediaRoot: string,
   ) {}
+
+  /** Set by the container: the video's channel YouTube handle (without @), for the Shorts end card. */
+  channelHandle?: (channelId: string | null) => Promise<string | undefined>;
 
   /** Set by the container: make the YouTube upload info after the final video. */
   afterFinal?: (project: Project, provider: Provider) => Promise<void>;
@@ -325,6 +339,7 @@ export class PipelineService {
         log.step(name, "running…");
         await produce();
         project.completeStep(name);
+        if (name === "clips" && opts.noNewVideos) project.approveInRun("clips"); // the user approved the videos they have
         await save();
         emit({ type: "step-done", step: name });
         if (project.needsReview(name)) throw new ReviewPause(name);
@@ -381,7 +396,7 @@ export class PipelineService {
       const character = project.character!;
 
       /** Per-scene work: skip any scene whose artifact already exists (fine-grained resume). */
-      const perScene = async (name: StepName, file: (i: number) => string, verb: string, make: (s: Scene) => Promise<void>) => {
+      const perScene = async (name: StepName, file: (i: number) => string, verb: string, make: (s: Scene, report: (message: string) => void) => Promise<void>) => {
         let done = 0;
         const report = (message: string) => emit({ type: "progress", step: name, done, total: scenes.length, message });
         report("starting");
@@ -391,7 +406,7 @@ export class PipelineService {
           checkCancel();
           if (!(await fileExists(file(s.index)))) {
             await ensureDir(p.sceneDir(s.index));
-            await make(s);
+            await make(s, report);
           }
           done++;
           log.step(name, `scene ${s.index + 1}/${scenes.length} ${verb}`);
@@ -557,7 +572,7 @@ export class PipelineService {
 
       await step("clips", allExist(scenes.map((s) => p.sceneClip(s.index))), async () => {
         const reference = await readFile(p.characterImage);
-        await perScene("clips", p.sceneClip, "rendered", async (s) => {
+        await perScene("clips", p.sceneClip, "rendered", async (s, report) => {
           const i = s.index;
           const vars = { scene_number: i + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description };
           // An uploaded (or already made) Veo video doesn't need a picture: don't pay for one.
@@ -566,6 +581,9 @@ export class PipelineService {
             await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references: [reference], label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
           }
           checkCancel();
+          if (useVeo && opts.noNewVideos && !(await fileExists(p.sceneVideo(i)))) {
+            throw new Error(`Scene ${i + 1} has no video yet: upload it (📤 Upload video) or click "Make the clips" to generate it`);
+          }
           if (useVeo && !(await fileExists(p.sceneVideo(i)))) {
             const r = await prompt("clips", "scene_video", "scene_video", vars, i);
             try {
@@ -591,13 +609,18 @@ export class PipelineService {
             }
           }
           const tmpClip = `${p.sceneClip(i)}.part.mp4`;
-          if (input.audioMode === "character") {
-            await videoToClip({ video: p.sceneVideo(i), out: tmpClip, fmt, keepAudio: true });
-          } else if (useVeo) {
-            await videoToClip({ ...timing(i), video: p.sceneVideo(i), out: tmpClip, fmt });
-          } else {
-            await stillToClip({ ...timing(i), image: p.sceneImage(i), out: tmpClip, motion: s.motion, fmt });
-          }
+          // Rendering is local (ffmpeg, up to 4K): one at a time, even while videos are generated in parallel,
+          // so a few 4K encodes don't fight over the CPUs and memory.
+          await renderOneAtATime(async () => {
+            report(`scene ${i + 1}: putting the clip together`);
+            if (input.audioMode === "character") {
+              await videoToClip({ video: p.sceneVideo(i), out: tmpClip, fmt, keepAudio: true });
+            } else if (useVeo) {
+              await videoToClip({ ...timing(i), video: p.sceneVideo(i), out: tmpClip, fmt });
+            } else {
+              await stillToClip({ ...timing(i), image: p.sceneImage(i), out: tmpClip, motion: s.motion, fmt });
+            }
+          });
           await rename(tmpClip, p.sceneClip(i));
         });
       });
@@ -610,6 +633,16 @@ export class PipelineService {
         const tmp = `${p.final}.part.mp4`;
         const bed = input.audioMode === "character" ? await musicFile() : undefined;
         await concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: timeline ? path.join(p.dir, timeline.file) : undefined, bed });
+        // Shorts: no clickable links inside the video, so show the channel's YouTube address at the end.
+        const handle = input.aspectRatio === "9:16" ? await this.channelHandle?.(project.channelId).catch(() => undefined) : undefined;
+        if (handle) {
+          if (await canDrawText()) {
+            const carded = `${p.final}.card.mp4`;
+            const total = durations.reduce((a, b) => a + b, 0);
+            await addEndCard({ input: tmp, out: carded, lines: ["\u25B6 More on YouTube", `youtube.com/@${handle}`], seconds: Math.min(3, Math.max(1.5, total * 0.2)), fmt });
+            await rename(carded, tmp);
+          } else log.warn("this ffmpeg can't draw text (no drawtext filter): the Shorts end card with the channel link was left out");
+        }
         await rename(tmp, p.final);
         await rm(path.join(p.dir, "concat.txt"), { force: true });
       });

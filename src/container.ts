@@ -64,6 +64,7 @@ export function buildServices(deps: {
     return kit ? { name: kit.details?.name ?? kit.input.name, handle: kit.details?.handle, language: kit.input.language } : {};
   };
   pipelineService.afterFinal = publishService.afterFinal;
+  pipelineService.channelHandle = async (id) => (await publishService.channelInfo(id)).handle;
   const planService = new PlanService(contentPlans, promptService, modelSettingsService, providers, projectService, channelService.assertExists, async (id) => {
     const { audioMode, singer, voice } = (await channelService.get(id)).input;
     return { audioMode, singer, voice };

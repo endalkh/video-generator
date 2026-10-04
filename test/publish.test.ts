@@ -76,3 +76,14 @@ describe("YouTube upload info at the end of a video", () => {
     expect(await fileExists(media(p.id).thumbnail)).toBe(false);
   });
 });
+
+describe("Shorts links", () => {
+  it("adds the channel link and #Shorts to a Short's description once", async () => {
+    const { withShortsLinks } = await import("../src/services/publish.service.js");
+    const p = { title: "t", description: "Sing along!", tags: [], thumbnailTitle: "x" };
+    const out = withShortsLinks(p, "MilcahsWorld");
+    expect(out.description).toBe("Sing along!\n\n▶ More songs: https://www.youtube.com/@MilcahsWorld #Shorts");
+    expect(withShortsLinks(out, "MilcahsWorld").description).toBe(out.description); // not twice
+    expect(withShortsLinks(p).description).toBe("Sing along!\n\n#Shorts"); // no channel handle yet
+  });
+});

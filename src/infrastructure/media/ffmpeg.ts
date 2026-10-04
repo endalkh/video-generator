@@ -103,6 +103,43 @@ export async function audioPiece(opts: { input: string; out: string; start?: num
   await runFfmpeg([...cut, "-i", opts.input, "-vn", ...pad, "-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "192k", "-f", "mp3", opts.out]);
 }
 
+let drawtextOk: Promise<boolean> | undefined;
+/** Whether this ffmpeg can draw text (needs libfreetype; the Docker image has it, some local builds don't). */
+export function canDrawText(): Promise<boolean> {
+  return (drawtextOk ??= run(FFMPEG, ["-hide_banner", "-filters"]).then((out) => /\bdrawtext\b/.test(out), () => false));
+}
+
+/** A bold font for the end card: FONT_FILE, else a common one on Linux/macOS, else fontconfig's default. */
+async function boldFont(): Promise<string | undefined> {
+  const candidates = [process.env.FONT_FILE, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/Library/Fonts/Arial Bold.ttf"];
+  for (const f of candidates) if (f && (await stat(f).then(() => true, () => false))) return f;
+  return undefined;
+}
+
+/** drawtext needs : , ' \ % escaped inside text values. */
+const dtEscape = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\u2019").replace(/:/g, "\\:").replace(/%/g, "\\%").replace(/,/g, "\\,");
+
+/**
+ * End card for Shorts: for the last `seconds`, a dark rounded box near the bottom with a call to action and the
+ * channel's YouTube address (e.g. "youtube.com/@MilcahsWorld"). Sound and length stay the same.
+ */
+export async function addEndCard(opts: { input: string; out: string; lines: [string, string]; seconds: number; fmt: VideoFormat }): Promise<void> {
+  const dur = await probeDuration(opts.input);
+  const from = Math.max(0, dur - opts.seconds).toFixed(3);
+  const font = await boldFont();
+  // Shrink long lines (e.g. a 30-letter handle) so they stay inside the picture (bold glyphs ≈ 0.62 em wide).
+  const fit = (size: number, text: string) => Math.round(Math.min(size, (opts.fmt.width * 0.9) / (0.62 * [...text].length)));
+  const big = fit(opts.fmt.width * 0.075, opts.lines[0]);
+  const small = fit(opts.fmt.width * 0.055, opts.lines[1]);
+  const pad = Math.round(opts.fmt.width * 0.03);
+  const common = `${font ? `fontfile='${font}':` : ""}fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=${pad}:x=(w-text_w)/2:enable='gte(t,${from})'`;
+  const filter = [
+    `drawtext=${common}:fontsize=${big}:y=h*0.70:text='${dtEscape(opts.lines[0])}'`,
+    `drawtext=${common}:fontsize=${small}:y=h*0.70+${big + pad * 3}:text='${dtEscape(opts.lines[1])}'`,
+  ].join(",");
+  await runFfmpeg(["-i", opts.input, "-vf", filter, "-map", "0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "-c:s", "copy", "-movflags", "+faststart", opts.out]);
+}
+
 /** Join audio files (any format/rate) into one WAV, in order. */
 export async function concatAudio(inputs: string[], out: string): Promise<void> {
   const norm = inputs.map((_, i) => `[${i}:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[a${i}]`).join(";");

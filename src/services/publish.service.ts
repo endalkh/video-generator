@@ -29,6 +29,18 @@ const THUMB = { width: 1280, height: 720, maxBytes: 2 * 1024 * 1024 };
  * YouTube upload info for a finished video: title, description, tags and a 1280×720 thumbnail. Made automatically
  * when the final video is built (if missing) and on demand from the Final video page; the text can be edited.
  */
+/**
+ * Shorts: links inside a Short's video can't be clicked, so the description carries the channel link (people tap
+ * it from the description) and #Shorts. Added once, at the end, if the AI didn't already include them.
+ */
+export function withShortsLinks(p: PublishInfo, handle?: string): PublishInfo {
+  let description = p.description.trim();
+  const url = handle ? `https://www.youtube.com/@${handle}` : undefined;
+  if (url && !description.toLowerCase().includes(`youtube.com/@${handle!.toLowerCase()}`)) description += `\n\n▶ More songs: ${url}`;
+  if (!/#shorts\b/i.test(description)) description += `${url ? " " : "\n\n"}#Shorts`;
+  return { ...p, description };
+}
+
 export class PublishService {
   /** Set by the container: the video's channel name, handle and language. */
   channelInfo: (channelId: string | null) => Promise<ChannelInfo> = async () => ({});
@@ -102,7 +114,7 @@ export class PublishService {
       video_length: duration ? (duration < 60 ? `about ${Math.round(duration)} seconds` : `about ${Math.round(duration / 30) / 2} minutes`) : "short",
     });
     const out = await provider.text("publish", r.text, { model: models.channel_text, ctx: { input: project.input, poem: project.poem! } });
-    project.setPublish(out);
+    project.setPublish(project.input.aspectRatio === "9:16" ? withShortsLinks(out, channel.handle) : out);
   }
 
   private async makeThumbnail(project: Project, provider: Provider, title?: string): Promise<void> {

@@ -117,6 +117,13 @@ export class Project {
     this.touch();
   }
 
+  /** Approved as part of the run itself (e.g. the user approved their uploaded videos before it started). */
+  approveInRun(step: StepName): void {
+    if (!this.isStepDone(step)) throw new ConflictError(`"${step}" hasn't been generated yet`);
+    if (!this.props.approved.includes(step)) this.props.approved.push(step);
+    this.touch();
+  }
+
   approve(step: StepName): void {
     this.assertEditable();
     if (!this.isStepDone(step)) throw new ConflictError(`"${step}" hasn't been generated yet`);

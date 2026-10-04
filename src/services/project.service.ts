@@ -117,7 +117,7 @@ export class ProjectService {
   }
 
   /** Start (or resume) in the background; progress is published to subscribers. */
-  async start(id: string, opts: { provider?: string; from?: string; until?: StepName } = {}): Promise<void> {
+  async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean } = {}): Promise<void> {
     if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is already running`);
     const project = await this.load(id);
     if (opts.from !== undefined && !STEP_NAMES.includes(opts.from as StepName)) throw new ValidationError(`Unknown step "${opts.from}"`);
@@ -131,7 +131,7 @@ export class ProjectService {
     };
     job.done = this.pipeline
       // "final" ends the run anyway, so it never needs an explicit stop.
-      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, signal: job.controller.signal, onEvent })
+      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, noNewVideos: opts.noNewVideos, signal: job.controller.signal, onEvent })
       .then(
         () => undefined,
         (err) => {
@@ -461,6 +461,27 @@ export class ProjectService {
     const keep = keepVisuals && step === "poem" && project.input.audioMode !== "character";
     project.regenerate(step, { keepVisuals: keep });
     await wipeMediaFrom(this.media(project.id), keep ? "audio" : step);
+  }
+
+  /**
+   * Approve the scene videos as they are (uploaded by hand or made earlier) and go on: the clips are put together
+   * from them and the final video is made. Nothing is generated or paid for. Every scene needs a video first.
+   */
+  async approveVideos(id: string): Promise<void> {
+    const project = await this.loadIdle(id);
+    if (project.input.videoMode !== "veo") throw new ConflictError("Visuals are animated pictures; there are no scene videos to approve");
+    const before = STEP_NAMES.slice(0, STEP_NAMES.indexOf("clips")).find((s) => !project.isStepDone(s));
+    if (before) throw new ConflictError(`Make the ${before} first`);
+    const scenes = project.scenes!.scenes;
+    const media = this.media(id);
+    const missing = (await Promise.all(scenes.map(async (s) => ((await fileExists(media.sceneVideo(s.index))) ? null : s.index + 1)))).filter((n): n is number => n !== null);
+    if (missing.length) {
+      const list = missing.length === 1 ? `Scene ${missing[0]} has` : `Scenes ${missing.slice(0, -1).join(", ")} and ${missing.at(-1)} have`;
+      throw new ConflictError(`${list} no video yet. Upload ${missing.length === 1 ? "it" : "them"} (📤 Upload video) or click "Make the clips" to generate ${missing.length === 1 ? "it" : "them"}, then approve again.`);
+    }
+    for (const s of STEP_NAMES.slice(0, STEP_NAMES.indexOf("clips"))) project.approve(s);
+    await this.projects.save(project);
+    await this.start(id, { noNewVideos: true });
   }
 
   /** Make one scene's picture and clip again, keeping the others. */
