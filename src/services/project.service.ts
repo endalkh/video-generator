@@ -7,7 +7,7 @@ import type { GenerationDto } from "../domain/generation/generation.model.js";
 import type { Provider } from "../domain/ports/generator.port.js";
 import { Project } from "../domain/project/project.entity.js";
 import { ProjectMapper, type ProjectDto, type ProjectSummaryDto } from "../domain/project/project.mapper.js";
-import { CharacterSchema, MAX_VIDEO_SECONDS, PoemSchema, ProjectInputSchema, ScenePlanSchema, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
+import { CharacterSchema, MAX_VIDEO_SECONDS, PoemSchema, ProjectInputSchema, ScenePlanSchema, soundInVideo, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
 import { audioToWav, imageToPng, probeDuration, probeStreams, runFfmpeg } from "../infrastructure/media/ffmpeg.js";
 import { songTimeline } from "../domain/ports/generator.port.js";
@@ -267,7 +267,7 @@ export class ProjectService {
     const poem = parse(PoemSchema, raw, "poem");
     const project = await this.loadIdle(id);
     // "The character speaks": her voice is inside each Veo clip, so new words always need new clips.
-    const keep = opts.keepVisuals === true && project.input.audioMode !== "character";
+    const keep = opts.keepVisuals === true && !soundInVideo(project.input);
     project.editPoem(poem, { keepVisuals: keep });
     await wipeMediaFrom(this.media(id), "audio");
     if (!keep) await wipePictures(this.media(id));
@@ -283,7 +283,7 @@ export class ProjectService {
     project.editScenes(plan);
     const media = this.media(id);
     await wipeMediaFrom(media, "audio");
-    const speaks = project.input.audioMode === "character";
+    const speaks = soundInVideo(project.input) !== null;
     for (const s of project.scenes!.scenes) {
       if (s.visualPrompt !== before[s.index]?.visualPrompt || (speaks && s.text !== before[s.index]?.text)) await wipeScene(media, s.index);
     }
@@ -385,7 +385,7 @@ export class ProjectService {
     const project = await this.load(id);
     const count = project.scenes?.scenes.length ?? 0;
     if (!Number.isInteger(index) || index < 0 || index >= count) throw new ValidationError(`No scene ${index + 1}`);
-    if (project.input.audioMode === "character") throw new ConflictError("In \"the character speaks\" mode the voice is made inside each video, so there's no separate scene audio");
+    if (soundInVideo(project.input)) throw new ConflictError("The voice / song is made inside each video clip, so there's no separate scene audio");
     if (!project.isStepDone("audio")) throw new ConflictError("Make the audio first");
     const media = this.media(id);
     const file = await ensureScenePiece(media, project, index);
@@ -458,7 +458,7 @@ export class ProjectService {
 
   /** Forget a step's output and delete its media. A new poem with `keepVisuals` keeps the pictures and videos. */
   private async makeFresh(project: Project, step: StepName, keepVisuals: boolean): Promise<void> {
-    const keep = keepVisuals && step === "poem" && project.input.audioMode !== "character";
+    const keep = keepVisuals && step === "poem" && !soundInVideo(project.input);
     project.regenerate(step, { keepVisuals: keep });
     await wipeMediaFrom(this.media(project.id), keep ? "audio" : step);
   }

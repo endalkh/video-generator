@@ -1,6 +1,6 @@
 import { ConflictError, NotFoundError } from "../domain/errors.js";
 import { KIDS_SYLLABLES_PER_SEC, LANGUAGE_NAMES, SONG_FRAME_SEC } from "../domain/ports/generator.port.js";
-import { SECONDS_PER_SCENE, type ProjectInput, type Singer } from "../domain/project/project.model.js";
+import { pacingMode, SECONDS_PER_SCENE, soundInVideo, type ProjectInput, type Singer } from "../domain/project/project.model.js";
 import { SCENE_TAIL_SEC } from "../infrastructure/media/ffmpeg.js";
 import { DEFAULT_PROMPTS, promptDefinition } from "../domain/prompt/prompt.defaults.js";
 import { Prompt, PromptSet, SHARED } from "../domain/prompt/prompt.entity.js";
@@ -146,6 +146,7 @@ export class PromptService {
   }
 
   private static buildSet(map: Map<string, Prompt>, input: ProjectInput, extra: SnapshotExtras = {}): PromptSet {
+    const inVideo = soundInVideo(input);
     return new PromptSet(
       map,
       {
@@ -169,10 +170,14 @@ export class PromptService {
       {
         am: input.language === "am",
         en: input.language === "en",
+        // Sound made inside the clips: a song is still a song (sung by the character in each clip); every other
+        // mode becomes "the character speaks" (one ~8 s spoken stanza per clip).
         song: input.audioMode === "song",
-        narration: input.audioMode === "narration",
-        music_voice: input.audioMode === "music_voice",
-        character_voice: input.audioMode === "character",
+        narration: input.audioMode === "narration" && !inVideo,
+        music_voice: input.audioMode === "music_voice" && !inVideo,
+        character_voice: inVideo === "speaks",
+        video_sings: inVideo === "sings",
+        video_sound: inVideo !== null,
         has_audio_request: Boolean(input.audioRequest),
         veo: input.videoMode === "veo",
         has_character_hint: Boolean(input.characterHint?.trim()),
@@ -198,9 +203,11 @@ export class PromptService {
  * narration and rhyme over music = 4 lines per stanza with a short pause after each scene.
  */
 function syllablesPerLine(input: ProjectInput, songSeconds?: number): number {
-  return input.audioMode === "song"
+  // Sound inside the clips: 2 lines per ~8-second clip, like "The character speaks".
+  const mode = pacingMode(input);
+  return mode === "song"
     ? Math.max(4, Math.floor(((songSeconds ?? input.songSeconds) - SONG_FRAME_SEC) * KIDS_SYLLABLES_PER_SEC / (input.sceneCount * 2)))
-    : Math.max(4, Math.min(14, Math.floor((videoSeconds(input) - input.sceneCount * SCENE_TAIL_SEC) * KIDS_SYLLABLES_PER_SEC / (input.sceneCount * (input.audioMode === "character" ? 2 : 4)))));
+    : Math.max(4, Math.min(14, Math.floor((videoSeconds(input) - input.sceneCount * SCENE_TAIL_SEC) * KIDS_SYLLABLES_PER_SEC / (input.sceneCount * (mode === "character" ? 2 : 4)))));
 }
 
 /** How the music prompt describes the singer (music models have no voice setting). */
@@ -224,7 +231,8 @@ const VOICE_STYLE: Record<Singer, string> = {
 
 /** Target video length: the chosen length, else the song length (song) or ~12 s per scene (narration). */
 function videoSeconds(input: ProjectInput, songSeconds?: number): number {
-  return input.lengthSeconds ?? (input.audioMode === "song" ? (songSeconds ?? input.songSeconds) : input.sceneCount * SECONDS_PER_SCENE[input.audioMode]);
+  const mode = pacingMode(input);
+  return input.lengthSeconds ?? (mode === "song" ? (songSeconds ?? input.songSeconds) : input.sceneCount * SECONDS_PER_SCENE[mode]);
 }
 
 /** Extra inputs for a prompt snapshot: the song length, and the Channel page's language and flags. */

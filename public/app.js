@@ -293,6 +293,10 @@ async function showNewVideo() {
     h("div", { class: "grid gap-4 sm:grid-cols-2 lg:grid-cols-3" },
       field("f-language", "Language", select("f-language", "language", [["en", "English"], ["am", "አማርኛ (Amharic)"]], lang)),
       field("f-audio", "Audio", select("f-audio", "audioMode", AUDIO_MODES, d.audioMode ?? (lang === "am" ? "music_voice" : "song"))),
+      h("div", { class: "flex items-start gap-2 self-end pb-2" },
+        h("input", { id: "f-videoaudio", name: "videoAudio", type: "checkbox", value: "on", checked: lang === "en", class: "mt-1 size-4 accent-coral", "aria-describedby": "f-videoaudio-hint" }),
+        h("label", { for: "f-videoaudio", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip the audio AI: the video AI makes the voice / song" }),
+          h("span", { id: "f-videoaudio-hint", class: "block text-xs text-stone-500", text: "The character sings (Song) or speaks (other choices) in each video clip. On by default for English; for Amharic the audio AI is clearer." }))),
       field("f-singer", "Singer / voice", select("f-singer", "singer", SINGERS, d.singer ?? "auto"), SINGER_HINT),
       field("f-voice", "Exact voice (optional)", select("f-voice", "voice", VOICE_OPTIONS, d.voice ?? ""), "For rhyme over music and narrated stories."),
       field("f-video", "Visuals", select("f-video", "videoMode", VISUALS_OPTIONS, "veo")),
@@ -327,6 +331,7 @@ async function showNewVideo() {
     if (input.sceneCount) input.sceneCount = Number(input.sceneCount);
     if (input.videoConcurrency) input.videoConcurrency = Number(input.videoConcurrency);
     input.subtitles = fd.get("subtitles") === "on";
+    input.videoAudio = fd.get("videoAudio") === "on";
     input.lengthSeconds = lengthSecondsOf(fd.get("lengthMinutes"));
     const btn = $("button[type=submit]", form);
     btn.disabled = true;
@@ -342,26 +347,38 @@ async function showNewVideo() {
   mount($("#main"), form);
   const updateLengthPlan = () => {
     const seconds = lengthSecondsOf($("#f-length").value);
-    const mode = $("#f-audio").value;
-    const scenes = Number($("#f-scenes").value) || autoScenes(seconds, mode);
+    const chosen = $("#f-audio").value;
+    const skipAudio = $("#f-videoaudio").checked;
+    // Skipping the audio AI: a song is sung in the clips, everything else is spoken there ("the character speaks").
+    const mode = skipAudio && chosen !== "song" ? "character" : chosen;
+    const scenes = Number($("#f-scenes").value) || (skipAudio || mode === "character" ? Math.min(40, Math.max(2, Math.round(seconds / 8))) : autoScenes(seconds, mode));
     const veo = $("#f-video").value === "veo";
+    const who = $("#f-character").value.trim() || "the character";
     $("#f-length-plan").textContent = `${formatLength(seconds)} video · ${scenes} scenes (${scenes} pictures${veo ? `, ${scenes} paid Veo clips` : ""}). `
-      + (mode === "song"
+      + (skipAudio && mode === "song"
+        ? `No audio AI: in every scene the video AI makes ${who} sing that scene's words herself, with her lips in sync. Each scene is one ~8-second clip, so this needs Visuals = moving video clips. Each clip is made on its own, so the tune can change a little from scene to scene.`
+        : mode === "song"
         ? (seconds > 180
             ? `Google's song models make at most about 3 minutes per song, so this song is made in ${Math.ceil(seconds / 180)} parts that are joined (with Lyria 3 Clip: ${Math.ceil(seconds / 30)} parts of 30 s, and the tune may change between parts). Pick Lyria 3 Pro or 3.5 on the Models page for long songs.`
             : seconds > 30 ? "Pick Lyria 3 Pro or 3.5 on the Models page: Lyria 3 Clip makes 30-second songs, so longer ones are joined from several 30 s parts." : "")
         : mode === "character"
-          ? `In every scene Veo makes ${$("#f-character").value.trim() || "the character"} say that scene's words herself, with her lips in sync, plus soft background music. Each scene is one 8-second Veo clip, so this needs Visuals = Veo (${scenes} paid clips). Veo's Amharic speech isn't documented: try a short video first.`
+          ? `In every scene the video AI makes ${who} say that scene's words herself, with her lips in sync${skipAudio ? " (no audio AI, no background music)" : ", plus soft background music"}. Each scene is one 8-second clip, so this needs Visuals = moving video clips (${scenes} paid clips). Video AIs' Amharic speech isn't documented: try a short video first.`
           : mode === "music_voice"
           ? "The rhyme is chanted clearly by the voice AI over instrumental music from the music AI (one music piece, looped). Amharic words come out clear, because the voice AI speaks Amharic while the music AI can't sing it well."
           : "The story is written to be read aloud in about this time; the exact length depends on the voice.");
     $("#f-voice").closest("div").hidden = mode === "song" || mode === "character";
-    if (mode === "character") $("#f-video").value = "veo";
+    if (mode === "character" || skipAudio) $("#f-video").value = "veo";
   };
-  for (const id of ["#f-length", "#f-audio", "#f-scenes", "#f-video"]) $(id).addEventListener("input", updateLengthPlan);
+  for (const id of ["#f-length", "#f-audio", "#f-scenes", "#f-video", "#f-videoaudio"]) $(id).addEventListener("input", updateLengthPlan);
+  // The skip box follows the language (on for English, off for Amharic) until it's changed by hand.
+  let skipTouched = false;
+  $("#f-videoaudio").addEventListener("change", () => { skipTouched = true; updateLengthPlan(); });
   // Amharic is better as a rhyme over music: suggest it when switching the language (unless the channel chose otherwise).
   $("#f-language").addEventListener("change", () => {
-    if (!d.audioMode && $("#f-language").value === "am" && $("#f-audio").value === "song") { $("#f-audio").value = "music_voice"; updateLengthPlan(); }
+    const am = $("#f-language").value === "am";
+    if (!skipTouched) $("#f-videoaudio").checked = !am;
+    if (!d.audioMode && am && $("#f-audio").value === "song") $("#f-audio").value = "music_voice";
+    updateLengthPlan();
   });
   updateLengthPlan();
   $("#f-topic").focus();
@@ -847,6 +864,7 @@ function settingsPanel(p) {
     topic: h("textarea", { id: "ps-topic", class: "field", rows: 2, lang: inp.language, value: inp.topic }),
     language: sel("language", [["en", "English"], ["am", "አማርኛ (Amharic)"]], inp.language),
     audioMode: sel("audioMode", AUDIO_MODES, inp.audioMode),
+    videoAudio: h("input", { id: "ps-videoAudio", type: "checkbox", checked: inp.videoAudio === true, class: "mt-1 size-4 accent-coral" }),
     singer: sel("singer", SINGERS, inp.singer ?? "auto"),
     voice: sel("voice", VOICE_OPTIONS, inp.voice ?? ""),
     length: h("input", { id: "ps-length", type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: inp.lengthSeconds ? inp.lengthSeconds / 60 : inp.audioMode === "song" ? inp.songSeconds / 60 : "", placeholder: "not set" }),
@@ -869,7 +887,7 @@ function settingsPanel(p) {
   const read = () => {
     const minutes = Number(els.length.value);
     return {
-      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, ageRange: els.ageRange.value.trim() || "3-6",
+      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, videoAudio: els.videoAudio.checked, ageRange: els.ageRange.value.trim() || "3-6",
       aspectRatio: els.aspectRatio.value, resolution: els.resolution.value, videoMode: els.videoMode.value,
       videoConcurrency: els.videoConcurrency.value ? Number(els.videoConcurrency.value) : null, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
       singer: els.singer.value, voice: els.voice.value || null,
@@ -880,7 +898,7 @@ function settingsPanel(p) {
   const changedKeys = () => {
     const next = read();
     const autoCount = next.sceneCount ?? autoScenes(next.lengthSeconds ?? inp.songSeconds, next.audioMode);
-    const cur = { ...inp, characterHint: inp.characterHint ?? null, lengthSeconds: inp.lengthSeconds ?? null, singer: inp.singer ?? "auto", voice: inp.voice ?? null };
+    const cur = { ...inp, characterHint: inp.characterHint ?? null, lengthSeconds: inp.lengthSeconds ?? null, singer: inp.singer ?? "auto", voice: inp.voice ?? null, videoAudio: inp.videoAudio === true };
     return Object.keys(next).filter((k) => k === "sceneCount" ? autoCount !== inp.sceneCount
       : k === "lengthSeconds" ? next.lengthSeconds !== (cur.lengthSeconds ?? (inp.audioMode === "song" ? inp.songSeconds : null))
       : String(next[k] ?? "") !== String(cur[k] ?? ""));
@@ -894,7 +912,7 @@ function settingsPanel(p) {
     if (!keys.length) return null;
     if (keys.every((k) => k === "videoConcurrency")) return "none";
     const has = (list) => keys.some((k) => list.includes(k));
-    if (has(["topic", "language", "audioMode", "lengthSeconds", "sceneCount", "ageRange"])) return lengthOnly() && keepBox.checked ? "audio" : "poem";
+    if (has(["topic", "language", "audioMode", "videoAudio", "lengthSeconds", "sceneCount", "ageRange"])) return lengthOnly() && keepBox.checked ? "audio" : "poem";
     if (has(["style", "characterHint"])) return "character";
     if (has(["singer", "voice"])) return "audio";
     return "clips";
@@ -946,6 +964,9 @@ function settingsPanel(p) {
       f("topic", "What is the video about?", els.topic),
       h("div", { class: "grid gap-4 sm:grid-cols-3" },
         f("language", "Language", els.language), f("audioMode", "Audio", els.audioMode), f("aspectRatio", "Shape", els.aspectRatio)),
+      h("div", { class: "flex items-start gap-2" }, els.videoAudio,
+        h("label", { for: "ps-videoAudio", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip the audio AI: the video AI makes the voice / song" }),
+          h("span", { class: "block text-xs text-stone-500", text: "The character sings (Song) or speaks (other choices) in each video clip. Changing this writes a new poem (one ~8-second stanza per clip)." }))),
       h("div", { class: "grid gap-4 sm:grid-cols-3" }, f("videoMode", "Visuals", els.videoMode, "Switching keeps the pictures and video clips already made."), f("resolution", "Quality", els.resolution, QUALITY_HINT), f("videoConcurrency", "Videos at the same time", els.videoConcurrency, CONCURRENCY_HINT)),
       h("div", { class: "grid gap-4 sm:grid-cols-2" }, f("singer", "Singer / voice", els.singer, SINGER_HINT), f("voice", "Exact voice (rhyme over music, narration)", els.voice)),
       h("div", { class: "grid gap-4 sm:grid-cols-3" },

@@ -59,7 +59,44 @@ describe("the video matches the audio", () => {
     // Changing a scene's words makes a new clip (her voice is in it).
     await c.projectService.editScenes(p.id, { scenes: p.scenes!.scenes.map((s, i) => (i === 0 ? { ...s, text: "New words" } : s)) });
     expect([await fileExists(m.sceneVideo(0)), await fileExists(m.sceneVideo(1))]).toEqual([false, true]);
-    await expect(c.projectService.changeVisuals(p.id, "still")).rejects.toThrow(/only speak in Veo/);
+    await expect(c.projectService.changeVisuals(p.id, "still")).rejects.toThrow(/made inside the video clips/);
+  }, 60_000);
+
+  it("skip the audio AI with a song: she sings each scene in the clip, no song, voice or music model is used", async () => {
+    const { mock, p } = await run({ videoAudio: true, singer: "boy", videoMode: "still", reviewMode: "manual" });
+    // Manual mode: the poem, scenes and character pause for review; the empty audio step doesn't.
+    for (const step of ["poem", "scenes", "character"]) {
+      expect((await c.projectService.get(p.id)).status).toBe("review");
+      await c.projectService.approve(p.id, step);
+      await c.projectService.idle();
+    }
+    const done = await c.projectService.get(p.id);
+    expect(done.status).toBe("review"); // the clips
+    expect(done.input.videoMode).toBe("veo"); // forced: the sound is made in the clips
+    expect(done.completed).toContain("audio");
+    expect(mock.prompts.filter((x) => ["song", "speech"].includes(x.kind))).toHaveLength(0);
+    const veo = mock.prompts.filter((x) => x.kind === "video");
+    const first = veo.find((x) => x.prompt.includes(done.scenes!.scenes[0]!.text))!;
+    expect(first.prompt).toContain("She sings to the camera in English, in the voice of a cheerful little boy");
+    expect(first.prompt).toContain("No captions, no text.");
+    expect(first.prompt).not.toContain("No speech");
+    expect(mock.prompts.find((x) => x.kind === "poem")!.prompt).toContain("The main character sings each stanza herself");
+    await c.projectService.approve(p.id, "clips");
+    await c.projectService.idle();
+    const m = media(p.id);
+    expect((await c.projectService.get(p.id)).status).toBe("done");
+    expect(await fileExists(m.music("wav"))).toBe(false); // not even background music
+    expect(await probeDuration(m.final)).toBeCloseTo(4, 0); // 2 clips × the mock's 2 s clip
+  }, 60_000);
+
+  it("skip the audio AI with narration: she says the words herself, without background music", async () => {
+    const { mock, p } = await run({ videoAudio: true, audioMode: "narration" });
+    expect([p.status, p.error]).toEqual(["done", null]);
+    const video = mock.prompts.find((x) => x.kind === "video")!.prompt;
+    expect(video).toContain("saying exactly these words");
+    expect(video).not.toContain("she does not talk");
+    expect(mock.prompts.filter((x) => ["song", "speech"].includes(x.kind))).toHaveLength(0);
+    expect(await fileExists(media(p.id).music("wav"))).toBe(false);
   }, 60_000);
 });
 
@@ -129,7 +166,7 @@ describe("each scene's own audio", () => {
   it("the character-speaks mode has no separate scene audio", async () => {
     const { p } = await run({ audioMode: "character" });
     expect(await fileExists(media(p.id).scenePiece(0))).toBe(false);
-    await expect(c.projectService.scenePiece(p.id, 0)).rejects.toThrow(/character speaks/);
+    await expect(c.projectService.scenePiece(p.id, 0)).rejects.toThrow(/made inside each video clip/);
   });
 });
 

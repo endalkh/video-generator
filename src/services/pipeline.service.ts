@@ -3,7 +3,7 @@ import path from "node:path";
 import type { GenContext, Provider } from "../domain/ports/generator.port.js";
 import { MAX_SONG_PART_SEC, mmss, singableSeconds, songParts, songTimeline } from "../domain/ports/generator.port.js";
 import type { Project } from "../domain/project/project.entity.js";
-import { defaultVoice, minResolution, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
+import { defaultVoice, minResolution, soundInVideo, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
@@ -137,7 +137,7 @@ export async function wipeScene(p: MediaPaths, i: number): Promise<void> {
  * video has no soundtrack of its own to cut (the character speaks inside Veo) or the audio isn't made yet.
  */
 export async function ensureScenePiece(p: MediaPaths, project: Project, i: number): Promise<string | null> {
-  if (project.input.audioMode === "character") return null;
+  if (soundInVideo(project.input)) return null;
   const out = p.scenePiece(i);
   if (await fileExists(out)) return out;
   const slot = project.song?.slots[i];
@@ -426,7 +426,21 @@ export class PipelineService {
       });
 
       const musicFile = async () => (await Promise.all(["mp3", "wav"].map(async (ext) => ((await fileExists(p.music(ext))) ? p.music(ext) : null)))).find(Boolean) ?? undefined;
-      if (input.audioMode === "character") {
+      // The voice / song is made by the video model inside each clip (lip-sync).
+      const inVideo = soundInVideo(input);
+      if (inVideo && input.videoAudio) {
+        // "Skip the audio model": nothing to make (not even background music) and nothing to review.
+        checkCancel();
+        if (!project.isStepDone("audio")) {
+          project.setSong(null);
+          project.completeStep("audio");
+          emit({ type: "step-done", step: "audio" });
+          log.step("audio", "skipped: the video model makes the voice / song in each clip");
+        }
+        project.approveInRun("audio");
+        await save();
+        if (opts.until === "audio") throw new StopAfter("audio");
+      } else if (inVideo) {
         // Her voice is made by Veo in each clip (lip-sync). Here: only soft background music, if the provider can make music.
         await step("audio", async () => typeof provider.song !== "function" || Boolean(await musicFile()), async () => {
           project.setSong(null);
@@ -613,7 +627,7 @@ export class PipelineService {
           // so a few 4K encodes don't fight over the CPUs and memory.
           await renderOneAtATime(async () => {
             report(`scene ${i + 1}: putting the clip together`);
-            if (input.audioMode === "character") {
+            if (inVideo) {
               await videoToClip({ video: p.sceneVideo(i), out: tmpClip, fmt, keepAudio: true });
             } else if (useVeo) {
               await videoToClip({ ...timing(i), video: p.sceneVideo(i), out: tmpClip, fmt });
@@ -631,7 +645,7 @@ export class PipelineService {
         // The .srt is always written (handy for uploading to YouTube); it's only put in the video when asked for.
         await writeFileAtomic(p.srt, buildSrt(scenes.map((s, i) => ({ text: s.text, duration: durations[i]! }))));
         const tmp = `${p.final}.part.mp4`;
-        const bed = input.audioMode === "character" ? await musicFile() : undefined;
+        const bed = inVideo && !input.videoAudio ? await musicFile() : undefined;
         await concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: timeline ? path.join(p.dir, timeline.file) : undefined, bed });
         // Shorts: no clickable links inside the video, so show the channel's YouTube address at the end.
         const handle = input.aspectRatio === "9:16" ? await this.channelHandle?.(project.channelId).catch(() => undefined) : undefined;

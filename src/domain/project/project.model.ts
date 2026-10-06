@@ -70,10 +70,30 @@ export function autoSceneCount(lengthSeconds: number, audioMode: AudioMode): num
   return Math.min(MAX_SCENES, Math.max(2, Math.round(lengthSeconds / SECONDS_PER_SCENE[audioMode])));
 }
 
+/**
+ * Where each scene's sound comes from. null = the audio models (song / voice AI), cut to the clips.
+ * "speaks" / "sings" = the video model makes it inside each clip: the character says (or sings) the scene's words
+ * herself, lips in sync, and no audio model is used ("The character speaks" mode always works like this; with
+ * `videoAudio` a song is sung in the clips and the other modes are spoken in the clips).
+ */
+export function soundInVideo(input: { audioMode: AudioMode; videoAudio?: boolean }): "speaks" | "sings" | null {
+  if (input.audioMode === "character") return "speaks";
+  if (!input.videoAudio) return null;
+  return input.audioMode === "song" ? "sings" : "speaks";
+}
+
+/** Scene pacing: sound made inside the clips means one ~8-second clip per scene, like "The character speaks". */
+export const pacingMode = (input: { audioMode: AudioMode; videoAudio?: boolean }): AudioMode => (soundInVideo(input) ? "character" : input.audioMode);
+
 const ProjectInputObject = z.object({
   topic: z.string().transform(tidy).pipe(z.string().min(3, "topic must be at least 3 characters")),
   language: LanguageSchema.default("en"),
   audioMode: AudioModeSchema.default("song"),
+  /**
+   * Skip the audio models: the video model makes the voice or song inside each clip (see soundInVideo). Off by
+   * default; the new-video form turns it on for English (video models speak and sing English well, Amharic not).
+   */
+  videoAudio: z.boolean().default(false),
   /** Moving video clips (Veo, Seedance, Kling…) by default; "still" = animated pictures (free, fast). */
   videoMode: VideoModeSchema.default("veo"),
   ageRange: z.string().default("3-6"),
@@ -103,10 +123,10 @@ const ProjectInputObject = z.object({
 
 export const ProjectInputSchema = ProjectInputObject.transform((v) => ({
   ...v,
-  // The character can only speak in Veo clips.
-  videoMode: v.audioMode === "character" ? ("veo" as const) : v.videoMode,
+  // The video model can only make the voice / song in moving video clips.
+  videoMode: soundInVideo(v) ? ("veo" as const) : v.videoMode,
   songSeconds: v.lengthSeconds ?? v.songSeconds,
-  sceneCount: v.sceneCount ?? (v.lengthSeconds ? autoSceneCount(v.lengthSeconds, v.audioMode) : 4),
+  sceneCount: v.sceneCount ?? (v.lengthSeconds ? autoSceneCount(v.lengthSeconds, pacingMode(v)) : 4),
 }));
 export type ProjectInput = z.infer<typeof ProjectInputSchema>;
 

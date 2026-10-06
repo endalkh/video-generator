@@ -16,6 +16,7 @@ import {
   REVIEW_STEPS,
   ReviewModeSchema,
   type ReviewMode,
+  soundInVideo,
 } from "./project.model.js";
 
 /** Plain data shape of a Project, used by mappers and repositories. */
@@ -43,7 +44,7 @@ export interface ProjectProps {
 const stepIndex = (s: StepName) => STEP_NAMES.indexOf(s);
 
 /** Settings that can be changed after a video was started (Video settings panel). */
-export const SETTING_KEYS = ["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio", "resolution", "videoMode", "videoConcurrency"] as const;
+export const SETTING_KEYS = ["topic", "language", "audioMode", "videoAudio", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio", "resolution", "videoMode", "videoConcurrency"] as const;
 
 /**
  * Aggregate root for a video project. Owns the pipeline progress rules:
@@ -330,7 +331,8 @@ export class Project {
     const has = (keys: readonly string[]) => changed.some((k) => keys.includes(k));
     const onlyLength = changed.every((k) => ["lengthSeconds", "songSeconds", "voice", "singer"].includes(k));
     let from: StepName;
-    if (has(["topic", "language", "audioMode", "lengthSeconds", "songSeconds", "sceneCount", "ageRange"])) {
+    // Sound inside the clips changes how long each stanza is (one ~8 s clip per scene): new words.
+    if (has(["topic", "language", "audioMode", "videoAudio", "lengthSeconds", "songSeconds", "sceneCount", "ageRange"])) {
       from = opts.keepPoem && onlyLength && this.props.poem && this.isStepDone("scenes") ? "audio" : "poem";
     } else if (has(["style", "characterHint"])) from = "character";
     else if (has(["voice", "singer"])) from = "audio";
@@ -376,7 +378,7 @@ export class Project {
   changeVisuals(mode: VideoMode): boolean {
     if (this.isRunning) throw new ConflictError(`Project "${this.id}" is running; stop it before changing visuals`);
     if (!VideoModeSchema.safeParse(mode).success) throw new ValidationError(`Unknown visuals "${mode}"`);
-    if (mode === "still" && this.props.input.audioMode === "character") throw new ValidationError("The character can only speak in Veo clips; change the audio first");
+    if (mode === "still" && soundInVideo(this.props.input)) throw new ValidationError("The voice / song is made inside the video clips, so they must be moving video; change the audio first");
     const changed = this.props.input.videoMode !== mode;
     this.props.input = { ...this.props.input, videoMode: mode };
     this.redoFrom("clips");
