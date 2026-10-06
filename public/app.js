@@ -265,7 +265,7 @@ const VOICE_OPTIONS = [["", "Matching the singer (recommended)"], ...Object.entr
 const AUDIO_LABEL = { song: "song", music_voice: "rhyme over music", narration: "narrated story", character: "the character speaks" };
 const CONCURRENCY_OPTIONS = [["", "Auto — 4 on inference.sh, 2 on Google Veo"], ...[1, 2, 3, 4, 5, 6, 8, 10].map((n) => [String(n), n === 1 ? "1 — one at a time (safest for rate limits)" : `${n} at a time`])];
 const CONCURRENCY_HINT = "How many scene videos are made at once. More is faster; Google Veo may answer \"too many requests\" (the app waits and retries).";
-const VISUALS_OPTIONS = [["veo", "Moving video clips — AI video per scene (Veo, Seedance or Kling on the Models page; paid)"], ["still", "Animated pictures — still images with camera motion (fast, free)"]];
+const VISUALS_OPTIONS = [["veo", "Moving video clips — AI video per scene (Veo, Seedance, Kling, Wan, FLUX, MiniMax, Omni or Grok on the Models page; paid)"], ["still", "Animated pictures — still images with camera motion (fast, free)"]];
 const QUALITY_OPTIONS = [["4k", "4K — 3840×2160, sharpest (slower; Veo 4K costs more)"], ["1080p", "Full HD — 1920×1080"], ["720p", "HD — 1280×720 (fastest)"]];
 const QUALITY_HINT = "Veo 3.1 makes real 4K clips; Veo Lite and Seedance make 1080p, scaled up. Thumbnails stay 1280×720 (YouTube's size).";
 const SINGER_HINT = "Songs: the singer is described to the music AI (it has no voice setting, so it's a strong hint). Rhyme over music and narration: also picks a matching voice.";

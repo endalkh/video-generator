@@ -48,7 +48,9 @@ export function defaultModelFor(task: string): string {
 export function capabilityOf(modelId: string): ModelCapability | undefined {
   const id = modelId.toLowerCase();
   // inference.sh apps ("inference.sh/bytedance/seedance-2-5", "inference.sh/klingai/avatar"): only these video apps are wired up.
-  if (id.startsWith("inference.sh/")) return /\/seedance|^inference\.sh\/klingai\/(avatar|video-v3)/.test(id) ? "video" : undefined;
+  if (id.startsWith("inference.sh/")) {
+    return /\/seedance|^inference\.sh\/(klingai\/(avatar(-pro)?|video-v3)|alibaba\/wan-2-7-i2v|bfl\/flux-3-video|minimax\/h3|falai\/minimax-h3-max|google\/gemini-omni-flash|xai\/grok-imagine-video-1-5)$/.test(id) ? "video" : undefined;
+  }
   if (/embedding|aqa|live|native-audio|realtime|robotics|computer-use|deep-research|customtools/.test(id)) return undefined;
   if (id.startsWith("veo")) return "video";
   if (id.startsWith("lyria")) return "music";

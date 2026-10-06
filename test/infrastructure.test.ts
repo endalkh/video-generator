@@ -8,6 +8,7 @@ import { maxVeoResolution, supportsImageSize, supportsReferenceImages } from "..
 import { formatFor } from "../src/infrastructure/media/ffmpeg.js";
 import { minResolution, videoResolution } from "../src/domain/project/project.model.js";
 import { InferenceShVideo, isAudioDrivenModel } from "../src/infrastructure/providers/inference-sh.js";
+import { capabilityOf } from "../src/domain/model-setting/model-setting.entity.js";
 import { slugify } from "../src/util/fs.js";
 import { isTransientError, withRetry } from "../src/util/retry.js";
 
@@ -157,7 +158,37 @@ describe("inference.sh Seedance video", () => {
     expect(InferenceShVideo.input("x", { ...base, model: "inference.sh/klingai/avatar-pro", audio }).input.mode).toBe("pro");
     expect(() => InferenceShVideo.input("x", { ...base, model: "inference.sh/klingai/avatar" })).toThrow(/make the audio first/);
     expect([isAudioDrivenModel("inference.sh/klingai/avatar-pro"), isAudioDrivenModel(model)]).toEqual([true, false]);
-    expect(new InferenceShVideo("k").listModels().map((m) => m.id)).toEqual([model, "inference.sh/klingai/video-v3", "inference.sh/klingai/avatar", "inference.sh/klingai/avatar-pro"]);
+    expect(new InferenceShVideo("k").listModels().map((m) => m.id).slice(0, 4)).toEqual([model, "inference.sh/klingai/video-v3", "inference.sh/klingai/avatar", "inference.sh/klingai/avatar-pro"]);
+  });
+
+  it("lists Seedance 2.0 Fast, Wan 2.7, FLUX 3, MiniMax H3 (+Max), Gemini Omni Flash and Grok Imagine 1.5 as video models", () => {
+    const ids = new InferenceShVideo("k").listModels().map((m) => m.id);
+    const added = ["bytedance/seedance-2-0-fast", "alibaba/wan-2-7-i2v", "bfl/flux-3-video", "minimax/h3", "falai/minimax-h3-max", "google/gemini-omni-flash", "xai/grok-imagine-video-1-5"].map((a) => `inference.sh/${a}`);
+    expect(ids).toEqual(expect.arrayContaining(added));
+    for (const id of ids) expect(capabilityOf(id)).toBe("video");
+    expect(capabilityOf("inference.sh/xai/grok-imagine-video")).toBeUndefined();
+  });
+
+  it("Seedance 2.0 Fast is capped at 720p and gets no output_format", () => {
+    const fast = InferenceShVideo.input("hop", { ...base, model: "inference.sh/bytedance/seedance-2-0-fast", resolution: "4k" });
+    expect(fast.app).toBe("bytedance/seedance-2-0-fast");
+    expect(fast.input).toMatchObject({ resolution: "720p", ratio: "adaptive", duration: 8, image: { bytes: still, contentType: "image/png" } });
+    expect(fast.input.output_format).toBeUndefined();
+    expect(InferenceShVideo.input("hop", { ...base, resolution: "4k" }).input).toMatchObject({ resolution: "1080p", output_format: "mp4" });
+  });
+
+  it("maps the scene picture, quality and scene length to each picture-animating model's inputs", () => {
+    const img = { bytes: still, contentType: "image/png" };
+    const run = (app: string, extra: Record<string, unknown> = {}) => InferenceShVideo.input("she waves", { ...base, model: `inference.sh/${app}`, character, durationSec: 6.2, ...extra }).input;
+    expect(run("alibaba/wan-2-7-i2v", { resolution: "4k" })).toEqual({ prompt: "she waves", first_frame: img, resolution: "1080P", duration: 7, watermark: false });
+    expect(run("alibaba/wan-2-7-i2v", { resolution: "720p", durationSec: 30 })).toMatchObject({ resolution: "720P", duration: 15 });
+    expect(run("bfl/flux-3-video", { resolution: "1080p", durationSec: 2 })).toEqual({ prompt: "she waves", image: img, resolution: "fhd", duration: 5, aspect_ratio: "auto", generate_audio: true });
+    expect(run("minimax/h3", { resolution: "720p", durationSec: 14 })).toEqual({ prompt: "she waves", image: img, resolution: "768P", duration: 10, ratio: "adaptive" });
+    expect(run("minimax/h3", { resolution: "1080p" }).resolution).toBe("2K");
+    expect(run("falai/minimax-h3-max", { resolution: "4k", durationSec: 14 })).toEqual({ prompt: "she waves", image: img, resolution: "768P", duration: 14, aspect_ratio: "adaptive" });
+    expect(run("google/gemini-omni-flash", { aspectRatio: "9:16" })).toEqual({ prompt: "she waves", image: img, aspect_ratio: "9:16" });
+    expect(run("xai/grok-imagine-video-1-5", { resolution: "4k" })).toEqual({ prompt: "she waves", image: img, resolution: "1080p", duration: 7, generate_audio: true });
+    expect(run("xai/grok-imagine-video-1-5", { durationSec: undefined }).duration).toBe(8);
   });
 
   /** Fake inference.sh API: records calls; the task finishes on the second status poll. */

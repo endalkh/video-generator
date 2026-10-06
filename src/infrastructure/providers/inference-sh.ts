@@ -10,18 +10,31 @@ export const isInferenceShModel = (model: string) => model.startsWith(INFERENCE_
 
 /**
  * Video apps on inference.sh that this app knows how to drive. `id` is what the Models page shows (after the prefix).
- * - seedance: animates the scene picture (8 s clips, fitted to the scene like Veo).
+ * - seedance: animates the scene picture (8 s clips, fitted to the scene like Veo); `maxResolution` caps the request.
  * - kling-v3: Kling V3 animates the scene picture (first frame) with its own sound, up to real 4K, 3-15 s, so
  *   each clip can be exactly as long as its scene. Billed per second.
  * - avatar: Kling Avatar animates the scene picture *to the scene's own audio* (lips follow the song/voice),
  *   so the clip is exactly as long as the scene. Standard $0.056/s, Pro $0.112/s (more body movement).
+ * - wan / flux / minimax / minimax-max / grok: animate the scene picture (first frame), as long as the scene
+ *   within each model's limits (longer scenes loop/stretch like a Veo clip).
+ * - omni: Gemini Omni Flash animates the scene picture; it picks the clip length itself (no duration input).
  */
 export const INFERENCE_SH_VIDEO_APPS = [
-  { id: "bytedance/seedance-2-5", app: "bytedance/seedance-2-5", kind: "seedance", displayName: "Seedance 2.5 (inference.sh)" },
+  { id: "bytedance/seedance-2-5", app: "bytedance/seedance-2-5", kind: "seedance", maxResolution: "1080p", displayName: "Seedance 2.5 (inference.sh)" },
   { id: "klingai/video-v3", app: "klingai/video-v3", kind: "kling-v3", displayName: "Kling V3 — animates the scene picture, real 4K, clip as long as the scene (inference.sh)" },
   { id: "klingai/avatar", app: "klingai/avatar", kind: "avatar", mode: "std", displayName: "Kling Avatar · standard — sings/speaks the scene's audio (inference.sh)" },
   { id: "klingai/avatar-pro", app: "klingai/avatar", kind: "avatar", mode: "pro", displayName: "Kling Avatar · pro — more natural movement (inference.sh)" },
+  { id: "bytedance/seedance-2-0-fast", app: "bytedance/seedance-2-0-fast", kind: "seedance", maxResolution: "720p", displayName: "Seedance 2.0 Fast — cheaper and quicker, up to 720p (inference.sh)" },
+  { id: "alibaba/wan-2-7-i2v", app: "alibaba/wan-2-7-i2v", kind: "wan", displayName: "Wan 2.7 — animates the scene picture, up to 1080p, 2-15 s (inference.sh)" },
+  { id: "bfl/flux-3-video", app: "bfl/flux-3-video", kind: "flux", displayName: "FLUX 3 Video — animates the scene picture with sound, up to 1080p, 5-20 s (inference.sh)" },
+  { id: "minimax/h3", app: "minimax/h3", kind: "minimax", displayName: "MiniMax H3 — animates the scene picture with sound, 768p or 2K, 5-10 s (inference.sh)" },
+  { id: "falai/minimax-h3-max", app: "falai/minimax-h3-max", kind: "minimax-max", displayName: "MiniMax H3 Max — follows the prompt more closely, 768p, 5-15 s (inference.sh)" },
+  { id: "google/gemini-omni-flash", app: "google/gemini-omni-flash", kind: "omni", displayName: "Gemini Omni Flash — animates the scene picture with sound (inference.sh)" },
+  { id: "xai/grok-imagine-video-1-5", app: "xai/grok-imagine-video-1-5", kind: "grok", displayName: "Grok Imagine Video 1.5 — animates the scene picture with sound, up to 1080p, 1-15 s (inference.sh)" },
 ] as const;
+
+/** Whole seconds covering the scene (8 s when unknown), within a model's limits. */
+const sceneSeconds = (durationSec: number | undefined, min: number, max: number) => Math.min(max, Math.max(min, Math.ceil(durationSec ?? CLIP_SECONDS)));
 
 /** Models that animate to the scene's audio (they need the audio step to be done). */
 export const isAudioDrivenModel = (model: string) => INFERENCE_SH_VIDEO_APPS.some((a) => a.kind === "avatar" && INFERENCE_SH_PREFIX + a.id === model);
@@ -134,7 +147,32 @@ export class InferenceShVideo {
         },
       };
     }
-    const common = { resolution: minResolution(opts.resolution ?? "720p", "1080p"), duration: CLIP_SECONDS, generate_audio: true, watermark: false, output_format: "mp4" };
+    const wanted = opts.resolution ?? "720p";
+    const prompt3k = prompt.slice(0, 3000);
+    // Picture-animating models: the scene picture (drawn from the character sheet) is the first frame, so the
+    // character stays the same; the clip keeps the picture's aspect ratio (already the project's).
+    switch (def.kind) {
+      case "wan":
+        return { app, input: { prompt: prompt3k, first_frame: file(opts.still), resolution: wanted === "720p" ? "720P" : "1080P", duration: sceneSeconds(opts.durationSec, 2, 15), watermark: false } };
+      case "flux":
+        return { app, input: { prompt: prompt3k, image: file(opts.still), resolution: wanted === "720p" ? "hd" : "fhd", duration: sceneSeconds(opts.durationSec, 5, 20), aspect_ratio: "auto", generate_audio: true } };
+      case "minimax":
+        return { app, input: { prompt: prompt3k, image: file(opts.still), resolution: wanted === "720p" ? "768P" : "2K", duration: sceneSeconds(opts.durationSec, 5, 10), ratio: "adaptive" } };
+      case "minimax-max":
+        return { app, input: { prompt: prompt3k, image: file(opts.still), resolution: "768P", duration: sceneSeconds(opts.durationSec, 5, 15), aspect_ratio: "adaptive" } };
+      case "omni":
+        return { app, input: { prompt: prompt3k, image: file(opts.still), aspect_ratio: opts.aspectRatio } };
+      case "grok":
+        return { app, input: { prompt: prompt3k, image: file(opts.still), resolution: minResolution(wanted, "1080p"), duration: sceneSeconds(opts.durationSec, 1, 15), generate_audio: true } };
+    }
+    const common = {
+      resolution: minResolution(wanted, def.maxResolution),
+      duration: CLIP_SECONDS,
+      generate_audio: true,
+      watermark: false,
+      // Only Seedance 2.5 has an output format choice.
+      ...(def.id === "bytedance/seedance-2-5" ? { output_format: "mp4" } : {}),
+    };
     if (opts.character) {
       return {
         app,
@@ -195,7 +233,9 @@ export class InferenceShVideo {
     const task = await this.get<{ output?: unknown; error?: string }>(`/tasks/${created.id}`, label);
     if (status !== "done") throw new Error(`${label}: inference.sh task ${created.id} ${status}${task.error ? `: ${task.error}` : ""}`);
     const url = fileUrl(task.output);
-    if (!url) throw new Error(`${label}: inference.sh returned no video (task ${created.id})${task.error ? ` (${task.error})` : ""}`);
+    // Grok returns no video (and a notice) when xAI's moderation withholds it.
+    const notice = (task.output as { notice?: string } | undefined)?.notice;
+    if (!url) throw new Error(`${label}: inference.sh returned no video (task ${created.id})${notice ? ` — ${notice}` : ""}${task.error ? ` (${task.error})` : ""}`);
     // Result files live on inference.sh; send the key only to its own hosts.
     const own = /(^|\.)inference\.sh$/.test(new URL(url).hostname);
     return withRetry(
