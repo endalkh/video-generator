@@ -49,6 +49,12 @@ export async function imageToPng(input: string, out: string): Promise<void> {
   await runFfmpeg(["-i", input, "-frames:v", "1", "-vf", "scale=w=1024:h=1024:force_original_aspect_ratio=decrease", "-f", "image2", "-c:v", "png", out]);
 }
 
+/** One frame of a video as a PNG (at `atSec`, or the first frame if the video is shorter). */
+export async function videoFrame(input: string, out: string, atSec = 1): Promise<void> {
+  const seek = Math.max(0, Math.min(atSec, (await probeDuration(input).catch(() => 0)) - 0.1));
+  await runFfmpeg(["-ss", String(seek), "-i", input, "-frames:v", "1", "-f", "image2", "-c:v", "png", out]);
+}
+
 /**
  * Scale and centre-crop a picture to exactly `width`×`height` (e.g. YouTube's 2560×1440 banner).
  * JPEG output steps the quality down until the file fits `maxBytes`; returns the file size.

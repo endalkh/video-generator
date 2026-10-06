@@ -18,6 +18,7 @@ export const isInferenceShModel = (model: string) => model.startsWith(INFERENCE_
  * - wan / flux / minimax / minimax-max / grok: animate the scene picture (first frame), as long as the scene
  *   within each model's limits (longer scenes loop/stretch like a Veo clip).
  * - omni: Gemini Omni Flash animates the scene picture; it picks the clip length itself (no duration input).
+ * - p-video / pixverse: low-cost picture animation (first frame only, so they need scene pictures).
  */
 export const INFERENCE_SH_VIDEO_APPS = [
   { id: "bytedance/seedance-2-5", app: "bytedance/seedance-2-5", kind: "seedance", maxResolution: "1080p", displayName: "Seedance 2.5 (inference.sh)" },
@@ -31,6 +32,8 @@ export const INFERENCE_SH_VIDEO_APPS = [
   { id: "falai/minimax-h3-max", app: "falai/minimax-h3-max", kind: "minimax-max", displayName: "MiniMax H3 Max — follows the prompt more closely, 768p, 5-15 s (inference.sh)" },
   { id: "google/gemini-omni-flash", app: "google/gemini-omni-flash", kind: "omni", displayName: "Gemini Omni Flash — animates the scene picture with sound (inference.sh)" },
   { id: "xai/grok-imagine-video-1-5", app: "xai/grok-imagine-video-1-5", kind: "grok", displayName: "Grok Imagine Video 1.5 — animates the scene picture with sound, up to 1080p, 1-15 s (inference.sh)" },
+  { id: "pruna/p-video", app: "pruna/p-video", kind: "p-video", displayName: "Pruna P-Video — cheapest: animates the scene picture with sound, 720p/1080p, 1-10 s (inference.sh)" },
+  { id: "pixverse/v6", app: "pixverse/v6", kind: "pixverse", displayName: "PixVerse v6 — low cost: animates the scene picture, up to 1080p, 5-15 s (inference.sh)" },
 ] as const;
 
 /** Whole seconds covering the scene (8 s when unknown), within a model's limits. */
@@ -44,7 +47,8 @@ const CLIP_SECONDS = 8;
 
 export interface InferenceShVideoOptions {
   model: string;
-  still: Buffer;
+  /** The scene picture to animate; missing = make the scene from the character reference and the prompt. */
+  still?: Buffer;
   aspectRatio: string;
   label: string;
   character?: Buffer;
@@ -117,12 +121,14 @@ export class InferenceShVideo {
     if (!def) throw new Error(`Unknown inference.sh video app "${id}" (known: ${INFERENCE_SH_VIDEO_APPS.map((a) => a.id).join(", ")})`);
     const app = def.app;
     const file = (b: Buffer): PendingFile => ({ bytes: b, contentType: opts.mime(b) });
+    if (!opts.still) return InferenceShVideo.fromCharacter(def, prompt, opts, file);
+    const still = opts.still;
     if (def.kind === "kling-v3") {
       return {
         app,
         input: {
           // The scene picture (drawn from the character sheet) is the first frame, so the character stays the same.
-          image: file(opts.still),
+          image: file(still),
           prompt: prompt.slice(0, 3000),
           sound: true,
           multi_shot: false, // one continuous shot per scene
@@ -139,7 +145,7 @@ export class InferenceShVideo {
         app,
         input: {
           // The scene picture is the face/character; the clip follows this scene's piece of the song or voice.
-          image: file(opts.still),
+          image: file(still),
           audio: { bytes: opts.audio, contentType: "audio/mpeg" } satisfies PendingFile,
           prompt: `Lively, cheerful children's animation: the character sings or speaks along to the audio with big friendly expressions and gentle movement, staying in this scene. ${prompt}`.slice(0, 2500),
           mode: def.mode,
@@ -153,17 +159,22 @@ export class InferenceShVideo {
     // character stays the same; the clip keeps the picture's aspect ratio (already the project's).
     switch (def.kind) {
       case "wan":
-        return { app, input: { prompt: prompt3k, first_frame: file(opts.still), resolution: wanted === "720p" ? "720P" : "1080P", duration: sceneSeconds(opts.durationSec, 2, 15), watermark: false } };
+        return { app, input: { prompt: prompt3k, first_frame: file(still), resolution: wanted === "720p" ? "720P" : "1080P", duration: sceneSeconds(opts.durationSec, 2, 15), watermark: false } };
       case "flux":
-        return { app, input: { prompt: prompt3k, image: file(opts.still), resolution: wanted === "720p" ? "hd" : "fhd", duration: sceneSeconds(opts.durationSec, 5, 20), aspect_ratio: "auto", generate_audio: true } };
+        return { app, input: { prompt: prompt3k, image: file(still), resolution: wanted === "720p" ? "hd" : "fhd", duration: sceneSeconds(opts.durationSec, 5, 20), aspect_ratio: "auto", generate_audio: true } };
       case "minimax":
-        return { app, input: { prompt: prompt3k, image: file(opts.still), resolution: wanted === "720p" ? "768P" : "2K", duration: sceneSeconds(opts.durationSec, 5, 10), ratio: "adaptive" } };
+        return { app, input: { prompt: prompt3k, image: file(still), resolution: wanted === "720p" ? "768P" : "2K", duration: sceneSeconds(opts.durationSec, 5, 10), ratio: "adaptive" } };
       case "minimax-max":
-        return { app, input: { prompt: prompt3k, image: file(opts.still), resolution: "768P", duration: sceneSeconds(opts.durationSec, 5, 15), aspect_ratio: "adaptive" } };
+        return { app, input: { prompt: prompt3k, image: file(still), resolution: "768P", duration: sceneSeconds(opts.durationSec, 5, 15), aspect_ratio: "adaptive" } };
       case "omni":
-        return { app, input: { prompt: prompt3k, image: file(opts.still), aspect_ratio: opts.aspectRatio } };
+        return { app, input: { prompt: prompt3k, image: file(still), aspect_ratio: opts.aspectRatio } };
+      case "p-video":
+        // Keep the safety filter on (its default is off): this is children's content.
+        return { app, input: { prompt: prompt3k, image: file(still), resolution: wanted === "720p" ? "720p" : "1080p", duration: sceneSeconds(opts.durationSec, 1, 10), save_audio: true, disable_safety_filter: false } };
+      case "pixverse":
+        return { app, input: { prompt: prompt.slice(0, 2000), image: file(still), quality: wanted === "720p" ? "720p" : "1080p", duration: sceneSeconds(opts.durationSec, 5, 15) } };
       case "grok":
-        return { app, input: { prompt: prompt3k, image: file(opts.still), resolution: minResolution(wanted, "1080p"), duration: sceneSeconds(opts.durationSec, 1, 15), generate_audio: true } };
+        return { app, input: { prompt: prompt3k, image: file(still), resolution: minResolution(wanted, "1080p"), duration: sceneSeconds(opts.durationSec, 1, 15), generate_audio: true } };
     }
     const common = {
       resolution: minResolution(wanted, def.maxResolution),
@@ -179,7 +190,7 @@ export class InferenceShVideo {
         input: {
           ...common,
           prompt: `@Image1 is the main character's reference sheet: keep the character looking exactly the same. @Image2 is this scene's picture: animate this scene.\n\n${prompt}`,
-          reference_images: [file(opts.character), file(opts.still)],
+          reference_images: [file(opts.character), file(still)],
           ratio: opts.aspectRatio,
           // No task_type: any value but "auto" makes the inference.sh app crash
           // ("Tasks.create() got an unexpected keyword argument 'omni_reference_task_type'").
@@ -187,7 +198,45 @@ export class InferenceShVideo {
       };
     }
     // First-frame mode needs ratio "adaptive" (taken from the picture, which already has the project's ratio).
-    return { app, input: { ...common, prompt, image: file(opts.still), ratio: "adaptive" } };
+    return { app, input: { ...common, prompt, image: file(still), ratio: "adaptive" } };
+  }
+
+  /**
+   * No scene picture: the model makes the whole scene from the prompt, with the character sheet as a reference
+   * image so she looks the same in every clip. Only models that take reference images can do this.
+   */
+  private static fromCharacter(def: (typeof INFERENCE_SH_VIDEO_APPS)[number], prompt: string, opts: InferenceShVideoOptions, file: (b: Buffer) => PendingFile): { app: string; input: Record<string, unknown> } {
+    if (!opts.character) throw new Error(`${opts.label}: no scene picture and no character picture to make the scene from`);
+    const ref = [file(opts.character)];
+    const wanted = opts.resolution ?? "720p";
+    const look = "The main character must look exactly like the character in the reference image (same face, hair, clothes and colours). Make this scene:";
+    switch (def.kind) {
+      case "seedance":
+        return {
+          app: def.app,
+          input: {
+            resolution: minResolution(wanted, def.maxResolution), duration: CLIP_SECONDS, generate_audio: true, watermark: false,
+            ...(def.id === "bytedance/seedance-2-5" ? { output_format: "mp4" } : {}),
+            prompt: `@Image1 is the main character's reference sheet: keep the character looking exactly the same. Make this scene:\n\n${prompt}`,
+            reference_images: ref,
+            ratio: opts.aspectRatio,
+          },
+        };
+      case "wan":
+        // Wan's reference version (r2v): same model, made from references instead of a first frame.
+        return { app: "alibaba/wan-2-7-r2v", input: { prompt: `${look}\n${prompt}`.slice(0, 3000), reference_images: ref, resolution: wanted === "720p" ? "720P" : "1080P", ratio: opts.aspectRatio, duration: sceneSeconds(opts.durationSec, 2, 15), watermark: false } };
+      case "minimax":
+        return { app: def.app, input: { prompt: `${look}\n${prompt}`.slice(0, 3000), reference_images: ref, resolution: wanted === "720p" ? "768P" : "2K", duration: sceneSeconds(opts.durationSec, 5, 15), ratio: opts.aspectRatio } };
+      case "minimax-max":
+        return { app: def.app, input: { prompt: `${look}\n${prompt}`.slice(0, 3000), reference_images: ref, resolution: "768P", duration: sceneSeconds(opts.durationSec, 5, 15), aspect_ratio: opts.aspectRatio } };
+      case "omni":
+        return { app: def.app, input: { prompt: `${look}\n${prompt}`.slice(0, 3000), reference_images: ref, aspect_ratio: opts.aspectRatio } };
+      case "grok":
+        // Grok names reference images <image_0>, …; reference-to-video goes up to 720p.
+        return { app: def.app, input: { prompt: `<image_0> is the main character: she must look exactly like <image_0>. Make this scene:\n${prompt}`.slice(0, 3000), reference_images: ref, resolution: minResolution(wanted, "720p"), duration: sceneSeconds(opts.durationSec, 1, 15), aspect_ratio: opts.aspectRatio, generate_audio: true } };
+      default:
+        throw new Error(`${opts.label}: ${def.displayName} only animates a scene picture. Pick Seedance, Wan 2.7, MiniMax H3, Gemini Omni Flash, Grok or Veo 3.1 on the Models page, or turn scene pictures back on`);
+    }
   }
 
   async video(prompt: string, opts: InferenceShVideoOptions): Promise<Buffer> {

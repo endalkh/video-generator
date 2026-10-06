@@ -46,10 +46,11 @@ export function defaultModelFor(task: string): string {
 
 /** Guess what a model can do from its id (the Gemini API doesn't expose output modalities). */
 export function capabilityOf(modelId: string): ModelCapability | undefined {
-  const id = modelId.toLowerCase();
+  // "free/<model>" = the same Gemini model on the free-tier key (GEMINI_TEXT_API_KEY).
+  const id = modelId.toLowerCase().replace(/^free\//, "");
   // inference.sh apps ("inference.sh/bytedance/seedance-2-5", "inference.sh/klingai/avatar"): only these video apps are wired up.
   if (id.startsWith("inference.sh/")) {
-    return /\/seedance|^inference\.sh\/(klingai\/(avatar(-pro)?|video-v3)|alibaba\/wan-2-7-i2v|bfl\/flux-3-video|minimax\/h3|falai\/minimax-h3-max|google\/gemini-omni-flash|xai\/grok-imagine-video-1-5)$/.test(id) ? "video" : undefined;
+    return /\/seedance|^inference\.sh\/(klingai\/(avatar(-pro)?|video-v3)|alibaba\/wan-2-7-i2v|bfl\/flux-3-video|minimax\/h3|falai\/minimax-h3-max|google\/gemini-omni-flash|xai\/grok-imagine-video-1-5|pruna\/p-video|pixverse\/v6)$/.test(id) ? "video" : undefined;
   }
   if (/embedding|aqa|live|native-audio|realtime|robotics|computer-use|deep-research|customtools/.test(id)) return undefined;
   if (id.startsWith("veo")) return "video";
@@ -87,7 +88,7 @@ export class ModelSetting {
 
   change(model: string): void {
     const id = model.trim().replace(/^models\//, "");
-    if (!/^(inference\.sh\/[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{1,120}$/.test(id)) throw new ValidationError(`"${model}" is not a valid model id`);
+    if (!/^(inference\.sh\/[a-zA-Z0-9][a-zA-Z0-9._-]*\/|free\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{1,120}$/.test(id)) throw new ValidationError(`"${model}" is not a valid model id`);
     const cap = capabilityOf(id);
     if (cap && cap !== this.definition.capability) {
       throw new ValidationError(`"${id}" looks like a ${cap} model, but "${this.definition.title}" needs a ${this.definition.capability} model`);

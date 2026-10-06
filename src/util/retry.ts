@@ -37,7 +37,8 @@ export async function withRetry<T>(fn: (attempt: number) => Promise<T>, opts: Re
     try {
       return await fn(attempt);
     } catch (err) {
-      if (attempt >= retries || !shouldRetry(err)) throw err;
+      // A spend cap or billing problem never clears by waiting, whatever the caller allows.
+      if (attempt >= retries || isBillingStop(err) || !shouldRetry(err)) throw err;
       const delay = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt) * (0.75 + Math.random() * 0.5);
       log.warn(`${label} failed (attempt ${attempt + 1}/${retries + 1}): ${(err as Error)?.message ?? err}; retrying in ${Math.round(delay)}ms`);
       await doSleep(delay);

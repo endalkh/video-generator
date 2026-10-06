@@ -25,6 +25,7 @@ export interface ProjectDetailsDto extends ProjectDto {
     final: string | null;
     subtitles: string | null;
     thumbnail: string | null;
+    music: string | null;
     scenes: { index: number; image: string | null; clip: string | null; video: string | null; audio: string | null; /** The scene's own piece of the soundtrack (MP3). */ piece: string | null }[];
   };
 }
@@ -99,6 +100,8 @@ export class ProjectService {
         final: await rel(p.final),
         subtitles: await rel(p.srt),
         thumbnail: await rel(p.thumbnail),
+        // Background music under clips that make their own voice / song.
+        music: (await rel(p.music("mp3"))) ?? (await rel(p.music("wav"))),
         scenes: await Promise.all((project.scenes?.scenes ?? []).map(async (s) => ({ index: s.index, image: await rel(p.sceneImage(s.index)), clip: await rel(p.sceneClip(s.index)), video: await rel(p.sceneVideo(s.index)), audio: await rel(p.sceneAudio(s.index)), piece: await rel(p.scenePiece(s.index)) }))),
       },
     };
@@ -447,10 +450,12 @@ export class ProjectService {
     const name = this.step(step);
     const project = await this.loadIdle(id);
     if (name === "audio" && opts.audioRequest !== undefined) project.setAudioRequest(opts.audioRequest);
-    const missing = STEP_NAMES.slice(0, STEP_NAMES.indexOf(name)).find((s) => !project.isStepDone(s));
+    // Voice / song made in the clips: the clips don't wait for the audio step (any background music is made on the way).
+    const optional = name === "clips" && soundInVideo(project.input) ? ["audio"] : [];
+    const missing = STEP_NAMES.slice(0, STEP_NAMES.indexOf(name)).find((s) => !project.isStepDone(s) && !optional.includes(s));
     if (missing) throw new ConflictError(`Make the ${missing} first`);
     if (opts.provider) this.providers(opts.provider); // fail fast (e.g. missing API key) before wiping anything
-    for (const s of STEP_NAMES.slice(0, STEP_NAMES.indexOf(name))) project.approve(s);
+    for (const s of STEP_NAMES.slice(0, STEP_NAMES.indexOf(name))) if (project.isStepDone(s)) project.approve(s);
     if (project.isStepDone(name)) await this.makeFresh(project, name, opts.keepVisuals === true);
     await this.projects.save(project);
     await this.start(id, { provider: opts.provider, until: name });

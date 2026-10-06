@@ -46,9 +46,14 @@ export function sniffImageMime(buf: Buffer): string {
   return "image/png";
 }
 
+/** Model id prefix: run this Gemini model on the free-tier key (GEMINI_TEXT_API_KEY). */
+export const FREE_PREFIX = "free/";
+
 export class GeminiProvider implements Provider {
   readonly name = "gemini";
   private readonly ai: GoogleGenAI;
+  /** The free-tier key (GEMINI_TEXT_API_KEY), used for models chosen as "free/<model>" on the Models page. */
+  private readonly freeAi?: GoogleGenAI;
 
   /** Video models named "inference.sh/…" (Seedance) run on inference.sh instead of Google (needs INFERENCE_API_KEY). */
   private inferenceSh?: InferenceShVideo;
@@ -56,10 +61,22 @@ export class GeminiProvider implements Provider {
   constructor(apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
     if (!apiKey) throw new Error("GEMINI_API_KEY is not set. Add it to .env or your environment, or use the mock provider.");
     this.ai = new GoogleGenAI({ apiKey });
+    const freeKey = process.env.GEMINI_TEXT_API_KEY?.trim();
+    if (freeKey) this.freeAi = new GoogleGenAI({ apiKey: freeKey });
   }
 
   private inferenceShVideo(): InferenceShVideo {
     return (this.inferenceSh ??= new InferenceShVideo());
+  }
+
+  /**
+   * Which key a model runs on: "free/<model>" = the free-tier key (GEMINI_TEXT_API_KEY), anything else = the paid
+   * GEMINI_API_KEY. Returns the client and the real model id.
+   */
+  private client(model: string): { ai: GoogleGenAI; model: string } {
+    if (!model.startsWith(FREE_PREFIX)) return { ai: this.ai, model };
+    if (!this.freeAi) throw new Error(`"${model}" runs on the free-tier key, but GEMINI_TEXT_API_KEY is not set. Add it to .env, or pick the model without "free/" on the Models page`);
+    return { ai: this.freeAi, model: model.slice(FREE_PREFIX.length) };
   }
 
   private modelsCache?: { at: number; models: AvailableModel[] };
@@ -73,6 +90,14 @@ export class GeminiProvider implements Provider {
       if (!actions.some((a) => a === "generateContent" || a === "predictLongRunning")) continue;
       if (m.name) models.push({ id: m.name.replace(/^models\//, ""), displayName: m.displayName });
     }
+    // With a free-tier key: every text and speech model also as "free/<model>" (free tier: text and some speech models).
+    if (this.freeAi) {
+      for (const m of [...models]) {
+        if (/tts/.test(m.id) || (/^(gemini|gemma)/.test(m.id) && !/image|embedding|live|native-audio/.test(m.id))) {
+          models.push({ id: FREE_PREFIX + m.id, displayName: `${m.displayName ?? m.id} · free key` });
+        }
+      }
+    }
     if (process.env.INFERENCE_API_KEY) models.push(...this.inferenceShVideo().listModels());
     this.modelsCache = { at: Date.now(), models };
     return models;
@@ -85,8 +110,9 @@ export class GeminiProvider implements Provider {
       : prompt;
     return withRetry(
       async () => {
-        const res = await this.ai.models.generateContent({
-          model: opts.model,
+        const { ai, model } = this.client(opts.model);
+        const res = await ai.models.generateContent({
+          model,
           contents,
           config: { responseMimeType: "application/json", responseJsonSchema: z.toJSONSchema(schema, { io: "input" }), temperature: 0.9 },
         });
@@ -104,8 +130,9 @@ export class GeminiProvider implements Provider {
     const imageSize = opts.size && supportsImageSize(opts.model) ? { imageSize: opts.size } : {};
     return withRetry(
       async () => {
-        const res = await this.ai.models.generateContent({
-          model: opts.model,
+        const { ai, model } = this.client(opts.model);
+        const res = await ai.models.generateContent({
+          model,
           contents: [
             { role: "user", parts: [...(opts.references ?? []).map((r) => ({ inlineData: { data: r.toString("base64"), mimeType: sniffImageMime(r) } })), { text: prompt }] },
           ],
@@ -120,8 +147,9 @@ export class GeminiProvider implements Provider {
   async speech(prompt: string, opts: { model: string; voice: string; label: string }): Promise<Buffer> {
     return withRetry(
       async () => {
-        const res = await this.ai.models.generateContent({
-          model: opts.model,
+        const { ai, model } = this.client(opts.model);
+        const res = await ai.models.generateContent({
+          model,
           contents: prompt,
           config: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } } } },
         });
@@ -137,7 +165,8 @@ export class GeminiProvider implements Provider {
   async song(prompt: string, opts: { model: string; label: string }): Promise<SongResult> {
     return withRetry(
       async () => {
-        const res = await this.ai.models.generateContent({ model: opts.model, contents: prompt, config: { responseModalities: ["AUDIO", "TEXT"] } });
+        const { ai, model } = this.client(opts.model);
+        const res = await ai.models.generateContent({ model, contents: prompt, config: { responseModalities: ["AUDIO", "TEXT"] } });
         const { data, mimeType } = firstInline(res, "audio/");
         const lyrics = (res.candidates?.[0]?.content?.parts ?? []).map((p) => p.text).filter(Boolean).join("\n");
         const ext = /wav/.test(mimeType) || data.toString("ascii", 0, 4) === "RIFF" ? "wav" : "mp3";
@@ -147,7 +176,7 @@ export class GeminiProvider implements Provider {
     );
   }
 
-  async video(prompt: string, opts: { model: string; still: Buffer; aspectRatio: string; label: string; character?: Buffer; audio?: Buffer; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
+  async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; audio?: Buffer; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
     const { label } = opts;
     if (isInferenceShModel(opts.model)) return this.inferenceShVideo().video(prompt, { ...opts, mime: sniffImageMime });
     const img = (b: Buffer) => ({ imageBytes: b.toString("base64"), mimeType: sniffImageMime(b) });
@@ -157,6 +186,9 @@ export class GeminiProvider implements Provider {
     // animate the scene picture as the first frame — that picture was itself drawn from the character sheet.
     const useReferences = !!opts.character && supportsReferenceImages(opts.model);
     if (opts.character && !useReferences) log.debug(`${label}: ${opts.model} doesn't take reference images; animating the scene picture as the first frame`);
+    if (!opts.still && !useReferences) {
+      throw new Error(`${label}: ${opts.model} can't make a scene without a scene picture (it takes no character reference). Pick Veo 3.1 or Veo 3.1 Fast on the Models page, or turn scene pictures back on`);
+    }
     // 1080p and 4K need 8 s clips, which is what the app makes anyway.
     const resolution = minResolution(opts.resolution ?? "720p", maxVeoResolution(opts.model));
     const base = { numberOfVideos: 1, aspectRatio: opts.aspectRatio, durationSeconds: 8, resolution };
@@ -167,10 +199,11 @@ export class GeminiProvider implements Provider {
           source: { prompt },
           config: {
             ...base,
-            referenceImages: [opts.character, opts.still].map((b) => ({ image: img(b), referenceType: VideoGenerationReferenceType.ASSET })),
+            // No scene picture: the character alone, and Veo makes the scene from the prompt.
+            referenceImages: [opts.character, ...(opts.still ? [opts.still] : [])].map((b) => ({ image: img(b), referenceType: VideoGenerationReferenceType.ASSET })),
           },
         }
-      : { model: opts.model, source: { prompt, image: img(opts.still) }, config: base };
+      : { model: opts.model, source: { prompt, image: img(opts.still!) }, config: base };
     // Veo has low per-minute request limits: on 429 wait long enough for the window to reset.
     let op = await withRetry(() => this.ai.models.generateVideos(request), {
       label,

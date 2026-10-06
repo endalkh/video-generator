@@ -112,7 +112,13 @@ describe("settings that keep what was made", () => {
     expect((await c.projectService.changeSettings(p.id, { videoConcurrency: null })).project.input.videoConcurrency).toBeUndefined();
     await expect(c.projectService.changeSettings(p.id, { videoConcurrency: 11 })).rejects.toThrow(ValidationError);
 
+    // Skipping pictures only affects scenes still to be made: the finished clips and final video stay.
     const m = media(p.id);
+    const np = await c.projectService.changeSettings(p.id, { scenePictures: false });
+    expect([np.redoFrom, np.project.input.scenePictures, np.project.status]).toEqual([null, false, "done"]);
+    expect([await fileExists(m.sceneClip(0)), await fileExists(m.final)]).toEqual([true, true]);
+    await c.projectService.changeSettings(p.id, { scenePictures: true });
+
     const b = await c.projectService.changeSettings(p.id, { resolution: "1080p", videoMode: "still" });
     expect(b.redoFrom).toBe("clips");
     expect([await fileExists(m.sceneImage(0)), await fileExists(m.sceneVideo(0)), await fileExists(m.sceneClip(0)), await fileExists(m.final)]).toEqual([true, true, false, false]);

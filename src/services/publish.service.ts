@@ -5,7 +5,7 @@ import type { Provider } from "../domain/ports/generator.port.js";
 import type { Project } from "../domain/project/project.entity.js";
 import { ProjectMapper, type ProjectDto } from "../domain/project/project.mapper.js";
 import { PublishInfoSchema, type PublishInfo } from "../domain/project/project.model.js";
-import { fitImage } from "../infrastructure/media/ffmpeg.js";
+import { fitImage, videoFrame } from "../infrastructure/media/ffmpeg.js";
 import type { ProjectRepository } from "../repositories/repositories.js";
 import { fileExists } from "../util/fs.js";
 import { log } from "../util/log.js";
@@ -55,11 +55,14 @@ export class PublishService {
     private readonly mediaDir: (id: string) => string,
   ) {}
 
-  /** Pipeline hook after the final video: make whatever upload info is missing (never fails the video). */
+  /**
+   * Pipeline hook after the final video: make whatever upload info is missing (never fails the video). The
+   * thumbnail starts as the first scene's picture (free, no AI); "✨ Make the thumbnail" draws an AI one on request.
+   */
   readonly afterFinal = async (project: Project, provider: Provider): Promise<void> => {
     try {
       if (!project.publish) await this.makeText(project, provider);
-      if (!(await fileExists(this.thumbnailFile(project.id)))) await this.makeThumbnail(project, provider);
+      if (!(await fileExists(this.thumbnailFile(project.id)))) await this.fit(project.id, await this.firstPicture(project));
     } catch (err) {
       log.warn(`[${project.id}] YouTube title/description/thumbnail not made: ${(err as Error).message} (make them on the Final video page)`);
     }
@@ -140,13 +143,25 @@ export class PublishService {
     if (project.publish && title !== undefined && title.trim() !== project.publish.thumbnailTitle) project.setPublish({ ...project.publish, thumbnailTitle: title.trim() });
   }
 
+  /** The first scene's picture; with no scene pictures, a frame from the first scene's video. */
   private async firstPicture(project: Project): Promise<Buffer> {
     const p = mediaPaths(this.mediaDir(project.id));
     for (const s of project.scenes?.scenes ?? []) {
       const img = await readFile(p.sceneImage(s.index)).catch(() => undefined);
       if (img) return img;
     }
-    throw new ConflictError("There are no scene pictures yet");
+    for (const s of project.scenes?.scenes ?? []) {
+      const video = (await fileExists(p.sceneVideo(s.index))) ? p.sceneVideo(s.index) : (await fileExists(p.sceneClip(s.index))) ? p.sceneClip(s.index) : null;
+      if (!video) continue;
+      const png = `${this.thumbnailFile(project.id)}.frame.png`;
+      try {
+        await videoFrame(video, png);
+        return await readFile(png);
+      } finally {
+        await rm(png, { force: true });
+      }
+    }
+    throw new ConflictError("There are no scene pictures or videos yet");
   }
 
   /** Crop/resize to YouTube's 1280×720, under 2 MB, and swap the file in atomically. */

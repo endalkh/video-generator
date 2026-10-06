@@ -147,6 +147,11 @@ describe("ModelSetting entity", () => {
     expect(() => v.change("other.host/bytedance/seedance-2-5")).toThrow(ValidationError);
     expect([capabilityOf("inference.sh/bytedance/seedance-2-5"), capabilityOf("inference.sh/klingai/avatar-pro"), capabilityOf("inference.sh/klingai/video-v3"), capabilityOf("inference.sh/google/veo-3-1")]).toEqual(["video", "video", "video", undefined]);
     expect([capabilityOf("lyria-3.5"), capabilityOf("gemini-3.8-flash-tts"), capabilityOf("gemini-3-pro-image"), capabilityOf("text-embedding-004")]).toEqual(["music", "tts", "image", undefined]);
+    // "free/<model>": the same model on the free-tier key.
+    s.change("free/gemini-3.8-flash");
+    expect(s.model).toBe("free/gemini-3.8-flash");
+    expect([capabilityOf("free/gemini-3.8-flash"), capabilityOf("free/gemini-3.8-flash-tts")]).toEqual(["text", "tts"]);
+    expect(() => v.change("free/gemini-3.8-flash")).toThrow(/needs a video model/);
   });
 });
 

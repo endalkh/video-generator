@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConflictError, ValidationError } from "../src/domain/errors.js";
 import { probeStreams } from "../src/infrastructure/media/ffmpeg.js";
@@ -33,11 +34,15 @@ describe("YouTube upload info at the end of a video", () => {
     const text = mock.prompts.find((x) => x.prompt.includes("YouTube upload text"))!.prompt;
     expect(text).toContain('on the channel "Milcah\'s World"');
     expect(text).toContain(done.poem!.stanzas[0]!.lines[0]!);
+    // The automatic thumbnail is the first scene's picture: no (paid) image model call.
+    expect(mock.prompts.some((x) => x.kind === "image" && x.prompt.includes("YouTube video thumbnail"))).toBe(false);
+    // An AI thumbnail is drawn only when asked for.
+    await c.publishService.generate(p.id, "thumbnail");
     const thumb = mock.prompts.find((x) => x.kind === "image" && x.prompt.includes("YouTube video thumbnail"))!.prompt;
     expect(thumb).toContain('Add the title "Sing along!"');
   }, 60_000);
 
-  it("can be edited and made again; a missing thumbnail or text never fails the video", async () => {
+  it("can be edited and made again; a failed AI thumbnail or text never fails the video", async () => {
     const mock = mockProvider();
     const image = mock.image.bind(mock);
     mock.image = async (prompt, opts) => {
@@ -49,9 +54,11 @@ describe("YouTube upload info at the end of a video", () => {
     await c.projectService.start(p.id);
     await c.projectService.idle();
     const done = await c.projectService.get(p.id);
-    expect([done.status, done.media.thumbnail, done.publish !== null]).toEqual(["done", null, true]);
+    expect([done.status, done.media.thumbnail, done.publish !== null]).toEqual(["done", "thumbnail.jpg", true]);
+    await expect(c.publishService.generate(p.id, "thumbnail")).rejects.toThrow(/quota exceeded/);
 
     // No AI: the first picture as the thumbnail.
+    await rm(media(p.id).thumbnail);
     const framed = await c.publishService.generate(p.id, "frame");
     expect(await size(media(p.id).thumbnail)).toBe("1280x720");
     expect(framed.publish).not.toBeNull();

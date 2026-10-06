@@ -51,6 +51,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-kids_studio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-kids_studio}?schema=public
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_TEXT_API_KEY: ${GEMINI_TEXT_API_KEY:-}
       INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
       VIDEO_RESOLUTION: ${VIDEO_RESOLUTION:-4k}
       VIDEO_CONCURRENCY: ${VIDEO_CONCURRENCY:-}

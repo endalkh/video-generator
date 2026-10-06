@@ -94,6 +94,16 @@ const ProjectInputObject = z.object({
    * default; the new-video form turns it on for English (video models speak and sing English well, Amharic not).
    */
   videoAudio: z.boolean().default(false),
+  /**
+   * When the voice / song is made inside the clips: lay soft instrumental music from the music model under them
+   * (video models often sing or speak with no backing music). Off = no audio model at all.
+   */
+  backgroundMusic: z.boolean().default(true),
+  /**
+   * Paint a picture for each scene (image model) and animate it. Off = no scene pictures: the video model makes
+   * each scene from the character picture (reference) and the scene description. Needs moving video clips.
+   */
+  scenePictures: z.boolean().default(true),
   /** Moving video clips (Veo, Seedance, Kling…) by default; "still" = animated pictures (free, fast). */
   videoMode: VideoModeSchema.default("veo"),
   ageRange: z.string().default("3-6"),
@@ -123,8 +133,8 @@ const ProjectInputObject = z.object({
 
 export const ProjectInputSchema = ProjectInputObject.transform((v) => ({
   ...v,
-  // The video model can only make the voice / song in moving video clips.
-  videoMode: soundInVideo(v) ? ("veo" as const) : v.videoMode,
+  // The video model can only make the voice / song (or a scene without a picture) in moving video clips.
+  videoMode: soundInVideo(v) || !v.scenePictures ? ("veo" as const) : v.videoMode,
   songSeconds: v.lengthSeconds ?? v.songSeconds,
   sceneCount: v.sceneCount ?? (v.lengthSeconds ? autoSceneCount(v.lengthSeconds, pacingMode(v)) : 4),
 }));

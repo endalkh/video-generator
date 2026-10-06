@@ -297,9 +297,17 @@ async function showNewVideo() {
         h("input", { id: "f-videoaudio", name: "videoAudio", type: "checkbox", value: "on", checked: lang === "en", class: "mt-1 size-4 accent-coral", "aria-describedby": "f-videoaudio-hint" }),
         h("label", { for: "f-videoaudio", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip the audio AI: the video AI makes the voice / song" }),
           h("span", { id: "f-videoaudio-hint", class: "block text-xs text-stone-500", text: "The character sings (Song) or speaks (other choices) in each video clip. On by default for English; for Amharic the audio AI is clearer." }))),
+      h("div", { id: "f-music-row", class: "flex items-start gap-2 self-end pb-2" },
+        h("input", { id: "f-music", name: "backgroundMusic", type: "checkbox", value: "on", checked: true, class: "mt-1 size-4 accent-coral" }),
+        h("label", { for: "f-music", class: "text-sm" }, h("span", { class: "font-semibold", text: "Add background music" }),
+          h("span", { class: "block text-xs text-stone-500", text: "Soft instrumental music from the music AI under the voice / song made in the clips (video AIs usually sing without music). Untick to use no audio AI at all." }))),
       field("f-singer", "Singer / voice", select("f-singer", "singer", SINGERS, d.singer ?? "auto"), SINGER_HINT),
       field("f-voice", "Exact voice (optional)", select("f-voice", "voice", VOICE_OPTIONS, d.voice ?? ""), "For rhyme over music and narrated stories."),
       field("f-video", "Visuals", select("f-video", "videoMode", VISUALS_OPTIONS, "veo")),
+      h("div", { id: "f-pictures-row", class: "flex items-start gap-2 self-end pb-2" },
+        h("input", { id: "f-nopictures", name: "noScenePictures", type: "checkbox", value: "on", class: "mt-1 size-4 accent-coral" }),
+        h("label", { for: "f-nopictures", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip scene pictures" }),
+          h("span", { class: "block text-xs text-stone-500", text: "The video AI makes each scene from the character picture and the scene description (no image AI per scene). Needs a video model that takes a character reference: Seedance, Wan 2.7, MiniMax H3, Gemini Omni Flash, Grok or Veo 3.1." }))),
       field("f-scenes", "Scenes", h("input", { id: "f-scenes", name: "sceneCount", type: "number", min: 2, max: 40, class: "field", placeholder: "Auto" }),
         "Leave empty: one picture about every 10 s (song) or 12 s (story)."),
       field("f-length", "Video length (minutes)", h("input", { id: "f-length", name: "lengthMinutes", type: "number", min: 0.5, max: 10, step: 0.5, value: d.videoMinutes ?? 0.5, class: "field", "aria-describedby": "f-length-plan" }),
@@ -332,6 +340,9 @@ async function showNewVideo() {
     if (input.videoConcurrency) input.videoConcurrency = Number(input.videoConcurrency);
     input.subtitles = fd.get("subtitles") === "on";
     input.videoAudio = fd.get("videoAudio") === "on";
+    input.backgroundMusic = fd.get("backgroundMusic") === "on";
+    input.scenePictures = fd.get("noScenePictures") !== "on";
+    delete input.noScenePictures;
     input.lengthSeconds = lengthSecondsOf(fd.get("lengthMinutes"));
     const btn = $("button[type=submit]", form);
     btn.disabled = true;
@@ -354,22 +365,25 @@ async function showNewVideo() {
     const scenes = Number($("#f-scenes").value) || (skipAudio || mode === "character" ? Math.min(40, Math.max(2, Math.round(seconds / 8))) : autoScenes(seconds, mode));
     const veo = $("#f-video").value === "veo";
     const who = $("#f-character").value.trim() || "the character";
-    $("#f-length-plan").textContent = `${formatLength(seconds)} video · ${scenes} scenes (${scenes} pictures${veo ? `, ${scenes} paid Veo clips` : ""}). `
+    $("#f-length-plan").textContent = `${formatLength(seconds)} video · ${scenes} scenes (${$("#f-nopictures").checked && veo ? "no pictures" : `${scenes} pictures`}${veo ? `, ${scenes} paid video clips` : ""}). `
       + (skipAudio && mode === "song"
-        ? `No audio AI: in every scene the video AI makes ${who} sing that scene's words herself, with her lips in sync. Each scene is one ~8-second clip, so this needs Visuals = moving video clips. Each clip is made on its own, so the tune can change a little from scene to scene.`
+        ? `No audio AI: in every scene the video AI makes ${who} sing that scene's words herself, with her lips in sync.${$("#f-music").checked ? " Soft background music from the music AI plays under the clips." : " No background music (video AIs usually sing without music)."} Each scene is one ~8-second clip, so this needs Visuals = moving video clips. Each clip is made on its own, so the tune can change a little from scene to scene.`
         : mode === "song"
         ? (seconds > 180
             ? `Google's song models make at most about 3 minutes per song, so this song is made in ${Math.ceil(seconds / 180)} parts that are joined (with Lyria 3 Clip: ${Math.ceil(seconds / 30)} parts of 30 s, and the tune may change between parts). Pick Lyria 3 Pro or 3.5 on the Models page for long songs.`
             : seconds > 30 ? "Pick Lyria 3 Pro or 3.5 on the Models page: Lyria 3 Clip makes 30-second songs, so longer ones are joined from several 30 s parts." : "")
         : mode === "character"
-          ? `In every scene the video AI makes ${who} say that scene's words herself, with her lips in sync${skipAudio ? " (no audio AI, no background music)" : ", plus soft background music"}. Each scene is one 8-second clip, so this needs Visuals = moving video clips (${scenes} paid clips). Video AIs' Amharic speech isn't documented: try a short video first.`
+          ? `In every scene the video AI makes ${who} say that scene's words herself, with her lips in sync${$("#f-music").checked ? ", plus soft background music from the music AI" : " (no audio AI, no background music)"}. Each scene is one 8-second clip, so this needs Visuals = moving video clips (${scenes} paid clips). Video AIs' Amharic speech isn't documented: try a short video first.`
           : mode === "music_voice"
           ? "The rhyme is chanted clearly by the voice AI over instrumental music from the music AI (one music piece, looped). Amharic words come out clear, because the voice AI speaks Amharic while the music AI can't sing it well."
           : "The story is written to be read aloud in about this time; the exact length depends on the voice.");
     $("#f-voice").closest("div").hidden = mode === "song" || mode === "character";
-    if (mode === "character" || skipAudio) $("#f-video").value = "veo";
+    $("#f-music-row").hidden = !(skipAudio || mode === "character");
+    const noPictures = $("#f-nopictures").checked;
+    if (mode === "character" || skipAudio || noPictures) $("#f-video").value = "veo";
+    $("#f-pictures-row").hidden = $("#f-video").value !== "veo";
   };
-  for (const id of ["#f-length", "#f-audio", "#f-scenes", "#f-video", "#f-videoaudio"]) $(id).addEventListener("input", updateLengthPlan);
+  for (const id of ["#f-length", "#f-audio", "#f-scenes", "#f-video", "#f-videoaudio", "#f-music", "#f-nopictures"]) $(id).addEventListener("input", updateLengthPlan);
   // The skip box follows the language (on for English, off for Amharic) until it's changed by hand.
   let skipTouched = false;
   $("#f-videoaudio").addEventListener("change", () => { skipTouched = true; updateLengthPlan(); });
@@ -479,7 +493,19 @@ async function renderProject(id, keepStatus = false) {
 
   const controls = h("div", { class: "mt-4 flex flex-wrap items-center gap-2" },
     p.running
-      ? h("button", { type: "button", class: "btn-danger", onclick: () => post(`/api/projects/${enc(id)}/cancel`) }, "■ Stop")
+      ? h("button", { type: "button", class: "btn-danger", onclick: async (e) => {
+          // Answer the click at once; the run stops within a moment (videos already paid for are picked up next time).
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          btn.textContent = "Stopping…";
+          try {
+            await post(`/api/projects/${enc(id)}/cancel`);
+          } catch (err) {
+            mount($("#run-status"), errorBox(err));
+            btn.disabled = false;
+            btn.textContent = "■ Stop";
+          }
+        } }, "■ Stop")
       : [
           p.status === "done" ? null : h("button", { type: "button", class: "btn-soft", onclick: async (e) => {
             e.currentTarget.disabled = true;
@@ -537,7 +563,10 @@ async function renderProject(id, keepStatus = false) {
 function stepPage(p, step, keepVideo, videoKey) {
   const id = p.id, lang = p.input.language;
   const done = p.completed.includes(step);
-  const prev = prevStep(step), next = nextStepOf(step);
+  const next = nextStepOf(step);
+  // Voice / song made in the clips: the clips don't wait for the audio step (background music is made on the way).
+  const soundInClips = p.input.audioMode === "character" || p.input.videoAudio === true;
+  const prev = step === "clips" && soundInClips && !p.completed.includes("audio") ? "character" : prevStep(step);
   const ready = !prev || p.completed.includes(prev);
   const making = p.running && p.nextStep === step;
   const idle = !p.running;
@@ -658,7 +687,16 @@ function stepPage(p, step, keepVideo, videoKey) {
   }
   if (step === "character" && idle && p.completed.includes("scenes")) after = characterUpload(p, act, done);
   if (step === "audio" && done) {
-    body = p.song
+    const soundInClips = p.input.audioMode === "character" || p.input.videoAudio === true;
+    body = soundInClips
+      // The voice / song is made in each video clip: this step only has the (optional) background music.
+      ? h("div", { class: "space-y-2" },
+          h("p", { class: "text-sm text-stone-600", text: `The ${p.input.audioMode === "song" ? "song is sung" : "words are said"} by the character in each video clip, so there's no separate voice or song here.` }),
+          p.media.music
+            ? [h("audio", { controls: true, class: "w-full", src: mediaUrl(id, p.media.music, p.updatedAt), "aria-label": "Background music" }),
+                h("p", { class: "text-sm text-stone-500", text: "Soft background music, played under the clips." })]
+            : h("p", { class: "text-sm text-stone-500", text: p.input.backgroundMusic === false ? "No background music (turned off in the video settings)." : "No background music: it couldn't be made (e.g. the Google spending cap). Make the audio again to try once more, or turn background music off in the video settings." }))
+      : p.song
       ? h("div", { class: "space-y-2" }, h("audio", { controls: true, class: "w-full", src: mediaUrl(id, p.song.file, p.updatedAt) }),
           h("p", { class: "text-sm text-stone-500", text: `${{ upload: "Your recording", music_voice: "Rhyme over music", ai: "Song" }[p.song.source ?? "ai"]} · ${p.song.duration.toFixed(1)} seconds` }),
           h("a", { class: "btn-soft", href: mediaUrl(id, p.song.file, p.updatedAt), download: "" }, "⬇ Download audio"))
@@ -865,6 +903,8 @@ function settingsPanel(p) {
     language: sel("language", [["en", "English"], ["am", "አማርኛ (Amharic)"]], inp.language),
     audioMode: sel("audioMode", AUDIO_MODES, inp.audioMode),
     videoAudio: h("input", { id: "ps-videoAudio", type: "checkbox", checked: inp.videoAudio === true, class: "mt-1 size-4 accent-coral" }),
+    backgroundMusic: h("input", { id: "ps-backgroundMusic", type: "checkbox", checked: inp.backgroundMusic !== false, class: "mt-1 size-4 accent-coral" }),
+    noScenePictures: h("input", { id: "ps-noScenePictures", type: "checkbox", checked: inp.scenePictures === false, class: "mt-1 size-4 accent-coral" }),
     singer: sel("singer", SINGERS, inp.singer ?? "auto"),
     voice: sel("voice", VOICE_OPTIONS, inp.voice ?? ""),
     length: h("input", { id: "ps-length", type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: inp.lengthSeconds ? inp.lengthSeconds / 60 : inp.audioMode === "song" ? inp.songSeconds / 60 : "", placeholder: "not set" }),
@@ -887,7 +927,7 @@ function settingsPanel(p) {
   const read = () => {
     const minutes = Number(els.length.value);
     return {
-      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, videoAudio: els.videoAudio.checked, ageRange: els.ageRange.value.trim() || "3-6",
+      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, videoAudio: els.videoAudio.checked, backgroundMusic: els.backgroundMusic.checked, scenePictures: !els.noScenePictures.checked, ageRange: els.ageRange.value.trim() || "3-6",
       aspectRatio: els.aspectRatio.value, resolution: els.resolution.value, videoMode: els.videoMode.value,
       videoConcurrency: els.videoConcurrency.value ? Number(els.videoConcurrency.value) : null, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
       singer: els.singer.value, voice: els.voice.value || null,
@@ -898,7 +938,7 @@ function settingsPanel(p) {
   const changedKeys = () => {
     const next = read();
     const autoCount = next.sceneCount ?? autoScenes(next.lengthSeconds ?? inp.songSeconds, next.audioMode);
-    const cur = { ...inp, characterHint: inp.characterHint ?? null, lengthSeconds: inp.lengthSeconds ?? null, singer: inp.singer ?? "auto", voice: inp.voice ?? null, videoAudio: inp.videoAudio === true };
+    const cur = { ...inp, characterHint: inp.characterHint ?? null, lengthSeconds: inp.lengthSeconds ?? null, singer: inp.singer ?? "auto", voice: inp.voice ?? null, videoAudio: inp.videoAudio === true, backgroundMusic: inp.backgroundMusic !== false, scenePictures: inp.scenePictures !== false };
     return Object.keys(next).filter((k) => k === "sceneCount" ? autoCount !== inp.sceneCount
       : k === "lengthSeconds" ? next.lengthSeconds !== (cur.lengthSeconds ?? (inp.audioMode === "song" ? inp.songSeconds : null))
       : String(next[k] ?? "") !== String(cur[k] ?? ""));
@@ -910,11 +950,11 @@ function settingsPanel(p) {
   };
   const redoFrom = (keys) => {
     if (!keys.length) return null;
-    if (keys.every((k) => k === "videoConcurrency")) return "none";
+    if (keys.every((k) => k === "videoConcurrency" || k === "scenePictures")) return "none";
     const has = (list) => keys.some((k) => list.includes(k));
     if (has(["topic", "language", "audioMode", "videoAudio", "lengthSeconds", "sceneCount", "ageRange"])) return lengthOnly() && keepBox.checked ? "audio" : "poem";
     if (has(["style", "characterHint"])) return "character";
-    if (has(["singer", "voice"])) return "audio";
+    if (has(["singer", "voice", "backgroundMusic"])) return "audio";
     return "clips";
   };
   const update = () => {
@@ -926,7 +966,7 @@ function settingsPanel(p) {
     const scenesNote = keys.includes("lengthSeconds") && !keys.includes("sceneCount") && from === "poem" ? ` It will have ${auto} scenes for this length.` : "";
     const later = from && from !== "none" ? config.steps.slice(config.steps.indexOf(from)).filter((s) => p.completed.includes(s)) : [];
     impact.textContent = !from ? "Nothing changed yet."
-      : from === "none" ? "Only how many videos are made at once changes. Nothing is made again."
+      : from === "none" ? (keys.includes("scenePictures") ? "Only scenes that have no video yet are affected. Nothing already made is made again." : "Only how many videos are made at once changes. Nothing is made again.")
       : from === "poem" ? `A new poem is written for these settings, then the scenes, audio and clips are made again.${scenesNote} The character (${p.character?.name ?? "not made yet"}) is kept.${later.length ? "" : " Nothing has been made yet, so nothing is lost."}`
       : from === "character" ? "The poem and scenes are kept. The character is drawn again in the new style, then the audio and clips are made again."
       : from === "audio" ? "The poem and pictures are kept. The song or voice is made again with the new length or voice, and the clips are re-timed."
@@ -967,6 +1007,12 @@ function settingsPanel(p) {
       h("div", { class: "flex items-start gap-2" }, els.videoAudio,
         h("label", { for: "ps-videoAudio", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip the audio AI: the video AI makes the voice / song" }),
           h("span", { class: "block text-xs text-stone-500", text: "The character sings (Song) or speaks (other choices) in each video clip. Changing this writes a new poem (one ~8-second stanza per clip)." }))),
+      h("div", { class: "flex items-start gap-2" }, els.backgroundMusic,
+        h("label", { for: "ps-backgroundMusic", class: "text-sm" }, h("span", { class: "font-semibold", text: "Background music under the voice / song made in the clips" }),
+          h("span", { class: "block text-xs text-stone-500", text: "Soft instrumental music from the music AI (when the video AI makes the voice / song). Changing it remakes only the music; the video clips are kept." }))),
+      h("div", { class: "flex items-start gap-2" }, els.noScenePictures,
+        h("label", { for: "ps-noScenePictures", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip scene pictures" }),
+          h("span", { class: "block text-xs text-stone-500", text: "The video AI makes each scene from the character picture (Seedance, Wan 2.7, MiniMax H3, Gemini Omni Flash, Grok or Veo 3.1). Clips already made are kept; remake a scene to use the new setting." }))),
       h("div", { class: "grid gap-4 sm:grid-cols-3" }, f("videoMode", "Visuals", els.videoMode, "Switching keeps the pictures and video clips already made."), f("resolution", "Quality", els.resolution, QUALITY_HINT), f("videoConcurrency", "Videos at the same time", els.videoConcurrency, CONCURRENCY_HINT)),
       h("div", { class: "grid gap-4 sm:grid-cols-2" }, f("singer", "Singer / voice", els.singer, SINGER_HINT), f("voice", "Exact voice (rhyme over music, narration)", els.voice)),
       h("div", { class: "grid gap-4 sm:grid-cols-3" },
@@ -989,7 +1035,7 @@ function uploadPage(p) {
       h("span", { "aria-hidden": "true", class: "text-xl", text: STEP_ICONS.upload }),
       h("h3", { id: "step-title", class: "text-xl font-bold", text: "Upload to YouTube" }),
       p.publish && p.media.thumbnail ? h("span", { class: "chip bg-emerald-100 text-emerald-800", text: "✓ ready" }) : null),
-    h("p", { class: "mb-4 text-sm text-stone-600", text: "The thumbnail, title, description and tags for this video. They're made automatically when the video is finished, and you can make them again any time with the buttons below." }),
+    h("p", { class: "mb-4 text-sm text-stone-600", text: "The thumbnail, title, description and tags for this video. They're made automatically when the video is finished: the thumbnail starts as the first scene's picture (free). \u2728 AI thumbnail draws one with AI instead (uses the image model, paid)." }),
     !ready ? h("p", { class: "text-stone-600" }, "Make the ", h("a", { href: stepUrl(p.id, "poem"), class: "font-semibold underline", text: "Poem" }), " and ", h("a", { href: stepUrl(p.id, "scenes"), class: "font-semibold underline", text: "Scenes" }), " first.")
       : [
           p.media.final
@@ -1015,7 +1061,7 @@ function publishCard(p, { inPage = false } = {}) {
   const thumbUrl = p.media.thumbnail ? mediaUrl(id, p.media.thumbnail, p.updatedAt) : null;
   const thumbTitle = h("input", { id: "pub-thumb-title", class: "field", lang, maxlength: 40, value: info?.thumbnailTitle ?? "", placeholder: "Words on the thumbnail (empty = none)" });
   const newThumb = h("button", { type: "button", class: thumbUrl ? "btn-soft" : "btn", onclick: (e) => call(e.currentTarget, "Drawing the thumbnail…",
-    () => post(`/api/projects/${enc(id)}/publish/thumbnail`, { title: thumbTitle.value, provider: $("#prov")?.value })) }, thumbUrl ? "↻ New thumbnail" : "✨ Make the thumbnail");
+    () => post(`/api/projects/${enc(id)}/publish/thumbnail`, { title: thumbTitle.value, provider: $("#prov")?.value })) }, thumbUrl ? "✨ New AI thumbnail" : "✨ Make the thumbnail");
   const fromPicture = h("button", { type: "button", class: "btn-soft", title: "No AI: crops the first scene's picture to 1280×720", onclick: (e) => call(e.currentTarget, "Using the first picture…",
     () => post(`/api/projects/${enc(id)}/publish/frame`, {})) }, "🖼️ Use the first picture");
 

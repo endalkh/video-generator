@@ -101,12 +101,14 @@ export class MockProvider implements Provider {
     return { audio: toneWav(durationSec, 3), ext: "wav", lyrics: "(mock song)" };
   }
 
-  /** Short MP4 made from the still, standing in for Veo. */
-  async video(prompt: string, { still, model }: { still: Buffer; model: string }): Promise<Buffer> {
+  /** Short MP4 made from the still (or, with no scene picture, from the character), standing in for Veo. */
+  async video(prompt: string, { still, character, model }: { still?: Buffer; character?: Buffer; model: string }): Promise<Buffer> {
     this.prompts.push({ kind: "video", prompt, model });
+    const picture = still ?? character;
+    if (!picture) throw new Error("mock video: no scene picture and no character");
     const dir = await mkdtemp(path.join(os.tmpdir(), "mock-video-"));
     try {
-      await writeFile(path.join(dir, "in.png"), still);
+      await writeFile(path.join(dir, "in.png"), picture);
       await stillToClip({ image: path.join(dir, "in.png"), duration: 2, out: path.join(dir, "out.mp4"), motion: "zoom-in", fmt: { width: 320, height: 180, fps: 25 } });
       return await readFile(path.join(dir, "out.mp4"));
     } finally {

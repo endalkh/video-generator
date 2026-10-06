@@ -44,7 +44,7 @@ export interface ProjectProps {
 const stepIndex = (s: StepName) => STEP_NAMES.indexOf(s);
 
 /** Settings that can be changed after a video was started (Video settings panel). */
-export const SETTING_KEYS = ["topic", "language", "audioMode", "videoAudio", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio", "resolution", "videoMode", "videoConcurrency"] as const;
+export const SETTING_KEYS = ["topic", "language", "audioMode", "videoAudio", "backgroundMusic", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio", "resolution", "videoMode", "scenePictures", "videoConcurrency"] as const;
 
 /**
  * Aggregate root for a video project. Owns the pipeline progress rules:
@@ -321,8 +321,8 @@ export class Project {
     const old = this.props.input;
     const changed = SETTING_KEYS.filter((k) => JSON.stringify(old[k] ?? null) !== JSON.stringify(input[k] ?? null));
     if (!changed.length) return null;
-    // How fast to work changes nothing that was made: just remember it.
-    if (changed.every((k) => k === "videoConcurrency")) {
+    // How fast to work, or whether scenes still to be made get a picture, changes nothing already made: just remember it.
+    if (changed.every((k) => k === "videoConcurrency" || k === "scenePictures")) {
       this.props.input = parsed.data;
       this.touch();
       return null;
@@ -335,7 +335,7 @@ export class Project {
     if (has(["topic", "language", "audioMode", "videoAudio", "lengthSeconds", "songSeconds", "sceneCount", "ageRange"])) {
       from = opts.keepPoem && onlyLength && this.props.poem && this.isStepDone("scenes") ? "audio" : "poem";
     } else if (has(["style", "characterHint"])) from = "character";
-    else if (has(["voice", "singer"])) from = "audio";
+    else if (has(["voice", "singer", "backgroundMusic"])) from = "audio";
     else from = "clips"; // aspectRatio, resolution, videoMode (pictures and videos already made are kept)
 
     this.props.input = input;
@@ -378,6 +378,7 @@ export class Project {
   changeVisuals(mode: VideoMode): boolean {
     if (this.isRunning) throw new ConflictError(`Project "${this.id}" is running; stop it before changing visuals`);
     if (!VideoModeSchema.safeParse(mode).success) throw new ValidationError(`Unknown visuals "${mode}"`);
+    if (mode === "still" && !this.props.input.scenePictures) throw new ValidationError("This video has no scene pictures (the video AI makes each scene); turn scene pictures on first");
     if (mode === "still" && soundInVideo(this.props.input)) throw new ValidationError("The voice / song is made inside the video clips, so they must be moving video; change the audio first");
     const changed = this.props.input.videoMode !== mode;
     this.props.input = { ...this.props.input, videoMode: mode };

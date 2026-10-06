@@ -73,7 +73,8 @@ export interface Provider {
     prompt: string,
     opts: {
       model: string;
-      still: Buffer;
+      /** The scene picture to animate. Missing = "no scene pictures": the model makes the scene from the character reference and the prompt. */
+      still?: Buffer;
       aspectRatio: string;
       label: string;
       ctx: GenContext;

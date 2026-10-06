@@ -62,8 +62,8 @@ describe("the video matches the audio", () => {
     await expect(c.projectService.changeVisuals(p.id, "still")).rejects.toThrow(/made inside the video clips/);
   }, 60_000);
 
-  it("skip the audio AI with a song: she sings each scene in the clip, no song, voice or music model is used", async () => {
-    const { mock, p } = await run({ videoAudio: true, singer: "boy", videoMode: "still", reviewMode: "manual" });
+  it("skip the audio AI with a song and no background music: she sings each scene in the clip, no audio model is used", async () => {
+    const { mock, p } = await run({ videoAudio: true, backgroundMusic: false, singer: "boy", videoMode: "still", reviewMode: "manual" });
     // Manual mode: the poem, scenes and character pause for review; the empty audio step doesn't.
     for (const step of ["poem", "scenes", "character"]) {
       expect((await c.projectService.get(p.id)).status).toBe("review");
@@ -89,14 +89,67 @@ describe("the video matches the audio", () => {
     expect(await probeDuration(m.final)).toBeCloseTo(4, 0); // 2 clips × the mock's 2 s clip
   }, 60_000);
 
-  it("skip the audio AI with narration: she says the words herself, without background music", async () => {
+  it("skip the audio AI with narration: she says the words herself, over soft background music (on by default)", async () => {
     const { mock, p } = await run({ videoAudio: true, audioMode: "narration" });
     expect([p.status, p.error]).toEqual(["done", null]);
     const video = mock.prompts.find((x) => x.kind === "video")!.prompt;
     expect(video).toContain("saying exactly these words");
     expect(video).not.toContain("she does not talk");
-    expect(mock.prompts.filter((x) => ["song", "speech"].includes(x.kind))).toHaveLength(0);
-    expect(await fileExists(media(p.id).music("wav"))).toBe(false);
+    expect(mock.prompts.filter((x) => x.kind === "speech")).toHaveLength(0);
+    expect(mock.prompts.filter((x) => x.kind === "song").map((x) => x.prompt)).toEqual([expect.stringContaining("Instrumental only")]);
+    const m = media(p.id);
+    expect(await fileExists(m.music("wav"))).toBe(true);
+    expect(await probeStreams(m.final)).toEqual(["video", "audio"]);
+  }, 60_000);
+
+  it("sound in the clips: \"Make the clips\" doesn't wait for the audio step, and failed background music never blocks it", async () => {
+    const mock = mockProvider();
+    mock.song = async () => {
+      throw Object.assign(new Error("Your project has exceeded its monthly spending cap."), { status: 429 });
+    };
+    c = await makeTestContainer({ provider: () => mock });
+    const created = await c.projectService.create({ topic: "Sun hats", sceneCount: 2, reviewMode: "manual", videoAudio: true }, "mock");
+    for (const step of ["poem", "scenes", "character"]) {
+      await c.projectService.generateStep(created.id, step);
+      await c.projectService.idle();
+    }
+    // The audio step was never made: the clips can still be asked for.
+    await c.projectService.generateStep(created.id, "clips");
+    await c.projectService.idle();
+    const p = await c.projectService.get(created.id);
+    expect([p.status, p.error]).not.toContain("failed");
+    expect(p.error).toBeNull();
+    expect(p.completed).toEqual(expect.arrayContaining(["audio", "clips"]));
+    expect(p.awaitingReview).not.toBe("audio");
+    expect(await fileExists(media(p.id).music("wav"))).toBe(false); // no music this time; remaking the Audio tries again
+    // Approving the videos goes straight on to the final video: the optional music isn't retried or reviewed again.
+    await c.projectService.approveVideos(p.id);
+    await c.projectService.idle();
+    const after = await c.projectService.get(p.id);
+    expect([after.status, after.awaitingReview, after.error]).toEqual(["done", null, null]);
+    expect(after.media.music).toBeNull();
+  }, 60_000);
+
+  it("skip scene pictures: no image AI per scene, the video model gets the character, the thumbnail is a video frame", async () => {
+    const mock = mockProvider();
+    const stills: (Buffer | undefined)[] = [];
+    const video = mock.video.bind(mock);
+    mock.video = async (prompt, opts) => {
+      stills.push(opts.still);
+      return video(prompt, opts);
+    };
+    c = await makeTestContainer({ provider: () => mock });
+    const created = await c.projectService.create({ topic: "Washing hands", sceneCount: 2, reviewMode: "auto", scenePictures: false, videoMode: "still" }, "mock");
+    await c.projectService.start(created.id);
+    await c.projectService.idle();
+    const p = await c.projectService.get(created.id);
+    expect([p.status, p.error, p.input.videoMode]).toEqual(["done", null, "veo"]);
+    expect(stills).toEqual([undefined, undefined]);
+    expect(mock.prompts.filter((x) => x.kind === "image").map((x) => x.prompt).some((t) => /scene/i.test(t) && !/character|thumbnail/i.test(t))).toBe(false);
+    const m = media(p.id);
+    expect([await fileExists(m.sceneImage(0)), await fileExists(m.sceneImage(1))]).toEqual([false, false]);
+    expect(p.media.thumbnail).toBe("thumbnail.jpg");
+    await expect(c.projectService.changeVisuals(p.id, "still")).rejects.toThrow(/no scene pictures/);
   }, 60_000);
 });
 

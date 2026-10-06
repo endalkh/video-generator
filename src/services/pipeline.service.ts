@@ -46,6 +46,33 @@ export class PipelineCancelled extends Error {
   }
 }
 
+/**
+ * Resolve with `work`, or reject with PipelineCancelled the moment `signal` aborts. The work itself isn't killed
+ * (a paid video task keeps its saved task id, so the next run picks it up instead of paying again), but its
+ * result is ignored and nothing is written.
+ */
+export function abortable<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  work.catch(() => {}); // a late failure after Stop must not become an unhandled rejection
+  if (signal.aborted) return Promise.reject(new PipelineCancelled());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new PipelineCancelled());
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+/** The provider with every method made abortable (optional methods stay missing when the provider lacks them). */
+function abortableProvider(provider: Provider, signal?: AbortSignal): Provider {
+  if (!signal) return provider;
+  return new Proxy(provider, {
+    get(target, prop, receiver) {
+      const v = Reflect.get(target, prop, receiver);
+      return typeof v === "function" ? (...args: unknown[]) => abortable(Promise.resolve(v.apply(target, args)), signal) : v;
+    },
+  });
+}
+
 /** Voice over music: music alone before the first line, pause after each line, music after the last one. */
 const MUSIC_INTRO_SEC = 2;
 /** "The character speaks": each Veo clip is ~8 s with her own voice. */
@@ -280,7 +307,9 @@ export class PipelineService {
 
   /** Returns the final video path, or null when the run stopped for a review or after `until`. */
   async run(project: Project, opts: RunOptions): Promise<string | null> {
-    const { provider, signal } = opts;
+    const { signal } = opts;
+    // Stop means stop now: every AI call and local render gives up as soon as Stop is pressed (see abortable).
+    const provider = abortableProvider(opts.provider, signal);
     const emit = opts.onEvent ?? (() => {});
     const concurrency = opts.concurrency ?? 2;
     const p = mediaPaths(this.mediaDir(project.id));
@@ -327,10 +356,19 @@ export class PipelineService {
       /** Runs a step unless it's checkpointed and its outputs still exist. */
       const step = async (name: StepName, outputsOk: () => Promise<boolean>, produce: () => Promise<void>) => {
         checkCancel();
+        // Asked for a later step (e.g. "Make the clips" while the background music isn't made yet): a step made on
+        // the way there doesn't stop for review.
+        const onTheWay = opts.until !== undefined && STEP_NAMES.indexOf(opts.until) > STEP_NAMES.indexOf(name);
+        const review = () => {
+          if (onTheWay && project.needsReview(name)) project.approveInRun(name); // so a later Continue doesn't stop here either
+          // "Approve these videos": the clips are approved even when they were already put together.
+          if (name === "clips" && opts.noNewVideos && project.needsReview(name)) project.approveInRun(name);
+          return project.needsReview(name);
+        };
         if (project.isStepDone(name) && (await outputsOk())) {
           emit({ type: "step-skip", step: name });
           log.step(name, "checkpoint found, skipping");
-          if (project.needsReview(name)) throw new ReviewPause(name);
+          if (review()) throw new ReviewPause(name);
           if (name === opts.until) throw new StopAfter(name);
           return;
         }
@@ -342,7 +380,7 @@ export class PipelineService {
         if (name === "clips" && opts.noNewVideos) project.approveInRun("clips"); // the user approved the videos they have
         await save();
         emit({ type: "step-done", step: name });
-        if (project.needsReview(name)) throw new ReviewPause(name);
+        if (review()) throw new ReviewPause(name);
         if (name === opts.until) throw new StopAfter(name);
       };
       const allExist = (files: string[]) => async () => (await Promise.all(files.map(fileExists))).every(Boolean);
@@ -404,13 +442,16 @@ export class PipelineService {
         const limit = name === "clips" && input.videoMode === "veo" ? videoConcurrency(models.scene_video, process.env.VIDEO_CONCURRENCY, input.videoConcurrency) : concurrency;
         await mapLimit(scenes, limit, async (s) => {
           checkCancel();
-          if (!(await fileExists(file(s.index)))) {
+          const made = !(await fileExists(file(s.index)));
+          if (made) {
             await ensureDir(p.sceneDir(s.index));
             await make(s, report);
           }
           done++;
-          log.step(name, `scene ${s.index + 1}/${scenes.length} ${verb}`);
-          report(`scene ${s.index + 1} ${verb}`);
+          // Scenes whose file is already there are only counted, not made again: say so.
+          const what = made ? verb : "already made";
+          log.step(name, `scene ${s.index + 1}/${scenes.length} ${what}`);
+          report(`scene ${s.index + 1} ${what}`);
         });
       };
 
@@ -428,29 +469,39 @@ export class PipelineService {
       const musicFile = async () => (await Promise.all(["mp3", "wav"].map(async (ext) => ((await fileExists(p.music(ext))) ? p.music(ext) : null)))).find(Boolean) ?? undefined;
       // The voice / song is made by the video model inside each clip (lip-sync).
       const inVideo = soundInVideo(input);
-      if (inVideo && input.videoAudio) {
-        // "Skip the audio model": nothing to make (not even background music) and nothing to review.
+      if (inVideo && !input.backgroundMusic) {
+        // No background music: no audio model at all, so nothing to make and nothing to review.
         checkCancel();
         if (!project.isStepDone("audio")) {
           project.setSong(null);
           project.completeStep("audio");
           emit({ type: "step-done", step: "audio" });
-          log.step("audio", "skipped: the video model makes the voice / song in each clip");
+          log.step("audio", "skipped: the video model makes the voice / song in each clip, without background music");
         }
         project.approveInRun("audio");
         await save();
         if (opts.until === "audio") throw new StopAfter("audio");
       } else if (inVideo) {
-        // Her voice is made by Veo in each clip (lip-sync). Here: only soft background music, if the provider can make music.
-        await step("audio", async () => typeof provider.song !== "function" || Boolean(await musicFile()), async () => {
+        // The voice / song is made in each clip (lip-sync). Here: only soft background music, if the provider can make music.
+        // It's optional: once the step is done (even if the music failed) it isn't made again until the Audio is remade,
+        // so approving or re-running never sends you back to review it.
+        await step("audio", async () => true, async () => {
           project.setSong(null);
           if (typeof provider.song !== "function" || (await musicFile())) return;
           const seconds = Math.min(fixedSongLength ?? MAX_SONG_PART_SEC, scenes.length * CHARACTER_CLIP_SEC + 2);
           emit({ type: "progress", step: "audio", done: 0, total: 1, message: "composing soft background music" });
           const r = await prompt("audio", "music_bed", "song", { title: project.poem!.title, song_seconds: seconds });
-          const music = await provider.song(r.text, { model: r.model, label: "background music", durationSec: seconds, ctx: ctx() });
-          await writeFileAtomic(p.music(music.ext), music.audio);
-          log.step("audio", "background music ready (the character's voice is made with each Veo clip)");
+          try {
+            const music = await provider.song(r.text, { model: r.model, label: "background music", durationSec: seconds, ctx: ctx() });
+            await writeFileAtomic(p.music(music.ext), music.audio);
+            log.step("audio", "background music ready (the voice / song is made in each clip)");
+          } catch (err) {
+            if (err instanceof PipelineCancelled) throw err;
+            // Only a soft bed under the clips' own sound: never let it block the video (e.g. the spend cap is reached).
+            // Remake the Audio to try again.
+            log.warn(`background music not made: ${(err as Error).message}; the video is made without it (remake the Audio to try again)`);
+            emit({ type: "progress", step: "audio", done: 1, total: 1, message: `no background music (${(err as Error).message.slice(0, 160)}); the video is made without it. Remake the Audio to try again` });
+          }
         });
       } else if (project.song?.source === "upload") {
         // Your own recording: nothing to generate (re-check it's still there).
@@ -590,7 +641,8 @@ export class PipelineService {
           const i = s.index;
           const vars = { scene_number: i + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description };
           // An uploaded (or already made) Veo video doesn't need a picture: don't pay for one.
-          if (!(await fileExists(p.sceneImage(i))) && !(useVeo && (await fileExists(p.sceneVideo(i))))) {
+          // No scene pictures: the video model makes the scene from the character picture.
+          if (input.scenePictures && !(await fileExists(p.sceneImage(i))) && !(useVeo && (await fileExists(p.sceneVideo(i))))) {
             const r = await prompt("clips", "scene_image", "scene_image", vars, i);
             await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references: [reference], label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
           }
@@ -608,13 +660,14 @@ export class PipelineService {
               // The scene's length on screen (unknown when the character speaks inside the clip: there's no separate audio).
               const durationSec = t.duration ?? (t.audio && (await fileExists(t.audio)) ? (await probeDuration(t.audio)) + SCENE_TAIL_SEC : undefined);
               const mp4 = await provider.video!(r.text, {
-                model: r.model, character: reference, audio: piece ? await readFile(piece) : undefined, durationSec, still: await readFile(p.sceneImage(i)), aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
+                model: r.model, character: reference, audio: piece ? await readFile(piece) : undefined, durationSec, still: input.scenePictures ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
                 resumeTaskId: saved?.model === r.model ? saved.taskId : undefined,
                 onTaskStarted: (taskId) => writeFileAtomic(taskFile, JSON.stringify({ taskId, model: r.model, startedAt: new Date().toISOString() })),
               });
               await writeFileAtomic(p.sceneVideo(i), mp4);
               await rm(taskFile, { force: true });
             } catch (err) {
+              if (err instanceof PipelineCancelled) throw err;
               // No fallback to pictures: surface the error so it can be fixed and retried.
               const hint = (err as { status?: number }).status === 429
                 ? ` — the request limit for ${r.model} on your account was reached. Finished clips are kept: wait a few minutes (or until tomorrow for a daily limit), then click "Make the clips" on the Clips page. A cheaper Veo model (fast or lite, on the Models page) has higher limits.`
@@ -625,7 +678,8 @@ export class PipelineService {
           const tmpClip = `${p.sceneClip(i)}.part.mp4`;
           // Rendering is local (ffmpeg, up to 4K): one at a time, even while videos are generated in parallel,
           // so a few 4K encodes don't fight over the CPUs and memory.
-          await renderOneAtATime(async () => {
+          await abortable(renderOneAtATime(async () => {
+            checkCancel(); // Stop pressed while waiting for its turn: don't render
             report(`scene ${i + 1}: putting the clip together`);
             if (inVideo) {
               await videoToClip({ video: p.sceneVideo(i), out: tmpClip, fmt, keepAudio: true });
@@ -634,7 +688,7 @@ export class PipelineService {
             } else {
               await stillToClip({ ...timing(i), image: p.sceneImage(i), out: tmpClip, motion: s.motion, fmt });
             }
-          });
+          }), signal);
           await rename(tmpClip, p.sceneClip(i));
         });
       });
@@ -645,8 +699,8 @@ export class PipelineService {
         // The .srt is always written (handy for uploading to YouTube); it's only put in the video when asked for.
         await writeFileAtomic(p.srt, buildSrt(scenes.map((s, i) => ({ text: s.text, duration: durations[i]! }))));
         const tmp = `${p.final}.part.mp4`;
-        const bed = inVideo && !input.videoAudio ? await musicFile() : undefined;
-        await concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: timeline ? path.join(p.dir, timeline.file) : undefined, bed });
+        const bed = inVideo && input.backgroundMusic ? await musicFile() : undefined;
+        await abortable(concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: timeline ? path.join(p.dir, timeline.file) : undefined, bed }), signal);
         // Shorts: no clickable links inside the video, so show the channel's YouTube address at the end.
         const handle = input.aspectRatio === "9:16" ? await this.channelHandle?.(project.channelId).catch(() => undefined) : undefined;
         if (handle) {
@@ -665,6 +719,7 @@ export class PipelineService {
       if (this.afterFinal && (!project.publish || !(await fileExists(p.thumbnail)))) {
         emit({ type: "progress", step: "final", done: 1, total: 1, message: "writing the YouTube title, description, tags and thumbnail" });
         await this.afterFinal(project, provider);
+        checkCancel(); // afterFinal swallows errors, including Stop
       }
       project.finish();
       await save();

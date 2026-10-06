@@ -4,7 +4,7 @@ import { encodePng } from "../src/infrastructure/media/png.js";
 import { pcmToWav, toneWav, wavDurationSeconds } from "../src/infrastructure/media/wav.js";
 import { srtToVtt } from "../src/api/routes/projects.routes.js";
 import { mapLimit, videoConcurrency } from "../src/services/pipeline.service.js";
-import { maxVeoResolution, supportsImageSize, supportsReferenceImages } from "../src/infrastructure/providers/gemini.js";
+import { GeminiProvider, maxVeoResolution, supportsImageSize, supportsReferenceImages } from "../src/infrastructure/providers/gemini.js";
 import { formatFor } from "../src/infrastructure/media/ffmpeg.js";
 import { minResolution, videoResolution } from "../src/domain/project/project.model.js";
 import { InferenceShVideo, isAudioDrivenModel } from "../src/infrastructure/providers/inference-sh.js";
@@ -54,6 +54,27 @@ describe("retry", () => {
     expect(isTransientError({ status: 503 })).toBe(true);
     expect(isTransientError({ status: 400 })).toBe(false);
     expect(isTransientError(new Error("API key not valid"))).toBe(false);
+  });
+  it("runs \"free/<model>\" on the free-tier key and everything else on the paid key", () => {
+    const before = process.env.GEMINI_TEXT_API_KEY;
+    try {
+      delete process.env.GEMINI_TEXT_API_KEY;
+      const paidOnly = new GeminiProvider("paid") as unknown as { client(m: string): { model: string } };
+      expect(paidOnly.client("gemini-3.8-flash").model).toBe("gemini-3.8-flash");
+      expect(() => paidOnly.client("free/gemini-3.8-flash")).toThrow(/GEMINI_TEXT_API_KEY is not set/);
+      process.env.GEMINI_TEXT_API_KEY = "free";
+      const both = new GeminiProvider("paid") as unknown as { client(m: string): { ai: unknown; model: string }; ai: unknown; freeAi: unknown };
+      expect([both.client("free/gemini-3.8-flash").model, both.client("free/gemini-3.8-flash").ai === both.freeAi, both.client("gemini-3.8-flash").ai === both.ai]).toEqual(["gemini-3.8-flash", true, true]);
+    } finally {
+      if (before === undefined) delete process.env.GEMINI_TEXT_API_KEY;
+      else process.env.GEMINI_TEXT_API_KEY = before;
+    }
+  });
+  it("never retries a spending cap, even when the caller retries everything (text models)", async () => {
+    let n = 0;
+    const cap = Object.assign(new Error("Your project has exceeded its monthly spending cap."), { status: 429 });
+    await expect(withRetry(async () => { n++; throw cap; }, { shouldRetry: () => true, sleep: async () => {} })).rejects.toBe(cap);
+    expect(n).toBe(1);
   });
   it("retries transient failures, fails fast on client errors", async () => {
     let n = 0;
@@ -163,7 +184,7 @@ describe("inference.sh Seedance video", () => {
 
   it("lists Seedance 2.0 Fast, Wan 2.7, FLUX 3, MiniMax H3 (+Max), Gemini Omni Flash and Grok Imagine 1.5 as video models", () => {
     const ids = new InferenceShVideo("k").listModels().map((m) => m.id);
-    const added = ["bytedance/seedance-2-0-fast", "alibaba/wan-2-7-i2v", "bfl/flux-3-video", "minimax/h3", "falai/minimax-h3-max", "google/gemini-omni-flash", "xai/grok-imagine-video-1-5"].map((a) => `inference.sh/${a}`);
+    const added = ["bytedance/seedance-2-0-fast", "alibaba/wan-2-7-i2v", "bfl/flux-3-video", "minimax/h3", "falai/minimax-h3-max", "google/gemini-omni-flash", "xai/grok-imagine-video-1-5", "pruna/p-video", "pixverse/v6"].map((a) => `inference.sh/${a}`);
     expect(ids).toEqual(expect.arrayContaining(added));
     for (const id of ids) expect(capabilityOf(id)).toBe("video");
     expect(capabilityOf("inference.sh/xai/grok-imagine-video")).toBeUndefined();
@@ -189,6 +210,27 @@ describe("inference.sh Seedance video", () => {
     expect(run("google/gemini-omni-flash", { aspectRatio: "9:16" })).toEqual({ prompt: "she waves", image: img, aspect_ratio: "9:16" });
     expect(run("xai/grok-imagine-video-1-5", { resolution: "4k" })).toEqual({ prompt: "she waves", image: img, resolution: "1080p", duration: 7, generate_audio: true });
     expect(run("xai/grok-imagine-video-1-5", { durationSec: undefined }).duration).toBe(8);
+    expect(run("pruna/p-video", { resolution: "4k", durationSec: 14 })).toEqual({ prompt: "she waves", image: img, resolution: "1080p", duration: 10, save_audio: true, disable_safety_filter: false });
+    expect(run("pixverse/v6", { resolution: "720p", durationSec: 2 })).toEqual({ prompt: "she waves", image: img, quality: "720p", duration: 5 });
+  });
+
+  it("with no scene picture, makes the scene from the character picture as a reference (or says which models can)", () => {
+    const ref = [{ bytes: character, contentType: "image/png" }];
+    const run = (app: string, extra: Record<string, unknown> = {}) => InferenceShVideo.input("she waves", { ...base, still: undefined, model: `inference.sh/${app}`, character, durationSec: 6.2, ...extra });
+    const sd = run("bytedance/seedance-2-5");
+    expect(sd.input).toMatchObject({ reference_images: ref, ratio: "16:9", duration: 8 });
+    expect(sd.input.image).toBeUndefined();
+    expect(String(sd.input.prompt)).toMatch(/^@Image1 .*she waves$/s);
+    const wan = run("alibaba/wan-2-7-i2v", { aspectRatio: "9:16" });
+    expect(wan.app).toBe("alibaba/wan-2-7-r2v"); // Wan's reference version
+    expect(wan.input).toMatchObject({ reference_images: ref, ratio: "9:16", resolution: "720P", duration: 7 });
+    expect(wan.input.first_frame).toBeUndefined();
+    expect(run("xai/grok-imagine-video-1-5", { resolution: "4k" }).input).toMatchObject({ reference_images: ref, resolution: "720p", aspect_ratio: "16:9" });
+    expect(run("minimax/h3", { durationSec: 14 }).input).toMatchObject({ reference_images: ref, duration: 14, ratio: "16:9" });
+    expect(run("falai/minimax-h3-max").input).toMatchObject({ reference_images: ref, aspect_ratio: "16:9" });
+    expect(run("google/gemini-omni-flash").input).toMatchObject({ reference_images: ref, aspect_ratio: "16:9" });
+    for (const app of ["klingai/video-v3", "bfl/flux-3-video", "klingai/avatar", "pruna/p-video", "pixverse/v6"]) expect(() => run(app)).toThrow(/only animates a scene picture/);
+    expect(() => run("bytedance/seedance-2-5", { character: undefined })).toThrow(/no character picture/);
   });
 
   /** Fake inference.sh API: records calls; the task finishes on the second status poll. */
