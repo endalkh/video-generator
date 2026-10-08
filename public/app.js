@@ -67,12 +67,44 @@ function errorBox(err) {
 
 const extLink = (href, text) => h("a", { href, target: "_blank", rel: "noopener noreferrer", class: "font-semibold underline" }, text, h("span", { class: "sr-only", text: " (opens in a new tab)" }), " ↗");
 
+/** Every outside service the app can use, with where to get a key, check usage and see prices. */
+const PROVIDERS = [
+  { id: "google", name: "Google Gemini API (AI Studio)", env: "GEMINI_API_KEY / GEMINI_TEXT_API_KEY", what: "Text, pictures, speech, Lyria songs, Veo videos",
+    links: [["https://aistudio.google.com/apikey", "API keys"], ["https://aistudio.google.com/usage", "Usage"], ["https://aistudio.google.com/rate-limit", "Rate limits"], ["https://ai.studio/spend", "Spend cap"], ["https://aistudio.google.com/billing", "Billing"], ["https://ai.google.dev/gemini-api/docs/pricing", "Pricing"], ["https://aistudio.google.com/status", "Status"]] },
+  { id: "inference", name: "inference.sh", env: "INFERENCE_API_KEY", what: "Seedance, Kling, Wan, FLUX, MiniMax, Omni, Grok, P-Video, PixVerse videos",
+    links: [["https://inference.sh", "Dashboard, API keys and prices (Settings → API Keys)"]] },
+  { id: "treblo", name: "Treblo (formerly Sonauto)", env: "TREBLO_API_KEY", what: "Full songs with vocals (treblo/v3)",
+    links: [["https://sonauto.ai/developers/account", "API key and credits"], ["https://sonauto.ai/developers/pricing", "Pricing"], ["https://sonauto.ai/developers/docs", "API docs"], ["https://sonauto.ai/api-terms", "API terms (attribution)"], ["https://status.treblo.com", "Status"]] },
+];
+/** Which provider runs a model id (as chosen on the Models page). */
+const providerOf = (model) => PROVIDERS.find((p) => p.id === (/^inference\.sh\//.test(model) ? "inference" : /^treblo\//.test(model) ? "treblo" : "google"));
+
+/** The provider list with links (Models page). */
+function providersCard() {
+  return h("section", { class: "card mb-6", "aria-labelledby": "providers-h" },
+    h("h3", { id: "providers-h", class: "text-lg font-bold", text: "Providers" }),
+    h("p", { class: "mt-1 text-sm text-stone-500", text: "Where each AI service's keys, usage and prices are. Put the keys in .env, then restart the app (make up)." }),
+    h("ul", { class: "mt-3 space-y-3" }, PROVIDERS.map((p) => h("li", {},
+      h("p", { class: "font-semibold", text: p.name }),
+      h("p", { class: "text-xs text-stone-500" }, `${p.what} · key: `, h("code", { text: p.env })),
+      h("p", { class: "mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm" }, p.links.map(([href, text]) => extLink(href, text)))))));
+}
+
 /**
  * Point to where Google account problems are fixed: rate limits (429 / RESOURCE_EXHAUSTED quota) vs.
  * billing (unpaid/overdue bill or empty Prepay credit: 402/403). A 429 also says "billing details", so check it first.
  */
 function billingHelp(message) {
   const text = String(message ?? "");
+  // "free_tier ... limit: 0": the model has no free tier at all, so waiting won't help.
+  if (/free_tier/i.test(text) && /limit:\s*0\b/.test(text)) {
+    const model = /model:\s*([\w.\-]+)/.exec(text)?.[1];
+    return h("div", { class: "mt-2 rounded-lg bg-white/70 p-2 text-sm text-ink" },
+      h("p", { text: `${model ? `"${model}"` : "This model"} has no free tier, so it can't run on the free key (a model named "free/…" on the Models page) and waiting won't help. On the Models page, pick a model without "free/" (uses your paid key) or a free model such as free/gemini-3.8-flash.` }),
+      h("p", { class: "mt-1 flex flex-wrap gap-x-4 gap-y-1" },
+        h("a", { href: "#/models", class: "font-semibold underline", text: "Models page" }),
+        extLink("https://ai.google.dev/gemini-api/docs/pricing", "Which models are free")));
+  }
   if (/\b429\b|RESOURCE_EXHAUSTED|exceeded your current quota|rate limit/i.test(text) && !/spend(ing)? cap|dunning/i.test(text)) {
     return h("div", { class: "mt-2 rounded-lg bg-white/70 p-2 text-sm text-ink" },
       h("p", { text: "This is a Google rate limit (too many requests for this model), not a payment problem. Finished work is kept. Wait and try again, or pick a model with higher limits:" }),
@@ -306,15 +338,15 @@ async function showNewVideo() {
       field("f-video", "Visuals", select("f-video", "videoMode", VISUALS_OPTIONS, "veo")),
       h("div", { id: "f-pictures-row", class: "flex items-start gap-2 self-end pb-2" },
         h("input", { id: "f-nopictures", name: "noScenePictures", type: "checkbox", value: "on", class: "mt-1 size-4 accent-coral" }),
-        h("label", { for: "f-nopictures", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip scene pictures" }),
-          h("span", { class: "block text-xs text-stone-500", text: "The video AI makes each scene from the character picture and the scene description (no image AI per scene). Needs a video model that takes a character reference: Seedance, Wan 2.7, MiniMax H3, Gemini Omni Flash, Grok or Veo 3.1." }))),
+        h("label", { for: "f-nopictures", class: "text-sm" }, h("span", { class: "font-semibold", text: "Start with no scene pictures" }),
+          h("span", { class: "block text-xs text-stone-500", text: "Every scene starts without a picture: the video AI makes it from the character picture and the scene description. You can turn the picture on or off for each scene on the Scenes page. Needs a video model that takes a character reference: Veo 3.1 Fast, Veo 3.1, Seedance, Wan 2.7, MiniMax H3, Gemini Omni Flash or Grok (not Veo 3.1 Lite)." }))),
       field("f-scenes", "Scenes", h("input", { id: "f-scenes", name: "sceneCount", type: "number", min: 2, max: 40, class: "field", placeholder: "Auto" }),
         "Leave empty: one picture about every 10 s (song) or 12 s (story)."),
       field("f-length", "Video length (minutes)", h("input", { id: "f-length", name: "lengthMinutes", type: "number", min: 0.5, max: 10, step: 0.5, value: d.videoMinutes ?? 0.5, class: "field", "aria-describedby": "f-length-plan" }),
         "From ½ to 10 minutes."),
       field("f-age", "Age range", h("input", { id: "f-age", name: "ageRange", value: d.ageRange ?? "3-6", class: "field" })),
       field("f-aspect", "Shape", select("f-aspect", "aspectRatio", [["16:9", "Landscape 16:9 (YouTube)"], ["9:16", "Portrait 9:16 (Shorts)"]])),
-      field("f-quality", "Quality", select("f-quality", "resolution", QUALITY_OPTIONS, config.videoResolution ?? "4k"), QUALITY_HINT),
+      field("f-quality", "Quality", select("f-quality", "resolution", QUALITY_OPTIONS, config.videoResolution ?? "1080p"), QUALITY_HINT),
       field("f-conc", "Videos at the same time", select("f-conc", "videoConcurrency", CONCURRENCY_OPTIONS, ""), CONCURRENCY_HINT),
       h("div", { class: "flex items-start gap-2 self-end pb-2" },
         h("input", { id: "f-subs", name: "subtitles", type: "checkbox", value: "on", class: "mt-1 size-4 accent-coral" }),
@@ -335,6 +367,15 @@ async function showNewVideo() {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
+    // The form is `novalidate` (custom hints), so check the one required field here instead of sending an empty topic.
+    const topicBox = $("#f-topic");
+    if (String(fd.get("topic") ?? "").trim().length < 3) {
+      topicBox.setAttribute("aria-invalid", "true");
+      mount(status, errorBox(new Error("Write what the video is about (at least 3 characters).")));
+      topicBox.focus();
+      return;
+    }
+    topicBox.removeAttribute("aria-invalid");
     const input = Object.fromEntries([...fd.entries()].filter(([k, v]) => k !== "provider" && k !== "lengthMinutes" && String(v).trim() !== ""));
     if (input.sceneCount) input.sceneCount = Number(input.sceneCount);
     if (input.videoConcurrency) input.videoConcurrency = Number(input.videoConcurrency);
@@ -594,7 +635,9 @@ function stepPage(p, step, keepVideo, videoKey) {
     ? h("input", { id: "keep-visuals", type: "checkbox", checked: true, class: "mt-1 size-4 accent-coral" }) : null;
   const keeping = () => Boolean(keepBox?.checked);
   const keepNote = " The pictures and video clips are kept; the song, clip timing and final video are made again.";
-  const changeNote = () => (keeping() ? keepNote : step === "audio" && hasVisuals ? `${laterNote} The pictures${veoKept ? ` and ${veoKept} Veo animation${veoKept === 1 ? "" : "s"}` : ""} are kept (no new AI cost); the clips are only re-timed to the new audio.` : laterNote);
+  // Scenes, character and audio are remade on their own: what later steps made is kept (only the clips are put together again).
+  const keptNote = laterDone.length ? " Everything made after it (character, audio, pictures and videos) is kept; only the clips and final video are put together again (no AI cost). Use ↻ Remake on a scene to redraw it." : "";
+  const changeNote = () => (keeping() ? keepNote : ["scenes", "character", "audio"].includes(step) ? keptNote : step === "audio" && hasVisuals ? `${laterNote} The pictures${veoKept ? ` and ${veoKept} Veo animation${veoKept === 1 ? "" : "s"}` : ""} are kept (no new AI cost); the clips are only re-timed to the new audio.` : laterNote);
   
   // Audio page: extra wishes for the song / music / voice, remembered for this video.
   const wish = step === "audio" && idle && ready
@@ -641,11 +684,13 @@ function stepPage(p, step, keepVideo, videoKey) {
       body = h("div", {}, h("div", { class: "whitespace-pre-line text-lg leading-relaxed", lang, text: p.poem.stanzas.map((s) => s.lines.join("\n")).join("\n\n") }), pace?.el);
     }
   } else if (step === "scenes" && p.scenes) {
+    // Scenes without a picture: the description goes straight to the video AI.
+    const noPicture = (sc) => p.input.videoMode === "veo" && (sc.picture ?? p.input.scenePictures !== false) === false;
     if (editable) {
       const rows = p.scenes.scenes.map((sc) => ({
         sc,
         text: h("textarea", { class: "field", lang, rows: 2, "aria-label": `Scene ${sc.index + 1} words`, value: sc.text }),
-        visual: h("textarea", { class: "field text-sm", rows: 3, "aria-label": `Scene ${sc.index + 1} picture description`, value: sc.visualPrompt }),
+        visual: h("textarea", { class: "field text-sm", rows: 3, "aria-label": `Scene ${sc.index + 1} ${noPicture(sc) ? "video" : "picture"} description`, value: sc.visualPrompt }),
       }));
       const read = () => ({ scenes: rows.map((r) => ({ ...r.sc, text: r.text.value.trim(), visualPrompt: r.visual.value.trim() })) });
       save = () => JSON.stringify(read()) !== JSON.stringify({ scenes: p.scenes.scenes }) ? () => post(`/api/projects/${enc(id)}/scenes`, { scenes: read() }, "PUT") : null;
@@ -659,13 +704,17 @@ function stepPage(p, step, keepVideo, videoKey) {
         return h("div", { class: "rounded-xl border border-orange-100 p-3" },
         h("div", { class: "mb-2 flex items-center gap-2" }, h("p", { class: "flex-1 font-semibold", text: `Scene ${r.sc.index + 1}` }), rw.toggle),
         h("p", { class: "label", text: "Sung / spoken" }), r.text, rw.box, rw.note,
-        h("p", { class: "label mt-2", text: "What the picture shows (English)" }), r.visual);
+        h("p", { class: "label mt-2", text: noPicture(r.sc) ? "What the video shows (English, sent to the video AI)" : "What the picture shows (English)" }), r.visual,
+        h("div", { class: "mt-2" }, scenePictureToggle(p, r.sc, act)));
       }));
     } else {
       body = h("ol", { class: "space-y-3" }, p.scenes.scenes.map((sc) => h("li", { class: "rounded-xl border border-orange-100 p-3" },
         h("p", { class: "whitespace-pre-line font-semibold", lang, text: `${sc.index + 1}. ${sc.text}` }),
-        h("p", { class: "mt-1 text-sm text-stone-600", text: sc.visualPrompt }))));
+        h("p", { class: "mt-1 text-sm text-stone-600", text: sc.visualPrompt }),
+        h("div", { class: "mt-2" }, scenePictureToggle(p, sc, act)))));
     }
+  } else if (step === "character" && p.character?.skipped && done) {
+    body = h("p", { class: "rounded-xl bg-sky-50 p-3 text-sm text-sky-900", text: "⏭ Character skipped: there's no character sheet, so each picture and video is made from its scene description (the people and animals may look a little different from scene to scene). Click \"Design a new character\" to add one." });
   } else if (step === "character" && p.character && (done || making)) {
     const img = p.media.characterImage
       ? h("img", { src: mediaUrl(id, p.media.characterImage, p.updatedAt), alt: `Character sheet for ${p.character.name}`, class: "w-56 self-start rounded-xl border border-orange-100" })
@@ -686,12 +735,14 @@ function stepPage(p, step, keepVideo, videoKey) {
     }
   }
   if (step === "character" && idle && p.completed.includes("scenes")) after = characterUpload(p, act, done);
-  if (step === "audio" && done) {
+  // Audio: show (and play) whatever is made, also while it's only partly done, e.g. after a rate limit stopped it.
+  const someAudio = p.song || p.media.music || p.media.scenes.some((m) => m.audio);
+  if (step === "audio" && (done || (someAudio && !making))) {
     const soundInClips = p.input.audioMode === "character" || p.input.videoAudio === true;
     body = soundInClips
       // The voice / song is made in each video clip: this step only has the (optional) background music.
       ? h("div", { class: "space-y-2" },
-          h("p", { class: "text-sm text-stone-600", text: `The ${p.input.audioMode === "song" ? "song is sung" : "words are said"} by the character in each video clip, so there's no separate voice or song here.` }),
+          h("p", { class: "text-sm text-stone-600", text: `⏭ Audio skipped: the ${p.input.audioMode === "song" ? "song is sung" : "words are said"} by the character in each video clip, so there's no separate voice or song here.` }),
           p.media.music
             ? [h("audio", { controls: true, class: "w-full", src: mediaUrl(id, p.media.music, p.updatedAt), "aria-label": "Background music" }),
                 h("p", { class: "text-sm text-stone-500", text: "Soft background music, played under the clips." })]
@@ -700,12 +751,16 @@ function stepPage(p, step, keepVideo, videoKey) {
       ? h("div", { class: "space-y-2" }, h("audio", { controls: true, class: "w-full", src: mediaUrl(id, p.song.file, p.updatedAt) }),
           h("p", { class: "text-sm text-stone-500", text: `${{ upload: "Your recording", music_voice: "Rhyme over music", ai: "Song" }[p.song.source ?? "ai"]} · ${p.song.duration.toFixed(1)} seconds` }),
           h("a", { class: "btn-soft", href: mediaUrl(id, p.song.file, p.updatedAt), download: "" }, "⬇ Download audio"))
-      : h("ol", { class: "space-y-3" }, (p.scenes?.scenes ?? []).map((sc) => {
+      : h("div", { class: "space-y-3" },
+        // Rhyme over music / narration: the voice model says each verse; the song model only makes the music.
+        p.input.audioMode === "music_voice" ? h("p", { class: "rounded-xl bg-sky-50 p-3 text-sm text-sky-900", text: "Rhyme over music: the voice AI (Models → Narration) says each verse, and the song model only makes the instrumental music under it. To have the song model sing the words, choose Audio = Song in the Audio settings below." }) : null,
+        p.media.music ? h("div", {}, h("p", { class: "label", text: "Music" }), h("audio", { controls: true, preload: "none", class: "w-full", src: mediaUrl(id, p.media.music, p.updatedAt), "aria-label": "Background music" })) : null,
+        h("ol", { class: "space-y-3" }, (p.scenes?.scenes ?? []).map((sc) => {
           const a = p.media.scenes.find((m) => m.index === sc.index)?.audio;
           return h("li", { class: "rounded-xl border border-orange-100 p-3" },
             h("p", { class: "mb-2 whitespace-pre-line text-sm", lang, text: `${sc.index + 1}. ${sc.text}` }),
-            a ? h("audio", { controls: true, preload: "none", class: "w-full", src: mediaUrl(id, a, p.updatedAt), "aria-label": `Scene ${sc.index + 1} narration` }) : h("p", { class: "text-sm text-stone-500", text: "missing" }));
-        }));
+            a ? h("audio", { controls: true, preload: "none", class: "w-full", src: mediaUrl(id, a, p.updatedAt), "aria-label": `Scene ${sc.index + 1} narration` }) : h("p", { class: "text-sm text-stone-500", text: done ? "missing" : "not made yet" }));
+        })));
   } else if (step === "clips" && p.scenes && (done || making || p.media.scenes.some((m) => m.image || m.clip))) {
     body = h("div", { class: "grid gap-4 sm:grid-cols-2" }, p.scenes.scenes.map((sc) => {
       const m = p.media.scenes.find((x) => x.index === sc.index);
@@ -725,7 +780,8 @@ function stepPage(p, step, keepVideo, videoKey) {
             await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/redo`);
           }) }, "↻ Remake") : null,
           p.completed.includes("audio") && p.input.audioMode !== "character" ? scenePieceButton(p, sc, m) : null,
-          idle && p.input.videoMode === "veo" ? sceneVideoUpload(p, sc, act) : null));
+          idle && p.input.videoMode === "veo" ? sceneVideoUpload(p, sc, act) : null),
+        idle ? h("div", { class: "px-3 pb-3" }, scenePictureToggle(p, sc, act)) : null);
     }));
     if (idle && p.completed.includes("audio")) extra = [visualsSwitch(p, act)];
     // Videos uploaded by hand (or made earlier): approve them as they are and go on, without generating anything.
@@ -744,7 +800,35 @@ function stepPage(p, step, keepVideo, videoKey) {
       p.media.subtitles ? h("a", { class: "btn-soft", href: mediaUrl(id, p.media.subtitles, p.updatedAt), download: `${id}.srt` }, "⬇ Lyrics file (.srt)") : null));
   }
   if (step === "final" && idle) after = subtitlesToggle(p, act);
+  if ((step === "scenes" || step === "clips") && idle && p.scenes) extra.push(allPicturesButton(p, act));
+  // Scenes: skip the AI plan, one scene per stanza (shown next to "Plan the scenes").
+  if (step === "scenes" && idle && ready) extra.push(h("button", { type: "button", class: "btn-soft", title: "No AI scene plan: each stanza becomes a scene, described by its own words. You can edit the descriptions afterwards.", onclick: act(async () => {
+    if (done && !confirm(`Replace the scene plan with one scene per stanza (no AI)?${laterNote}`)) return SKIP;
+    await post(`/api/projects/${enc(id)}/scenes/skip`);
+  }, false) }, "⏭ Skip scenes"));
+  if (step === "character" && idle && ready && !p.character?.skipped) extra.push(h("button", { type: "button", class: "btn-soft", title: "No character sheet: each picture and video is made from its scene description.", onclick: act(async () => {
+    const made = p.media.scenes.filter((m) => m.image || m.video).length;
+    if (!confirm(`Skip the character? No character sheet is drawn, so the main character may look different in each scene.${done ? " The current character is removed." : ""}${made ? ` The ${made} scene picture${made === 1 ? "" : "s"} / video${made === 1 ? "" : "s"} already made from it ${made === 1 ? "is" : "are"} deleted.` : ""}`)) return SKIP;
+    await post(`/api/projects/${enc(id)}/character/skip`);
+  }, false) }, "⏭ Skip character"));
   if (step === "audio" && idle && p.completed.includes("character")) after = audioUpload(p, act, done);
+  // Audio page: its settings live here (not in Video settings), plus Skip.
+  if (step === "audio" && idle && ready) {
+    const skipped = p.input.videoAudio === true || p.input.audioMode === "character";
+    extra.push(skipped && p.input.audioMode !== "character"
+      ? h("button", { type: "button", class: "btn-soft", title: "The audio AI makes the song / voice again; the scene videos are made again without their own singing.", onclick: act(async () => {
+          if (!confirm("Use the audio AI for the song / voice? The scene videos made with their own singing are deleted and made again later (paid).")) return SKIP;
+          await post(`/api/projects/${enc(id)}/audio/use-ai`);
+        }, false) }, "🎵 Use the audio AI instead")
+      : !skipped || p.input.backgroundMusic !== false || !done
+      ? h("button", { type: "button", class: "btn-soft", title: "No song or voice from the audio AI: the video AI sings / speaks each scene inside its clip.", onclick: act(async () => {
+          const videos = p.media.scenes.filter((m) => m.video).length;
+          if (!confirm(`Skip the audio? No audio AI is used: the video AI ${p.input.audioMode === "song" ? "sings" : "says"} each scene in its clip, with no background music. The poem and pictures are kept.${videos ? ` The ${videos} scene video${videos === 1 ? "" : "s"} already made ${videos === 1 ? "is" : "are"} deleted and made again with sound (paid).` : ""}`)) return SKIP;
+          await post(`/api/projects/${enc(id)}/audio/skip`);
+        }, false) }, "⏭ Skip audio")
+      : null);
+    after = [settingsPanel(p, "audio"), after];
+  }
 
   // What to do on this page.
   let buttons = [];
@@ -769,7 +853,7 @@ function stepPage(p, step, keepVideo, videoKey) {
     const approve = reviewing ? h("button", { type: "button", class: "btn", onclick: act(async () => {
       await save()?.();
       await post(`/api/projects/${enc(id)}/approve`, { step });
-    }) }, next ? `✓ Approve & make ${STEP_LABELS[next]}` : "✓ Approve") : null;
+    }, false) }, "✓ Approve") : null;
     buttons = [approve, saveBtn, ...extra, generate(REDO_LABEL[step], "btn-soft")];
     extra = [];
   }
@@ -894,32 +978,36 @@ function videoAdmin(p) {
  * Change the video's settings after it was started (length, scenes, language, song/story, style, shape…).
  * Shows what will have to be made again before saving; nothing is generated until you ask.
  */
-function settingsPanel(p) {
+/** Settings shown on the Audio step instead of in Video settings. */
+const AUDIO_SETTING_KEYS = ["audioMode", "videoAudio", "backgroundMusic", "singer", "voice"];
+
+function settingsPanel(p, group = "video") {
   const id = p.id, inp = p.input;
-  const f = (key, label, control, hint) => h("div", {}, h("label", { for: `ps-${key}`, class: "label", text: label }), control, hint ? h("p", { id: `ps-${key}-hint`, class: "mt-1 text-xs text-stone-500", text: hint }) : null);
-  const sel = (key, options, value) => h("select", { id: `ps-${key}`, class: "field" }, options.map(([v, t]) => h("option", { value: v, text: t, selected: v === value })));
+  const inGroup = (k) => (group === "audio") === AUDIO_SETTING_KEYS.includes(k);
+  const pre = group === "audio" ? "as" : "ps"; // unique ids when both panels could be on one page
+  const f = (key, label, control, hint) => h("div", {}, h("label", { for: `${pre}-${key}`, class: "label", text: label }), control, hint ? h("p", { id: `${pre}-${key}-hint`, class: "mt-1 text-xs text-stone-500", text: hint }) : null);
+  const sel = (key, options, value) => h("select", { id: `${pre}-${key}`, class: "field" }, options.map(([v, t]) => h("option", { value: v, text: t, selected: v === value })));
   const els = {
-    topic: h("textarea", { id: "ps-topic", class: "field", rows: 2, lang: inp.language, value: inp.topic }),
+    topic: h("textarea", { id: `${pre}-topic`, class: "field", rows: 2, lang: inp.language, value: inp.topic }),
     language: sel("language", [["en", "English"], ["am", "አማርኛ (Amharic)"]], inp.language),
     audioMode: sel("audioMode", AUDIO_MODES, inp.audioMode),
-    videoAudio: h("input", { id: "ps-videoAudio", type: "checkbox", checked: inp.videoAudio === true, class: "mt-1 size-4 accent-coral" }),
-    backgroundMusic: h("input", { id: "ps-backgroundMusic", type: "checkbox", checked: inp.backgroundMusic !== false, class: "mt-1 size-4 accent-coral" }),
-    noScenePictures: h("input", { id: "ps-noScenePictures", type: "checkbox", checked: inp.scenePictures === false, class: "mt-1 size-4 accent-coral" }),
+    videoAudio: h("input", { id: `${pre}-videoAudio`, type: "checkbox", checked: inp.videoAudio === true, class: "mt-1 size-4 accent-coral" }),
+    backgroundMusic: h("input", { id: `${pre}-backgroundMusic`, type: "checkbox", checked: inp.backgroundMusic !== false, class: "mt-1 size-4 accent-coral" }),
     singer: sel("singer", SINGERS, inp.singer ?? "auto"),
     voice: sel("voice", VOICE_OPTIONS, inp.voice ?? ""),
-    length: h("input", { id: "ps-length", type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: inp.lengthSeconds ? inp.lengthSeconds / 60 : inp.audioMode === "song" ? inp.songSeconds / 60 : "", placeholder: "not set" }),
-    sceneCount: h("input", { id: "ps-sceneCount", type: "number", min: 2, max: 40, class: "field", value: inp.sceneCount, placeholder: "Auto" }),
-    ageRange: h("input", { id: "ps-ageRange", class: "field", value: inp.ageRange }),
+    length: h("input", { id: `${pre}-length`, type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: inp.lengthSeconds ? inp.lengthSeconds / 60 : inp.audioMode === "song" ? inp.songSeconds / 60 : "", placeholder: "not set" }),
+    sceneCount: h("input", { id: `${pre}-sceneCount`, type: "number", min: 2, max: 40, class: "field", value: inp.sceneCount, placeholder: "Auto" }),
+    ageRange: h("input", { id: `${pre}-ageRange`, class: "field", value: inp.ageRange }),
     aspectRatio: sel("aspectRatio", [["16:9", "Landscape 16:9 (YouTube)"], ["9:16", "Portrait 9:16 (Shorts)"]], inp.aspectRatio),
-    resolution: sel("resolution", QUALITY_OPTIONS, inp.resolution ?? "4k"),
+    resolution: sel("resolution", QUALITY_OPTIONS, inp.resolution ?? "1080p"),
     videoMode: sel("videoMode", VISUALS_OPTIONS, inp.videoMode ?? "veo"),
     videoConcurrency: sel("videoConcurrency", CONCURRENCY_OPTIONS, inp.videoConcurrency ? String(inp.videoConcurrency) : ""),
-    characterHint: h("input", { id: "ps-characterHint", class: "field", value: inp.characterHint ?? "", placeholder: "a curious little goat named Abeba" }),
-    style: h("input", { id: "ps-style", class: "field", value: inp.style }),
+    characterHint: h("input", { id: `${pre}-characterHint`, class: "field", value: inp.characterHint ?? "", placeholder: "a curious little goat named Abeba" }),
+    style: h("input", { id: `${pre}-style`, class: "field", value: inp.style }),
   };
-  const keepBox = h("input", { id: "ps-keep", type: "checkbox", checked: true, class: "mt-1 size-4 accent-coral" });
+  const keepBox = h("input", { id: `${pre}-keep`, type: "checkbox", checked: true, class: "mt-1 size-4 accent-coral" });
   const keepRow = h("div", { class: "flex items-start gap-2 rounded-xl bg-violet-50 p-3 text-sm", hidden: true }, keepBox,
-    h("label", { for: "ps-keep" }, h("span", { class: "font-semibold", text: "Keep the poem and the pictures" }),
+    h("label", { for: `${pre}-keep` }, h("span", { class: "font-semibold", text: "Keep the poem and the pictures" }),
       h("span", { class: "block text-stone-600", text: "Only the length changes: the same words are sung or read over the new length, and the clips are re-timed. Untick to write a new poem that fits the new length." })));
   const impact = h("p", { role: "status", "aria-live": "polite", class: "rounded-xl bg-sky-50 p-3 text-sm text-sky-900" });
   const status = h("div", { role: "status", "aria-live": "polite", class: "text-sm" });
@@ -927,7 +1015,7 @@ function settingsPanel(p) {
   const read = () => {
     const minutes = Number(els.length.value);
     return {
-      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, videoAudio: els.videoAudio.checked, backgroundMusic: els.backgroundMusic.checked, scenePictures: !els.noScenePictures.checked, ageRange: els.ageRange.value.trim() || "3-6",
+      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, videoAudio: els.videoAudio.checked, backgroundMusic: els.backgroundMusic.checked, ageRange: els.ageRange.value.trim() || "3-6",
       aspectRatio: els.aspectRatio.value, resolution: els.resolution.value, videoMode: els.videoMode.value,
       videoConcurrency: els.videoConcurrency.value ? Number(els.videoConcurrency.value) : null, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
       singer: els.singer.value, voice: els.voice.value || null,
@@ -938,8 +1026,8 @@ function settingsPanel(p) {
   const changedKeys = () => {
     const next = read();
     const autoCount = next.sceneCount ?? autoScenes(next.lengthSeconds ?? inp.songSeconds, next.audioMode);
-    const cur = { ...inp, characterHint: inp.characterHint ?? null, lengthSeconds: inp.lengthSeconds ?? null, singer: inp.singer ?? "auto", voice: inp.voice ?? null, videoAudio: inp.videoAudio === true, backgroundMusic: inp.backgroundMusic !== false, scenePictures: inp.scenePictures !== false };
-    return Object.keys(next).filter((k) => k === "sceneCount" ? autoCount !== inp.sceneCount
+    const cur = { ...inp, characterHint: inp.characterHint ?? null, lengthSeconds: inp.lengthSeconds ?? null, singer: inp.singer ?? "auto", voice: inp.voice ?? null, videoAudio: inp.videoAudio === true, backgroundMusic: inp.backgroundMusic !== false };
+    return Object.keys(next).filter(inGroup).filter((k) => k === "sceneCount" ? autoCount !== inp.sceneCount
       : k === "lengthSeconds" ? next.lengthSeconds !== (cur.lengthSeconds ?? (inp.audioMode === "song" ? inp.songSeconds : null))
       : String(next[k] ?? "") !== String(cur[k] ?? ""));
   };
@@ -994,32 +1082,36 @@ function settingsPanel(p) {
       location.hash = stepUrl(id, currentStep);
       await renderProject(id);
       const s = $("#run-status");
+      if (s && !r.redoFrom) s.textContent = "Settings saved ✓";
       if (s && r.redoFrom) s.textContent = `Settings saved ✓ Next: ${LABEL[r.redoFrom] ?? STEP_LABELS[r.redoFrom]}.`;
     } catch (err) { mount(status, errorBox(err)); save.disabled = false; }
   } }, "💾 Save settings");
 
-  const panel = h("details", { id: "settings-panel", class: "mt-4 rounded-xl border border-orange-100 p-4" },
-    h("summary", { class: "cursor-pointer font-semibold", text: "⚙️ Video settings: length, scenes, language, style…" }),
+  const audioFields = [
+    h("div", { class: "grid gap-4 sm:grid-cols-3" }, f("audioMode", "Audio", els.audioMode),
+      f("singer", "Singer / voice", els.singer, SINGER_HINT), f("voice", "Exact voice (rhyme over music, narration)", els.voice)),
+    h("div", { class: "flex items-start gap-2" }, els.videoAudio,
+      h("label", { for: `${pre}-videoAudio`, class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip the audio AI: the video AI makes the voice / song" }),
+        h("span", { class: "block text-xs text-stone-500", text: "The character sings (Song) or speaks (other choices) in each video clip. Changing this writes a new poem (one ~8-second stanza per clip)." }))),
+    h("div", { class: "flex items-start gap-2" }, els.backgroundMusic,
+      h("label", { for: `${pre}-backgroundMusic`, class: "text-sm" }, h("span", { class: "font-semibold", text: "Background music under the voice / song made in the clips" }),
+        h("span", { class: "block text-xs text-stone-500", text: "Soft instrumental music from the music AI (when the video AI makes the voice / song). Changing it remakes only the music; the video clips are kept." }))),
+  ];
+  const videoFields = [
+    f("topic", "What is the video about?", els.topic),
+    h("div", { class: "grid gap-4 sm:grid-cols-2" }, f("language", "Language", els.language), f("aspectRatio", "Shape", els.aspectRatio)),
+    h("div", { class: "grid gap-4 sm:grid-cols-3" }, f("videoMode", "Visuals", els.videoMode, "Switching keeps the pictures and video clips already made."), f("resolution", "Quality", els.resolution, QUALITY_HINT), f("videoConcurrency", "Videos at the same time", els.videoConcurrency, CONCURRENCY_HINT)),
+    h("div", { class: "grid gap-4 sm:grid-cols-3" },
+      f("length", "Video length (minutes)", els.length, "½ to 10 minutes."),
+      f("sceneCount", "Scenes", els.sceneCount, "Empty = picked from the length."),
+      f("ageRange", "Age range", els.ageRange)),
+    h("div", { class: "grid gap-4 sm:grid-cols-2" }, f("characterHint", "Main character", els.characterHint), f("style", "Art style", els.style)),
+  ];
+  const audio = group === "audio";
+  const panel = h("details", { id: audio ? "audio-settings" : "settings-panel", class: "mt-4 rounded-xl border border-orange-100 p-4", open: audio && !p.completed.includes("audio") },
+    h("summary", { class: "cursor-pointer font-semibold", text: audio ? "🎵 Audio settings: song or story, singer, voice, music…" : "⚙️ Video settings: length, scenes, language, style…" }),
     h("div", { class: "mt-4 space-y-4" },
-      f("topic", "What is the video about?", els.topic),
-      h("div", { class: "grid gap-4 sm:grid-cols-3" },
-        f("language", "Language", els.language), f("audioMode", "Audio", els.audioMode), f("aspectRatio", "Shape", els.aspectRatio)),
-      h("div", { class: "flex items-start gap-2" }, els.videoAudio,
-        h("label", { for: "ps-videoAudio", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip the audio AI: the video AI makes the voice / song" }),
-          h("span", { class: "block text-xs text-stone-500", text: "The character sings (Song) or speaks (other choices) in each video clip. Changing this writes a new poem (one ~8-second stanza per clip)." }))),
-      h("div", { class: "flex items-start gap-2" }, els.backgroundMusic,
-        h("label", { for: "ps-backgroundMusic", class: "text-sm" }, h("span", { class: "font-semibold", text: "Background music under the voice / song made in the clips" }),
-          h("span", { class: "block text-xs text-stone-500", text: "Soft instrumental music from the music AI (when the video AI makes the voice / song). Changing it remakes only the music; the video clips are kept." }))),
-      h("div", { class: "flex items-start gap-2" }, els.noScenePictures,
-        h("label", { for: "ps-noScenePictures", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip scene pictures" }),
-          h("span", { class: "block text-xs text-stone-500", text: "The video AI makes each scene from the character picture (Seedance, Wan 2.7, MiniMax H3, Gemini Omni Flash, Grok or Veo 3.1). Clips already made are kept; remake a scene to use the new setting." }))),
-      h("div", { class: "grid gap-4 sm:grid-cols-3" }, f("videoMode", "Visuals", els.videoMode, "Switching keeps the pictures and video clips already made."), f("resolution", "Quality", els.resolution, QUALITY_HINT), f("videoConcurrency", "Videos at the same time", els.videoConcurrency, CONCURRENCY_HINT)),
-      h("div", { class: "grid gap-4 sm:grid-cols-2" }, f("singer", "Singer / voice", els.singer, SINGER_HINT), f("voice", "Exact voice (rhyme over music, narration)", els.voice)),
-      h("div", { class: "grid gap-4 sm:grid-cols-3" },
-        f("length", "Video length (minutes)", els.length, "½ to 10 minutes."),
-        f("sceneCount", "Scenes", els.sceneCount, "Empty = picked from the length."),
-        f("ageRange", "Age range", els.ageRange)),
-      h("div", { class: "grid gap-4 sm:grid-cols-2" }, f("characterHint", "Main character", els.characterHint), f("style", "Art style", els.style)),
+      ...(audio ? audioFields : videoFields),
       keepRow, impact,
       h("div", { class: "flex flex-wrap items-center gap-3" }, save, status)));
   update();
@@ -1189,6 +1281,33 @@ function scenePieceButton(p, sc, m) {
  * Use a video file you have (e.g. downloaded from inference.sh when the app couldn't fetch it) as one scene's
  * animation, instead of paying to generate it again. Only the clips and final video are re-made.
  */
+/**
+ * Moving video: draw a picture for this scene (the video AI animates it), or skip it (the video AI makes the
+ * scene from the character picture; cheaper, needs Veo 3.1 Fast / Veo 3.1 or a reference-capable inference.sh model).
+ */
+/** Skip (or bring back) every scene's picture at once (moving video only). */
+function allPicturesButton(p, act) {
+  if (p.input.videoMode !== "veo" || !p.scenes || p.running) return null;
+  const anyOn = p.scenes.scenes.some((sc) => sc.picture ?? p.input.scenePictures !== false);
+  return h("button", { type: "button", class: "btn-soft", title: anyOn ? "No picture for any scene: the video AI makes each scene from the character picture (needs Veo 3.1 Fast or Veo 3.1, not Lite). Pictures already drawn are kept." : "Draw a picture for every scene again; the video AI animates it.", onclick: act(async () => {
+    await post(`/api/projects/${enc(p.id)}/scenes/pictures`, { picture: !anyOn }, "PUT");
+  }, false) }, anyOn ? "⏭ Skip scene pictures" : "🖼️ Draw scene pictures");
+}
+
+function scenePictureToggle(p, sc, act) {
+  if (p.input.videoMode !== "veo") return null;
+  const on = sc.picture ?? p.input.scenePictures !== false;
+  const box = h("input", { id: `pic-${sc.index}`, type: "checkbox", checked: on, class: "mt-0.5 size-4 accent-coral", disabled: p.running });
+  box.addEventListener("change", act(async () => {
+    await post(`/api/projects/${enc(p.id)}/scenes/${sc.index + 1}/picture`, { picture: box.checked }, "PUT");
+  }, false));
+  return h("div", { class: "flex items-start gap-2 text-sm" }, box,
+    h("label", { for: `pic-${sc.index}` }, h("span", { class: "font-semibold", text: "🖼️ Picture for this scene" }),
+      h("span", { class: "block text-xs text-stone-500", text: on
+        ? "A picture is drawn, then animated. Untick to skip it: the video AI makes the scene from the character picture (needs Veo 3.1 Fast or Veo 3.1, not Lite)."
+        : "No picture: the video AI makes this scene from the character picture. Tick to draw one (then remake the scene)." })));
+}
+
 function sceneVideoUpload(p, sc, act) {
   const n = sc.index + 1;
   const file = h("input", { type: "file", accept: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm", class: "sr-only", "aria-label": `Video file for scene ${n}`, tabindex: -1 });
@@ -1424,6 +1543,7 @@ async function showModels() {
       h("p", { class: "text-stone-600", text: "One model per task. The list shows the models your Gemini key can use." })),
     available.warning ? h("div", { class: "mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm" },
       h("p", { text: available.warning + " — you can still type a model id." }), billingHelp(available.warning)) : null,
+    providersCard(),
     h("div", { class: "card divide-y divide-orange-100 p-0" }, rows),
   ].filter(Boolean));
 }
@@ -1439,6 +1559,13 @@ function modelRow(s, options) {
   const custom = h("input", { class: "field mt-2 font-mono text-sm", placeholder: "e.g. gemini-3.1-pro-preview", hidden: true, "aria-label": `Custom model id for ${s.title}` });
   const status = h("span", { role: "status", "aria-live": "polite", class: "text-sm" });
   const reset = h("button", { type: "button", class: "btn-soft px-3 py-1 text-sm", hidden: s.isDefault }, "↺ Default");
+  // Where the chosen model runs: link to that provider's page (keys, usage, prices).
+  const providerLink = h("p", { class: "mt-1 text-xs text-stone-500" });
+  const showProvider = (model) => {
+    const pr = providerOf(model);
+    mount(providerLink, "Runs on ", extLink(pr.links[0][0], pr.name));
+  };
+  showProvider(s.model);
 
   const save = async (model) => {
     status.className = "text-sm text-stone-500";
@@ -1446,6 +1573,7 @@ function modelRow(s, options) {
     try {
       const saved = await post(`/api/models/settings/${enc(s.task)}`, { model }, "PUT");
       Object.assign(s, saved);
+      showProvider(saved.model);
       reset.hidden = saved.isDefault;
       status.className = "text-sm text-emerald-700";
       status.textContent = "Saved ✓";
@@ -1466,6 +1594,7 @@ function modelRow(s, options) {
     try {
       const saved = await post(`/api/models/settings/${enc(s.task)}/reset`);
       Object.assign(s, saved);
+      showProvider(saved.model);
       if (![...select.options].some((o) => o.value === saved.model)) select.prepend(h("option", { value: saved.model, text: saved.model }));
       select.value = saved.model;
       custom.hidden = true;
@@ -1482,7 +1611,7 @@ function modelRow(s, options) {
         h("h3", { class: "font-semibold", text: s.title }),
         h("span", { class: "chip px-2 py-0 text-xs", text: CAPABILITY_LABEL[s.capability] })),
       h("p", { class: "mt-1 text-sm text-stone-500", text: s.description })),
-    h("div", {}, select, custom, h("div", { class: "mt-2 flex items-center gap-2" }, reset, status)));
+    h("div", {}, select, custom, h("div", { class: "mt-2 flex items-center gap-2" }, reset, status), providerLink));
 }
 
 // ---------- Channel art (YouTube brand kit) ----------

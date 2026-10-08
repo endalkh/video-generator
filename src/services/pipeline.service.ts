@@ -2,11 +2,13 @@ import { readdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { GenContext, Provider } from "../domain/ports/generator.port.js";
 import { MAX_SONG_PART_SEC, mmss, singableSeconds, songParts, songTimeline } from "../domain/ports/generator.port.js";
+import { isTrebloModel, TREBLO_MAX_SONG_SEC } from "../infrastructure/providers/treblo.js";
 import type { Project } from "../domain/project/project.entity.js";
-import { defaultVoice, minResolution, soundInVideo, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
+import { defaultVoice, minResolution, scenePicture, soundInVideo, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
+import { needsScenePicture } from "../infrastructure/providers/gemini.js";
 import { addEndCard, assertFfmpegAvailable, audioPiece, canDrawText, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, SCENE_TAIL_SEC, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
 import { ensureDir, fileExists, writeFileAtomic } from "../util/fs.js";
@@ -153,6 +155,17 @@ export async function wipePictures(p: MediaPaths): Promise<void> {
   await Promise.all(files.map((f) => rm(f, { force: true })));
 }
 
+/** Delete every scene's Veo video and clip (and the final video); pictures are kept. E.g. when the sound moves into the clips. */
+export async function wipeSceneVideos(p: MediaPaths): Promise<void> {
+  const dirs = await readdir(path.join(p.dir, "scenes")).catch(() => [] as string[]);
+  const files = [p.final, p.srt];
+  for (const d of dirs) {
+    const i = Number(d) - 1;
+    if (Number.isInteger(i) && i >= 0) files.push(p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i));
+  }
+  await Promise.all(files.map((f) => rm(f, { force: true })));
+}
+
 /** Delete one scene's picture, video and clip (plus the final video) so only that scene is made again. */
 export async function wipeScene(p: MediaPaths, i: number): Promise<void> {
   await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.final, p.srt].map((f) => rm(f, { force: true })));
@@ -232,6 +245,8 @@ export interface RunOptions {
   /** Clips step: use only the scene videos that exist (uploaded or made earlier); never generate one. The clips are
    *  then approved, so a manual-review run goes on to the final video. A missing video fails the run with an error. */
   noNewVideos?: boolean;
+  /** Remaking one step on its own: keep the later steps that are done (don't invalidate them). */
+  keepLater?: boolean;
   concurrency?: number;
   signal?: AbortSignal;
   onEvent?: (e: PipelineEvent) => void;
@@ -334,6 +349,8 @@ export class PipelineService {
       const models = await this.modelSettings.snapshot();
       // Lyria 3 Clip (and the offline mock) always make a fixed length; Lyria 3 Pro / 3.5 follow the prompt.
       const fixedSongLength = provider.songLengthSec ?? (/^lyria-3(\.\d+)?-clip/.test(models.song) ? 30 : undefined);
+      // Longest song one request makes: Treblo v3 up to 4:30, Lyria ~3 min.
+      const maxSongPart = isTrebloModel(models.song) ? TREBLO_MAX_SONG_SEC : MAX_SONG_PART_SEC;
       // With a chosen video length, long songs are made in parts; without one, a fixed-length model sets it.
       const songSeconds = input.lengthSeconds ?? fixedSongLength ?? input.songSeconds;
       const prompts: PromptSet = await this.promptService.snapshotFor(input, { songSeconds, channel: project.channelId });
@@ -372,7 +389,7 @@ export class PipelineService {
           if (name === opts.until) throw new StopAfter(name);
           return;
         }
-        project.redoFrom(name); // redoing a step invalidates everything after it
+        if (!opts.keepLater) project.redoFrom(name); // redoing a step invalidates everything after it (unless kept on purpose)
         emit({ type: "step-start", step: name });
         log.step(name, "running…");
         await produce();
@@ -415,7 +432,7 @@ export class PipelineService {
       });
       const scenes = project.scenes!.scenes;
 
-      await step("character", async () => project.character !== null && (await fileExists(p.characterImage)), async () => {
+      await step("character", async () => project.character !== null && (project.character.skipped === true || (await fileExists(p.characterImage))), async () => {
         // Reuse a character the user edited (or kept); only generate one when there is none.
         let character = project.character;
         if (!character) {
@@ -425,7 +442,7 @@ export class PipelineService {
           await save();
         }
         checkCancel();
-        if (!(await fileExists(p.characterImage))) {
+        if (!character.skipped && !(await fileExists(p.characterImage))) {
           const ri = await prompt("character", "character_image", "character_image", { character_name: character.name, character_description: character.description });
           await writeFileAtomic(p.characterImage, await provider.image(ri.text, { model: ri.model, aspectRatio: "1:1", label: "character image", ctx: ctx() }));
         }
@@ -492,7 +509,7 @@ export class PipelineService {
           emit({ type: "progress", step: "audio", done: 0, total: 1, message: "composing soft background music" });
           const r = await prompt("audio", "music_bed", "song", { title: project.poem!.title, song_seconds: seconds });
           try {
-            const music = await provider.song(r.text, { model: r.model, label: "background music", durationSec: seconds, ctx: ctx() });
+            const music = await provider.song(r.text, { model: r.model, label: "background music", durationSec: seconds, ctx: ctx(), instrumental: true });
             await writeFileAtomic(p.music(music.ext), music.audio);
             log.step("audio", "background music ready (the voice / song is made in each clip)");
           } catch (err) {
@@ -529,7 +546,7 @@ export class PipelineService {
           if (!bed) {
             emit({ type: "progress", step: "audio", done: 0, total: 1, message: "composing the music" });
             const r = await prompt("audio", "music_bed", "song", { title: project.poem!.title, song_seconds: bedLength });
-            const music = await provider.song!(r.text, { model: r.model, label: "music", durationSec: bedLength, ctx: ctx() });
+            const music = await provider.song!(r.text, { model: r.model, label: "music", durationSec: bedLength, ctx: ctx(), instrumental: true });
             bed = p.music(music.ext);
             await writeFileAtomic(bed, music.audio);
           }
@@ -547,14 +564,15 @@ export class PipelineService {
           const needed = singableSeconds(scenes.map((s) => s.text));
           let length = songSeconds;
           if (needed > songSeconds && fixedSongLength === undefined && !input.lengthSeconds) {
-            length = Math.min(MAX_SONG_PART_SEC, needed);
+            length = Math.min(maxSongPart, needed);
             log.warn(`the lyrics need ~${needed}s to be sung clearly; making a ${length}s song instead of ${songSeconds}s`);
             emit({ type: "progress", step: "audio", done: 0, total: 1, message: `lyrics need ~${needed}s to be sung clearly, so the song is ${length}s` });
           } else if (needed > songSeconds) {
             log.warn(`the lyrics need ~${needed}s to be sung clearly but the song is ${songSeconds}s; expect rushed singing`);
             emit({ type: "progress", step: "audio", done: 0, total: 1, message: `lyrics need ~${needed}s but the song is only ${songSeconds}s: the singing will be rushed` });
           }
-          const parts = songParts(scenes, length, { fixedLength: fixedSongLength });
+          const parts = songParts(scenes, length, { fixedLength: fixedSongLength, maxPart: maxSongPart });
+          const plainLyrics = (idx: number[]) => idx.map((i) => scenes[i]!.text).join("\n\n");
           const title = project.poem!.title;
           const timedLyrics = (idx: number[], seconds: number, first: boolean) => {
             const planned = songTimeline(idx.map((i) => scenes[i]!), seconds, first ? 2 : 1);
@@ -566,7 +584,7 @@ export class PipelineService {
           if (parts.length === 1) {
             emit({ type: "progress", step: "audio", done: 0, total: 1, message: "composing song" });
             const r = await prompt("audio", "song", "song", { title, timed_lyrics: timedLyrics(parts[0]!.scenes, length, true), song_seconds: length, part_note: "" });
-            const song = await provider.song!(r.text, { model: r.model, label: "song", durationSec: length, ctx: ctx() });
+            const song = await provider.song!(r.text, { model: r.model, label: "song", durationSec: length, ctx: ctx(), lyrics: plainLyrics(parts[0]!.scenes) });
             const file = p.song(song.ext);
             await writeFileAtomic(file, song.audio);
             // Re-fit the timeline to the real length the model returned.
@@ -593,7 +611,7 @@ export class PipelineService {
               + (first ? "Start with a short instrumental intro and set a catchy melody and chorus." : "Continue the same song: exactly the same melody, chorus, tempo, key, instruments and singer as before, with no intro.")
               + (last ? " End with a happy, clear ending." : " Do not end or fade out: stop on the beat, ready for the next part.");
             const r = await prompt("audio", "song", "song", { title, timed_lyrics: timedLyrics(part.scenes, part.seconds, first), song_seconds: part.seconds, part_note: note });
-            const song = await provider.song!(r.text, { model: r.model, label: `song part ${j + 1}`, durationSec: part.seconds, ctx: ctx() });
+            const song = await provider.song!(r.text, { model: r.model, label: `song part ${j + 1}`, durationSec: part.seconds, ctx: ctx(), lyrics: plainLyrics(part.scenes) });
             await writeFileAtomic(p.songPart(j, song.ext), song.audio);
             files.push(p.songPart(j, song.ext));
             if (song.lyrics) lyrics.push(song.lyrics);
@@ -636,15 +654,27 @@ export class PipelineService {
       };
 
       await step("clips", allExist(scenes.map((s) => p.sceneClip(s.index))), async () => {
-        const reference = await readFile(p.characterImage);
+        // Pictures are off, but the video model can only animate a picture: say so before paying for anything.
+        // (Character skipped on Veo: a scene with no picture is made from its words alone, which any Veo model can do.)
+        if (useVeo && provider.name === "gemini" && needsScenePicture(models.scene_video) && !(character.skipped && !isInferenceShModel(models.scene_video))) {
+          const missing: number[] = [];
+          for (const s of scenes) {
+            if (!scenePicture(input, s) && !(await fileExists(p.sceneVideo(s.index))) && !(await fileExists(p.sceneImage(s.index)))) missing.push(s.index + 1);
+          }
+          if (missing.length) {
+            throw new Error(`Scene${missing.length === 1 ? "" : "s"} ${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no picture, but ${models.scene_video} can only animate a scene picture (it can't make a scene from the character alone). On the Models page pick Veo 3.1 Fast or Veo 3.1 for Scene animation (or Seedance, Wan 2.7, MiniMax H3, Gemini Omni Flash or Grok on inference.sh), or turn the picture back on for ${missing.length === 1 ? "that scene" : "those scenes"} on the Scenes page. Nothing was made or paid for.`);
+          }
+        }
+        // Character step skipped: no sheet to keep the look; each scene is made from its description.
+        const reference = character.skipped ? undefined : await readFile(p.characterImage);
         await perScene("clips", p.sceneClip, "rendered", async (s, report) => {
           const i = s.index;
           const vars = { scene_number: i + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description };
           // An uploaded (or already made) Veo video doesn't need a picture: don't pay for one.
           // No scene pictures: the video model makes the scene from the character picture.
-          if (input.scenePictures && !(await fileExists(p.sceneImage(i))) && !(useVeo && (await fileExists(p.sceneVideo(i))))) {
+          if (scenePicture(input, s) && !(await fileExists(p.sceneImage(i))) && !(useVeo && (await fileExists(p.sceneVideo(i))))) {
             const r = await prompt("clips", "scene_image", "scene_image", vars, i);
-            await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references: [reference], label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
+            await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references: reference ? [reference] : [], label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
           }
           checkCancel();
           if (useVeo && opts.noNewVideos && !(await fileExists(p.sceneVideo(i)))) {
@@ -660,7 +690,7 @@ export class PipelineService {
               // The scene's length on screen (unknown when the character speaks inside the clip: there's no separate audio).
               const durationSec = t.duration ?? (t.audio && (await fileExists(t.audio)) ? (await probeDuration(t.audio)) + SCENE_TAIL_SEC : undefined);
               const mp4 = await provider.video!(r.text, {
-                model: r.model, character: reference, audio: piece ? await readFile(piece) : undefined, durationSec, still: input.scenePictures ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
+                model: r.model, character: reference, audio: piece ? await readFile(piece) : undefined, durationSec, still: scenePicture(input, s) && (await fileExists(p.sceneImage(i))) ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
                 resumeTaskId: saved?.model === r.model ? saved.taskId : undefined,
                 onTaskStarted: (taskId) => writeFileAtomic(taskFile, JSON.stringify({ taskId, model: r.model, startedAt: new Date().toISOString() })),
               });

@@ -38,6 +38,7 @@ describe("PromptService", () => {
 describe("manual review mode", () => {
   it("stops after each step, allows edits, and continues on approval", async () => {
     c = await makeTestContainer();
+    await expect(c.projectService.create({ sceneCount: 2 }, "mock")).rejects.toMatchObject({ details: ["topic: write what the video is about"] });
     const created = await c.projectService.create({ topic: "sheep and goats", sceneCount: 2, reviewMode: "manual" }, "mock");
     const ps = c.projectService;
     const settle = async () => { await ps.idle(); return ps.get(created.id); };
@@ -50,10 +51,12 @@ describe("manual review mode", () => {
     await expect(ps.editPoem(created.id, { title: "T", stanzas: [{ lines: ["only one"] }] })).rejects.toBeInstanceOf(ValidationError);
     await ps.editPoem(created.id, { title: "Selam's Flock", stanzas: [{ lines: ["Sheep on the hill"] }, { lines: ["Goats by the stream"] }] });
     await ps.approve(created.id, "poem");
+    await ps.start(created.id); // Approve no longer starts the next step
     p = await settle();
     expect([p.awaitingReview, p.scenes!.scenes.map((s) => s.text)]).toEqual(["scenes", ["Sheep on the hill", "Goats by the stream"]]);
 
     await ps.approve(created.id, "scenes");
+    await ps.start(created.id); // Approve no longer starts the next step
     p = await settle();
     expect(p.awaitingReview).toBe("character");
     const charCalls = () => c.generations.items.filter((g) => g.promptKey === "character").length;
@@ -63,6 +66,7 @@ describe("manual review mode", () => {
     expect([p.awaitingReview, p.character!.name, p.media.characterImage]).toEqual(["character", "Selam", "character.png"]);
     expect(charCalls()).toBe(before); // edited character reused, not regenerated
     await ps.approve(created.id, "character");
+    await ps.start(created.id); // Approve no longer starts the next step
     p = await settle();
 
     // Regenerating the song keeps earlier approvals.
@@ -72,12 +76,14 @@ describe("manual review mode", () => {
     expect([p.awaitingReview, p.approved]).toEqual(["audio", ["poem", "scenes", "character"]]);
 
     await ps.approve(created.id, "audio");
+    await ps.start(created.id); // Approve no longer starts the next step
     p = await settle();
     expect(p.awaitingReview).toBe("clips");
     await ps.redoScene(created.id, 1);
     p = await settle();
     expect(p.awaitingReview).toBe("clips");
     await ps.approve(created.id, "clips");
+    await ps.start(created.id); // Approve no longer starts the next step
     p = await settle();
     expect([p.status, p.media.final]).toEqual(["done", "final.mp4"]);
   }, 60_000);
@@ -115,11 +121,13 @@ describe("one step at a time", () => {
     p = await gen("clips");
     expect([p.completed.at(-1), p.media.final, p.media.scenes.every((s) => s.clip)]).toEqual(["clips", null, true]);
 
-    // Remaking the scenes clears everything after them.
+    // Remaking the scenes keeps the character, audio, pictures and videos; only the clips are put together again.
+    const imagesBefore = c.generations.items.filter((g) => g.projectId === id && g.promptKey === "scene_image").length;
     p = await gen("scenes");
-    expect(p.completed).toEqual(["poem", "scenes"]);
-    await expect(ps.generateStep(id, "clips")).rejects.toBeInstanceOf(ConflictError);
-    for (const s of ["character", "audio", "clips"]) await gen(s);
+    expect([[...p.completed].sort(), p.media.characterImage, p.song !== null]).toEqual([["audio", "character", "poem", "scenes"], "character.png", true]);
+    p = await gen("clips");
+    expect(p.completed).toContain("clips");
+    expect(c.generations.items.filter((g) => g.projectId === id && g.promptKey === "scene_image").length).toBe(imagesBefore); // no new pictures
     p = await gen("final");
     expect([p.status, p.media.final]).toEqual(["done", "final.mp4"]);
   }, 60_000);
@@ -255,7 +263,7 @@ describe("ModelSettingsService", () => {
     await expect(c.modelSettingsService.update("poem", "lyria-3.5")).rejects.toBeInstanceOf(ValidationError);
     expect((await c.modelSettingsService.reset("poem")).model).toBe("gemini-3.8-flash");
     const avail = await c.modelSettingsService.availableModels("mock");
-    expect(avail.byCapability.music.map((m) => m.id)).toEqual(["lyria-3-clip-preview"]);
+    expect(avail.byCapability.music.map((m) => m.id)).toEqual(["lyria-3.5"]);
     expect(avail.warning).toBeNull();
   });
 });
@@ -271,7 +279,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
     expect(byKey("poem")).toEqual(["gemini-3.1-pro-preview"]);
     expect(byKey("scenes")).toEqual(["gemini-3.8-flash"]);
     expect(byKey("scene_image")).toEqual(["gemini-3-pro-image", "gemini-3-pro-image"]);
-    expect(byKey("song")).toEqual(["lyria-3-clip-preview"]);
+    expect(byKey("song")).toEqual(["lyria-3.5"]);
   }, 60_000);
 
   it("renders a song video using DB prompts, then resumes from checkpoints", async () => {

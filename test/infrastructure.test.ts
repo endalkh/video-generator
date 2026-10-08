@@ -10,7 +10,7 @@ import { minResolution, videoResolution } from "../src/domain/project/project.mo
 import { InferenceShVideo, isAudioDrivenModel } from "../src/infrastructure/providers/inference-sh.js";
 import { capabilityOf } from "../src/domain/model-setting/model-setting.entity.js";
 import { slugify } from "../src/util/fs.js";
-import { isTransientError, withRetry } from "../src/util/retry.js";
+import { isTransientError, retryHintMs, withRetry } from "../src/util/retry.js";
 
 describe("slugify", () => {
   it("makes ascii slugs", () => expect(slugify("Washing Hands, Before Eating!")).toBe("washing-hands-before-eating"));
@@ -51,6 +51,7 @@ describe("retry", () => {
     // Ordinary rate limits retry; a monthly spending cap doesn't (waiting won't fix it).
     expect(isTransientError({ status: 429, message: "You exceeded your current quota, please check your plan and billing details." })).toBe(true);
     expect(isTransientError({ status: 429, message: "Your project has exceeded its monthly spending cap. Please go to AI Studio" })).toBe(false);
+    expect(isTransientError({ status: 429, message: "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-omni-1.1-flash" })).toBe(false);
     expect(isTransientError({ status: 503 })).toBe(true);
     expect(isTransientError({ status: 400 })).toBe(false);
     expect(isTransientError(new Error("API key not valid"))).toBe(false);
@@ -305,8 +306,8 @@ describe("inference.sh Seedance video", () => {
 });
 
 describe("video resolution", () => {
-  it("defaults to 4k and validates VIDEO_RESOLUTION", () => {
-    expect([videoResolution(""), videoResolution(" 1080P "), videoResolution("720p")]).toEqual(["4k", "1080p", "720p"]);
+  it("defaults to 1080p and validates VIDEO_RESOLUTION", () => {
+    expect([videoResolution(""), videoResolution(" 4K "), videoResolution("720p")]).toEqual(["1080p", "4k", "720p"]);
     expect(() => videoResolution("8k")).toThrow(/VIDEO_RESOLUTION must be one of/);
     expect(minResolution("4k", "1080p")).toBe("1080p");
   });
@@ -323,3 +324,20 @@ describe("video resolution", () => {
   });
 });
 
+
+describe("waiting for per-minute quotas", () => {
+  it("waits as long as the API asks, with extra tries for short waits", async () => {
+    const quota = Object.assign(new Error('Quota exceeded for metric: generate_content_free_tier_requests, limit: 3, model: gemini-3.8-flash-tts\nPlease retry in 3.020031325s.'), { status: 429 });
+    expect([retryHintMs(quota), retryHintMs(new Error('"retryDelay":"21595s"')), retryHintMs(new Error("nope"))]).toEqual([3021, 21_595_000, undefined]);
+    const waits: number[] = [];
+    let calls = 0;
+    const out = await withRetry(async () => { if (++calls < 7) throw quota; return "ok"; }, { sleep: async (ms) => { waits.push(ms); } });
+    expect([out, calls]).toEqual(["ok", 7]); // more than the usual 3 retries
+    expect(waits.every((w) => w >= 3500 && w <= 4600)).toBe(true);
+    // Hours away: not waited for here.
+    const daily = Object.assign(new Error("Please retry in 21595s."), { status: 429 });
+    let n = 0;
+    await expect(withRetry(async () => { n++; throw daily; }, { sleep: async () => {} })).rejects.toBe(daily);
+    expect(n).toBe(4);
+  });
+});

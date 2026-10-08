@@ -133,10 +133,12 @@ describe("your own recording", () => {
 
     // Continue: clips + final are made with the recording; no AI audio is generated.
     await c.projectService.approve(p.id, "audio");
+    await c.projectService.start(p.id); // Approve no longer starts the next step
     await c.projectService.idle();
     const mid = await c.projectService.get(p.id);
     expect([mid.status, mid.error, mid.completed]).toEqual(["review", null, ["poem", "scenes", "character", "audio", "clips"]]);
     await c.projectService.approve(p.id, "clips");
+    await c.projectService.start(p.id); // Approve no longer starts the next step
     await c.projectService.idle();
     const done = await c.projectService.get(p.id);
     expect(done.status).toBe("done");

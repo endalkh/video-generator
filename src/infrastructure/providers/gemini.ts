@@ -8,7 +8,8 @@ import { ChannelDetailsSchema } from "../../domain/channel/channel.model.js";
 import { PlanTextSchema } from "../../domain/plan/plan.model.js";
 import { CharacterSchema, minResolution, PoemSchema, PublishInfoSchema, ScenePlanSchema, StanzaSchema, type VideoResolution } from "../../domain/project/project.model.js";
 import { log } from "../../util/log.js";
-import { InferenceShVideo, isInferenceShModel } from "./inference-sh.js";
+import { InferenceShVideo, inferenceShWorksWithoutPicture, isInferenceShModel } from "./inference-sh.js";
+import { isTrebloModel, TREBLO_MODELS, TrebloMusic } from "./treblo.js";
 import { isBillingStop, isTransientError, sleep, withRetry } from "../../util/retry.js";
 import { type AvailableModel, type GenContext, type Provider, type SongResult, type TextKind, type TextOutputs } from "../../domain/ports/generator.port.js";
 
@@ -29,6 +30,11 @@ function firstInline(res: { candidates?: { content?: { parts?: InlinePart[] } }[
 export function maxVeoResolution(model: string): VideoResolution {
   if (!/^veo-3\.1-/.test(model)) return "720p";
   return /lite/.test(model) ? "1080p" : "4k";
+}
+
+/** Video models that only animate a scene picture, so "Skip scene pictures" can't be used with them. */
+export function needsScenePicture(model: string): boolean {
+  return isInferenceShModel(model) ? !inferenceShWorksWithoutPicture(model) : !supportsReferenceImages(model);
 }
 
 /** Nano Banana 2 / Pro (Gemini 3 image models) take an output size; older image models don't. */
@@ -69,6 +75,12 @@ export class GeminiProvider implements Provider {
     return (this.inferenceSh ??= new InferenceShVideo());
   }
 
+  /** Song models named "treblo/…" run on Treblo (Sonauto) instead of Google (needs TREBLO_API_KEY). */
+  private trebloClient?: TrebloMusic;
+  private treblo(): TrebloMusic {
+    return (this.trebloClient ??= new TrebloMusic());
+  }
+
   /**
    * Which key a model runs on: "free/<model>" = the free-tier key (GEMINI_TEXT_API_KEY), anything else = the paid
    * GEMINI_API_KEY. Returns the client and the real model id.
@@ -93,12 +105,13 @@ export class GeminiProvider implements Provider {
     // With a free-tier key: every text and speech model also as "free/<model>" (free tier: text and some speech models).
     if (this.freeAi) {
       for (const m of [...models]) {
-        if (/tts/.test(m.id) || (/^(gemini|gemma)/.test(m.id) && !/image|embedding|live|native-audio/.test(m.id))) {
+        if (/tts/.test(m.id) || (/^(gemini|gemma)/.test(m.id) && !/image|embedding|live|native-audio|omni|-pro-preview/.test(m.id))) {
           models.push({ id: FREE_PREFIX + m.id, displayName: `${m.displayName ?? m.id} · free key` });
         }
       }
     }
     if (process.env.INFERENCE_API_KEY) models.push(...this.inferenceShVideo().listModels());
+    if (process.env.TREBLO_API_KEY?.trim()) models.push(...TREBLO_MODELS);
     this.modelsCache = { at: Date.now(), models };
     return models;
   }
@@ -162,7 +175,8 @@ export class GeminiProvider implements Provider {
     );
   }
 
-  async song(prompt: string, opts: { model: string; label: string }): Promise<SongResult> {
+  async song(prompt: string, opts: { model: string; label: string; durationSec: number; ctx: GenContext; lyrics?: string; instrumental?: boolean }): Promise<SongResult> {
+    if (isTrebloModel(opts.model)) return this.treblo().song(prompt, opts);
     return withRetry(
       async () => {
         const { ai, model } = this.client(opts.model);
@@ -186,7 +200,9 @@ export class GeminiProvider implements Provider {
     // animate the scene picture as the first frame — that picture was itself drawn from the character sheet.
     const useReferences = !!opts.character && supportsReferenceImages(opts.model);
     if (opts.character && !useReferences) log.debug(`${label}: ${opts.model} doesn't take reference images; animating the scene picture as the first frame`);
-    if (!opts.still && !useReferences) {
+    // No picture and no character (Character step skipped): Veo makes the scene from the words alone.
+    const textOnly = !opts.still && !opts.character;
+    if (!opts.still && !useReferences && !textOnly) {
       throw new Error(`${label}: ${opts.model} can't make a scene without a scene picture (it takes no character reference). Pick Veo 3.1 or Veo 3.1 Fast on the Models page, or turn scene pictures back on`);
     }
     // 1080p and 4K need 8 s clips, which is what the app makes anyway.
@@ -203,6 +219,7 @@ export class GeminiProvider implements Provider {
             referenceImages: [opts.character, ...(opts.still ? [opts.still] : [])].map((b) => ({ image: img(b), referenceType: VideoGenerationReferenceType.ASSET })),
           },
         }
+      : textOnly ? { model: opts.model, source: { prompt }, config: base }
       : { model: opts.model, source: { prompt, image: img(opts.still!) }, config: base };
     // Veo has low per-minute request limits: on 429 wait long enough for the window to reset.
     let op = await withRetry(() => this.ai.models.generateVideos(request), {

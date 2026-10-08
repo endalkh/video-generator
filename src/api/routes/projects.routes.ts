@@ -65,9 +65,14 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
     )
     .post("/api/projects/:id/approve", async ({ params, body }) => {
       const b = await body();
-      await projects.approve(params.id!, String(b.step ?? ""));
-      return { id: params.id };
-    }, 202)
+      return projects.approve(params.id!, String(b.step ?? ""));
+    })
+    .post("/api/projects/:id/scenes/skip", async ({ params }) => projects.skipScenes(params.id!))
+    .post("/api/projects/:id/character/skip", async ({ params }) => projects.skipCharacter(params.id!))
+    .post("/api/projects/:id/audio/skip", async ({ params }) => projects.skipAudio(params.id!))
+    .post("/api/projects/:id/audio/use-ai", async ({ params }) => projects.useAudioAi(params.id!))
+    .put("/api/projects/:id/scenes/pictures", async ({ params, body }) => projects.setAllScenePictures(params.id!, (await body()).picture))
+    .put("/api/projects/:id/scenes/:index/picture", async ({ params, body }) => projects.setScenePicture(params.id!, Number(params.index) - 1, (await body()).picture))
     .post("/api/projects/:id/regenerate", async ({ params, body }) => {
       const b = await body();
       await projects.regenerate(params.id!, String(b.step ?? ""), { provider: str(b.provider), keepVisuals: b.keepVisuals === true });

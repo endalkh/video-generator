@@ -23,7 +23,7 @@ export const MODEL_TASKS: readonly (ModelTaskDefinition & { task: ModelTask })[]
   { task: "character", title: "Character design", description: "Invents the main character's name and look.", capability: "text", defaultModel: "gemini-3.8-flash", envVar: "GEMINI_CHARACTER_MODEL" },
   { task: "character_image", title: "Character image", description: "Draws the character reference sheet.", capability: "image", defaultModel: "gemini-3.1-flash-image", envVar: "GEMINI_CHARACTER_IMAGE_MODEL" },
   { task: "scene_image", title: "Scene illustrations", description: "Paints each scene, using the character sheet as reference.", capability: "image", defaultModel: "gemini-3.1-flash-image", envVar: "GEMINI_SCENE_IMAGE_MODEL" },
-  { task: "song", title: "Song", description: "Composes and sings the whole song (Song mode).", capability: "music", defaultModel: "lyria-3-clip-preview", envVar: "GEMINI_MUSIC_MODEL" },
+  { task: "song", title: "Song", description: "Music for every video. Audio = Song: composes and sings the whole song. Audio = Rhyme over music: only the instrumental music (the Narration model says the words). Each video's Audio choice is on its Audio step.", capability: "music", defaultModel: "lyria-3.5", envVar: "GEMINI_MUSIC_MODEL" },
   { task: "narration", title: "Narration / TTS", description: "Reads each scene aloud (Narration mode).", capability: "tts", defaultModel: "gemini-3.8-flash-tts", envVar: "GEMINI_TTS_MODEL" },
   { task: "scene_video", title: "Scene animation", description: "Animates each scene (Visuals = Veo).", capability: "video", defaultModel: "veo-3.1-fast-generate-preview", envVar: "GEMINI_VIDEO_MODEL" },
   { task: "channel_text", title: "Channel name & description", description: "Writes the YouTube channel name, handle, description and keywords (Channel page), and each finished video's title, description and tags.", capability: "text", defaultModel: "gemini-3.8-flash", envVar: "GEMINI_CHANNEL_TEXT_MODEL" },
@@ -52,7 +52,8 @@ export function capabilityOf(modelId: string): ModelCapability | undefined {
   if (id.startsWith("inference.sh/")) {
     return /\/seedance|^inference\.sh\/(klingai\/(avatar(-pro)?|video-v3)|alibaba\/wan-2-7-i2v|bfl\/flux-3-video|minimax\/h3|falai\/minimax-h3-max|google\/gemini-omni-flash|xai\/grok-imagine-video-1-5|pruna\/p-video|pixverse\/v6)$/.test(id) ? "video" : undefined;
   }
-  if (/embedding|aqa|live|native-audio|realtime|robotics|computer-use|deep-research|customtools/.test(id)) return undefined;
+  if (id.startsWith("treblo/")) return "music";
+  if (/embedding|aqa|live|native-audio|realtime|robotics|computer-use|deep-research|customtools|omni/.test(id)) return undefined;
   if (id.startsWith("veo")) return "video";
   if (id.startsWith("lyria")) return "music";
   if (/tts/.test(id)) return "tts";
@@ -88,8 +89,12 @@ export class ModelSetting {
 
   change(model: string): void {
     const id = model.trim().replace(/^models\//, "");
-    if (!/^(inference\.sh\/[a-zA-Z0-9][a-zA-Z0-9._-]*\/|free\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{1,120}$/.test(id)) throw new ValidationError(`"${model}" is not a valid model id`);
+    if (!/^(inference\.sh\/[a-zA-Z0-9][a-zA-Z0-9._-]*\/|free\/|treblo\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{1,120}$/.test(id)) throw new ValidationError(`"${model}" is not a valid model id`);
     const cap = capabilityOf(id);
+    // Gemini Omni on the Gemini API is a video model this app doesn't drive directly (use inference.sh/google/gemini-omni-flash).
+    if (/^(free\/)?gemini-omni/.test(id)) {
+      throw new ValidationError(`"${id}" is a video model; "${this.definition.title}" needs a ${this.definition.capability} model${this.definition.capability === "video" ? ' (for Omni video, pick "inference.sh/google/gemini-omni-flash")' : ""}`);
+    }
     if (cap && cap !== this.definition.capability) {
       throw new ValidationError(`"${id}" looks like a ${cap} model, but "${this.definition.title}" needs a ${this.definition.capability} model`);
     }

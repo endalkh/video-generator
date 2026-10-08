@@ -8,6 +8,9 @@ export const INFERENCE_SH_PREFIX = "inference.sh/";
 
 export const isInferenceShModel = (model: string) => model.startsWith(INFERENCE_SH_PREFIX);
 
+/** Kinds that can make a scene from the character sheet alone (see `fromCharacter`); the others only animate a scene picture. */
+const NO_PICTURE_KINDS = new Set(["seedance", "wan", "minimax", "minimax-max", "omni", "grok"]);
+
 /**
  * Video apps on inference.sh that this app knows how to drive. `id` is what the Models page shows (after the prefix).
  * - seedance: animates the scene picture (8 s clips, fitted to the scene like Veo); `maxResolution` caps the request.
@@ -35,6 +38,12 @@ export const INFERENCE_SH_VIDEO_APPS = [
   { id: "pruna/p-video", app: "pruna/p-video", kind: "p-video", displayName: "Pruna P-Video — cheapest: animates the scene picture with sound, 720p/1080p, 1-10 s (inference.sh)" },
   { id: "pixverse/v6", app: "pixverse/v6", kind: "pixverse", displayName: "PixVerse v6 — low cost: animates the scene picture, up to 1080p, 5-15 s (inference.sh)" },
 ] as const;
+
+/** Can this inference.sh model make a scene without a scene picture? (Unknown models: assume not.) */
+export function inferenceShWorksWithoutPicture(model: string): boolean {
+  const def = INFERENCE_SH_VIDEO_APPS.find((a) => INFERENCE_SH_PREFIX + a.id === model);
+  return !!def && NO_PICTURE_KINDS.has(def.kind);
+}
 
 /** Whole seconds covering the scene (8 s when unknown), within a model's limits. */
 const sceneSeconds = (durationSec: number | undefined, min: number, max: number) => Math.min(max, Math.max(min, Math.ceil(durationSec ?? CLIP_SECONDS)));

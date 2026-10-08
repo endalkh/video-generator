@@ -17,6 +17,7 @@ import {
   ReviewModeSchema,
   type ReviewMode,
   soundInVideo,
+  NO_CHARACTER,
 } from "./project.model.js";
 
 /** Plain data shape of a Project, used by mappers and repositories. */
@@ -44,6 +45,9 @@ export interface ProjectProps {
 const stepIndex = (s: StepName) => STEP_NAMES.indexOf(s);
 
 /** Settings that can be changed after a video was started (Video settings panel). */
+/** Steps that can be made again while keeping everything the later steps made. */
+export const KEEP_LATER_STEPS = ["scenes", "character", "audio"] as const;
+
 export const SETTING_KEYS = ["topic", "language", "audioMode", "videoAudio", "backgroundMusic", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio", "resolution", "videoMode", "scenePictures", "videoConcurrency"] as const;
 
 /**
@@ -129,6 +133,91 @@ export class Project {
     this.assertEditable();
     if (!this.isStepDone(step)) throw new ConflictError(`"${step}" hasn't been generated yet`);
     if (!this.props.approved.includes(step)) this.props.approved.push(step);
+    // Nothing else waits for review: the video waits until you make the next step.
+    if (this.props.status === "review" && this.awaitingReview === null) this.props.status = "paused";
+    this.touch();
+  }
+
+  /**
+   * Skip the Scenes step: no AI scene plan. Each stanza becomes a scene, and its picture / video description is
+   * simply the topic plus the stanza's words (edit them on the Scenes page if you like).
+   */
+  skipScenes(): void {
+    this.assertEditable();
+    const poem = this.props.poem;
+    if (!poem || !this.isStepDone("poem")) throw new ConflictError("Write the poem first");
+    const motions = ["zoom-in", "pan-right", "zoom-out", "pan-left"] as const;
+    this.setScenes({
+      scenes: poem.stanzas.map((st, i) => {
+        const text = st.lines.join("\n");
+        return { index: i, text, visualPrompt: `A cheerful children's cartoon scene about ${this.props.input.topic}. It shows what these words say: ${text.replace(/\n/g, " ")}`, motion: motions[i % motions.length]! };
+      }),
+    });
+    this.props.approved = this.props.approved.filter((s) => stepIndex(s) < stepIndex("scenes"));
+    this.redoFrom("scenes");
+    this.completeStep("scenes");
+    this.props.approved.push("scenes");
+    if (this.props.status === "done" || this.props.status === "review") this.props.status = "paused";
+    this.touch();
+  }
+
+  /** Skip the Character step: no character sheet. Pictures and videos already made are thrown away (they used it). */
+  skipCharacter(): void {
+    this.assertEditable();
+    if (!this.isStepDone("scenes")) throw new ConflictError("Make the scenes first");
+    this.props.character = { ...NO_CHARACTER };
+    this.props.approved = this.props.approved.filter((s) => stepIndex(s) < stepIndex("character"));
+    if (this.isStepDone("character")) this.redoFrom("clips");
+    else this.completeStep("character");
+    this.props.approved.push("character");
+    if (this.props.status === "done" || this.props.status === "review") this.props.status = "paused";
+    this.touch();
+  }
+
+  /**
+   * Skip the Audio step: no song or voice from the audio AI. The video AI sings / speaks each scene in its clip
+   * (moving video), with no background music. The poem and pictures are kept; the scene videos are made again
+   * with sound. Returns true when the clips have to be made again.
+   */
+  skipAudio(): boolean {
+    this.assertEditable();
+    if (!this.isStepDone("character")) throw new ConflictError("Make the character first");
+    const already = soundInVideo(this.props.input) !== null && this.props.input.backgroundMusic === false && this.isStepDone("audio");
+    if (already) return false;
+    this.props.input = { ...this.props.input, videoAudio: true, backgroundMusic: false, videoMode: "veo" };
+    this.props.song = null;
+    this.redoFrom("audio");
+    this.completeStep("audio");
+    this.props.approved.push("audio");
+    if (this.props.status === "done" || this.props.status === "review") this.props.status = "paused";
+    this.touch();
+    return true;
+  }
+
+  /** Undo `skipAudio`: the audio AI makes the song / voice again (the poem and pictures are kept). */
+  useAudioAi(): boolean {
+    this.assertEditable();
+    if (this.props.input.audioMode === "character") throw new ValidationError('"The character speaks" always uses the video AI; pick another Audio choice in the Audio settings first');
+    if (!this.props.input.videoAudio) return false;
+    this.props.input = { ...this.props.input, videoAudio: false };
+    this.invalidateAfterEdit("audio", "audio");
+    if (this.props.status === "review") this.props.status = "paused";
+    return true;
+  }
+
+  /** Turn every scene's picture on or off at once (Skip pictures on the Scenes / Clips page). */
+  setAllScenePictures(on: boolean): void {
+    for (const s of this.props.scenes?.scenes ?? []) this.setScenePicture(s.index, on);
+    if (!this.props.scenes) throw new ConflictError("Make the scenes first");
+  }
+
+  /** Turn one scene's picture on or off (moving video only). Nothing already made is thrown away. */
+  setScenePicture(index: number, on: boolean): void {
+    this.assertEditable();
+    const scene = this.props.scenes?.scenes[index];
+    if (!scene) throw new ValidationError(`No scene ${index + 1}`);
+    if (!on && this.props.input.videoMode !== "veo") throw new ValidationError("Animated pictures need a picture for every scene; switch Visuals to moving video clips first");
+    scene.picture = on;
     this.touch();
   }
 
@@ -191,6 +280,8 @@ export class Project {
     if (this.isStepDone("character")) this.redoFrom("clips");
     else this.completeStep("character");
     if (this.props.status === "done") this.props.status = "paused";
+    // Manual mode: check the new character before going on.
+    if (this.needsReview("character") && this.props.status !== "failed") this.props.status = "review";
     this.touch();
   }
 
@@ -237,6 +328,23 @@ export class Project {
     if (step === "character") this.props.character = null;
     if (step === "audio") this.props.song = null;
     this.invalidateAfterEdit(step, step);
+  }
+
+  /**
+   * Make one step again but keep what the later steps made (character, audio, scene pictures and videos). Only the
+   * clips and the final video, which are put together from them at no AI cost, have to be made again.
+   */
+  regenerateKeepingLater(step: StepName): void {
+    this.assertEditable();
+    if (!(KEEP_LATER_STEPS as readonly string[]).includes(step)) throw new ValidationError(`"${step}" can't be made again on its own`);
+    if (step === "scenes") this.props.scenes = null;
+    if (step === "character") this.props.character = null;
+    if (step === "audio") this.props.song = null;
+    const drop: StepName[] = [step, "clips", "final"];
+    this.props.completed = this.props.completed.filter((s) => !drop.includes(s));
+    this.props.approved = this.props.approved.filter((s) => !drop.includes(s));
+    if (this.props.status === "done" || this.props.status === "review") this.props.status = "paused";
+    this.touch();
   }
 
   /** Remove approvals from `reviewFrom` on and progress from `redoFrom` on. */
@@ -378,7 +486,6 @@ export class Project {
   changeVisuals(mode: VideoMode): boolean {
     if (this.isRunning) throw new ConflictError(`Project "${this.id}" is running; stop it before changing visuals`);
     if (!VideoModeSchema.safeParse(mode).success) throw new ValidationError(`Unknown visuals "${mode}"`);
-    if (mode === "still" && !this.props.input.scenePictures) throw new ValidationError("This video has no scene pictures (the video AI makes each scene); turn scene pictures on first");
     if (mode === "still" && soundInVideo(this.props.input)) throw new ValidationError("The voice / song is made inside the video clips, so they must be moving video; change the audio first");
     const changed = this.props.input.videoMode !== mode;
     this.props.input = { ...this.props.input, videoMode: mode };

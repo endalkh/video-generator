@@ -28,7 +28,7 @@ export type VideoResolution = z.infer<typeof VideoResolutionSchema>;
 
 export function videoResolution(env = process.env.VIDEO_RESOLUTION): VideoResolution {
   const v = env?.trim().toLowerCase();
-  if (!v) return "4k";
+  if (!v) return "1080p";
   if (v in VIDEO_RESOLUTIONS) return v as VideoResolution;
   throw new Error(`VIDEO_RESOLUTION must be one of ${Object.keys(VIDEO_RESOLUTIONS).join(", ")} (got "${env}")`);
 }
@@ -86,7 +86,7 @@ export function soundInVideo(input: { audioMode: AudioMode; videoAudio?: boolean
 export const pacingMode = (input: { audioMode: AudioMode; videoAudio?: boolean }): AudioMode => (soundInVideo(input) ? "character" : input.audioMode);
 
 const ProjectInputObject = z.object({
-  topic: z.string().transform(tidy).pipe(z.string().min(3, "topic must be at least 3 characters")),
+  topic: z.string({ error: "write what the video is about" }).transform(tidy).pipe(z.string().min(3, "topic must be at least 3 characters")),
   language: LanguageSchema.default("en"),
   audioMode: AudioModeSchema.default("song"),
   /**
@@ -162,8 +162,16 @@ export const SceneSchema = z.object({
   visualPrompt: z.string().min(1),
   /** Camera / motion hint, used for Ken Burns or Veo prompts. */
   motion: MotionSchema.default("zoom-in"),
+  /** Moving-video mode: false = no picture for this scene (the video AI makes it from the character); unset = the video's default. */
+  picture: z.boolean().optional(),
 });
 export type Scene = z.infer<typeof SceneSchema>;
+
+/** Does this scene get a picture? Animated pictures always need one; moving video follows the scene, else the video's default. */
+export function scenePicture(input: { videoMode?: string; scenePictures?: boolean }, scene: Pick<Scene, "picture">): boolean {
+  if (input.videoMode !== "veo") return true;
+  return scene.picture ?? input.scenePictures !== false;
+}
 
 export const ScenePlanSchema = z.object({ scenes: z.array(SceneSchema).min(1) });
 export type ScenePlan = z.infer<typeof ScenePlanSchema>;
@@ -172,8 +180,17 @@ export const CharacterSchema = z.object({
   name: z.string().min(1),
   /** Detailed English appearance description reused in every scene prompt. */
   description: z.string().min(1),
+  /** Character step skipped: no character sheet; each picture / video is made from its scene description. */
+  skipped: z.boolean().optional(),
 });
 export type Character = z.infer<typeof CharacterSchema>;
+
+/** Stand-in used in the prompts when the Character step is skipped. */
+export const NO_CHARACTER: Character = {
+  name: "the children",
+  description: "No fixed main character: show the children, animals and people the scene describes, in the video's art style.",
+  skipped: true,
+};
 
 /** Song mode: where the continuous song file lives and when each scene is on screen. */
 export const SongTimelineSchema = z.object({

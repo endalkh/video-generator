@@ -110,7 +110,7 @@ describe("HTTP API", () => {
 
   it("reads and changes per-task models", async () => {
     const settings = await (await fetch(`${base}/api/models/settings`)).json();
-    expect(settings.find((s: { task: string }) => s.task === "song").model).toBe("lyria-3-clip-preview");
+    expect(settings.find((s: { task: string }) => s.task === "song").model).toBe("lyria-3.5");
     const ok = await fetch(`${base}/api/models/settings/scenes`, json("PUT", { model: "gemini-3.1-pro-preview" }));
     expect((await ok.json()).model).toBe("gemini-3.1-pro-preview");
     expect((await fetch(`${base}/api/models/settings/scenes`, json("PUT", { model: "veo-3.1-lite-generate-preview" }))).status).toBe(400);

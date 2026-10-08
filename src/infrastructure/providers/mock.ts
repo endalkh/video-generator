@@ -104,8 +104,8 @@ export class MockProvider implements Provider {
   /** Short MP4 made from the still (or, with no scene picture, from the character), standing in for Veo. */
   async video(prompt: string, { still, character, model }: { still?: Buffer; character?: Buffer; model: string }): Promise<Buffer> {
     this.prompts.push({ kind: "video", prompt, model });
-    const picture = still ?? character;
-    if (!picture) throw new Error("mock video: no scene picture and no character");
+    // Neither (Character step skipped, no scene picture): made from the words alone, like Veo text-to-video.
+    const picture = still ?? character ?? (await placeholderScenePng(320, 180, 0));
     const dir = await mkdtemp(path.join(os.tmpdir(), "mock-video-"));
     try {
       await writeFile(path.join(dir, "in.png"), picture);

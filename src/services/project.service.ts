@@ -5,7 +5,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../domain/errors.
 import { GenerationMapper } from "../domain/generation/generation.mapper.js";
 import type { GenerationDto } from "../domain/generation/generation.model.js";
 import type { Provider } from "../domain/ports/generator.port.js";
-import { Project } from "../domain/project/project.entity.js";
+import { KEEP_LATER_STEPS, Project } from "../domain/project/project.entity.js";
 import { ProjectMapper, type ProjectDto, type ProjectSummaryDto } from "../domain/project/project.mapper.js";
 import { CharacterSchema, MAX_VIDEO_SECONDS, PoemSchema, ProjectInputSchema, ScenePlanSchema, soundInVideo, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
@@ -13,7 +13,7 @@ import { audioToWav, imageToPng, probeDuration, probeStreams, runFfmpeg } from "
 import { songTimeline } from "../domain/ports/generator.port.js";
 import { ensureDir, fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
-import { ensureScenePiece, mediaPaths, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
+import { ensureScenePiece, mediaPaths, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, wipeSceneVideos, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
 
 export type ProviderFactory = (name: string) => Provider;
 
@@ -120,7 +120,7 @@ export class ProjectService {
   }
 
   /** Start (or resume) in the background; progress is published to subscribers. */
-  async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean } = {}): Promise<void> {
+  async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean; keepLater?: boolean } = {}): Promise<void> {
     if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is already running`);
     const project = await this.load(id);
     if (opts.from !== undefined && !STEP_NAMES.includes(opts.from as StepName)) throw new ValidationError(`Unknown step "${opts.from}"`);
@@ -134,7 +134,7 @@ export class ProjectService {
     };
     job.done = this.pipeline
       // "final" ends the run anyway, so it never needs an explicit stop.
-      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, noNewVideos: opts.noNewVideos, signal: job.controller.signal, onEvent })
+      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, noNewVideos: opts.noNewVideos, keepLater: opts.keepLater, signal: job.controller.signal, onEvent })
       .then(
         () => undefined,
         (err) => {
@@ -247,12 +247,75 @@ export class ProjectService {
 
   // ---------- Manual review ----------
 
-  /** Approve the step under review and continue to the next one. */
-  async approve(id: string, step: string): Promise<void> {
+  /** Approve a step. Nothing starts: make the next step from its own page (or Continue) when you're ready. */
+  async approve(id: string, step: string): Promise<ProjectDto> {
     const project = await this.loadIdle(id);
     project.approve(this.step(step));
     await this.projects.save(project);
-    await this.start(id);
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Skip the Scenes step: one scene per stanza, no AI plan. Nothing starts. */
+  async skipScenes(id: string): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    const hadScenes = project.isStepDone("scenes");
+    project.skipScenes();
+    if (hadScenes) await wipeMediaFrom(this.media(id), "audio"); // new scenes: their audio, pictures and clips go
+    if (hadScenes) await wipePictures(this.media(id));
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Skip the Character step (no character sheet). Nothing starts. */
+  async skipCharacter(id: string): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    project.skipCharacter();
+    const media = this.media(id);
+    await wipeMediaFrom(media, "clips"); // pictures and videos were drawn from the old sheet
+    await rm(media.characterImage, { force: true });
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Skip the Audio step: the video AI sings / speaks in each clip, no audio AI. Nothing starts. */
+  async skipAudio(id: string): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    if (project.skipAudio()) {
+      const media = this.media(id);
+      await wipeMediaFrom(media, "audio"); // song, voices, music and clips
+      await wipeSceneVideos(media); // the old scene videos have no singing in them
+      await this.projects.save(project);
+    }
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Go back to making the song / voice with the audio AI. Nothing starts: make the Audio when ready. */
+  async useAudioAi(id: string): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    if (!project.useAudioAi()) return ProjectMapper.toDto(project);
+    const media = this.media(id);
+    await wipeMediaFrom(media, "audio");
+    await wipeSceneVideos(media); // they sing / speak themselves; the new audio replaces that
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Skip (or bring back) the pictures of every scene. */
+  async setAllScenePictures(id: string, on: unknown): Promise<ProjectDto> {
+    if (typeof on !== "boolean") throw new ValidationError("picture must be true or false");
+    const project = await this.loadIdle(id);
+    project.setAllScenePictures(on);
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Draw a picture for one scene, or let the video AI make it from the character (moving video only). */
+  async setScenePicture(id: string, index: number, on: unknown): Promise<ProjectDto> {
+    if (typeof on !== "boolean") throw new ValidationError("picture must be true or false");
+    const project = await this.loadIdle(id);
+    project.setScenePicture(index, on);
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
   }
 
   async setReviewMode(id: string, mode: string): Promise<ProjectDto> {
@@ -437,9 +500,9 @@ export class ProjectService {
   async regenerate(id: string, step: string, opts: { provider?: string; keepVisuals?: boolean } = {}): Promise<void> {
     const name = this.step(step);
     const project = await this.loadIdle(id);
-    await this.makeFresh(project, name, opts.keepVisuals === true);
+    const keepLater = await this.makeFresh(project, name, opts.keepVisuals === true);
     await this.projects.save(project);
-    await this.start(id, { provider: opts.provider, until: name });
+    await this.start(id, { provider: opts.provider, until: name, keepLater });
   }
 
   /**
@@ -456,16 +519,29 @@ export class ProjectService {
     if (missing) throw new ConflictError(`Make the ${missing} first`);
     if (opts.provider) this.providers(opts.provider); // fail fast (e.g. missing API key) before wiping anything
     for (const s of STEP_NAMES.slice(0, STEP_NAMES.indexOf(name))) if (project.isStepDone(s)) project.approve(s);
-    if (project.isStepDone(name)) await this.makeFresh(project, name, opts.keepVisuals === true);
+    const keepLater = project.isStepDone(name) ? await this.makeFresh(project, name, opts.keepVisuals === true) : false;
     await this.projects.save(project);
-    await this.start(id, { provider: opts.provider, until: name });
+    await this.start(id, { provider: opts.provider, until: name, keepLater });
   }
 
-  /** Forget a step's output and delete its media. A new poem with `keepVisuals` keeps the pictures and videos. */
-  private async makeFresh(project: Project, step: StepName, keepVisuals: boolean): Promise<void> {
+  /**
+   * Forget a step's output and delete its media. Scenes, character and audio are made again on their own: what the
+   * later steps made (character, song, pictures, videos) is kept, and only the clips and final video are put together
+   * again (returns true). A new poem with `keepVisuals` keeps the pictures and videos.
+   */
+  private async makeFresh(project: Project, step: StepName, keepVisuals: boolean): Promise<boolean> {
+    if ((KEEP_LATER_STEPS as readonly string[]).includes(step)) {
+      project.regenerateKeepingLater(step);
+      const media = this.media(project.id);
+      if (step === "character") await rm(media.characterImage, { force: true }); // the new design is drawn again
+      if (step === "audio") await wipeMediaFrom(media, "audio"); // song / voices / music; pictures and videos stay
+      await wipeRenders(media); // clips and final video are put together again (no AI cost)
+      return true;
+    }
     const keep = keepVisuals && step === "poem" && !soundInVideo(project.input);
     project.regenerate(step, { keepVisuals: keep });
     await wipeMediaFrom(this.media(project.id), keep ? "audio" : step);
+    return false;
   }
 
   /**

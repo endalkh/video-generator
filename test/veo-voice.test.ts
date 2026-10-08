@@ -68,6 +68,7 @@ describe("the video matches the audio", () => {
     for (const step of ["poem", "scenes", "character"]) {
       expect((await c.projectService.get(p.id)).status).toBe("review");
       await c.projectService.approve(p.id, step);
+    await c.projectService.start(p.id); // Approve no longer starts the next step
       await c.projectService.idle();
     }
     const done = await c.projectService.get(p.id);
@@ -82,6 +83,7 @@ describe("the video matches the audio", () => {
     expect(first.prompt).not.toContain("No speech");
     expect(mock.prompts.find((x) => x.kind === "poem")!.prompt).toContain("The main character sings each stanza herself");
     await c.projectService.approve(p.id, "clips");
+    await c.projectService.start(p.id); // Approve no longer starts the next step
     await c.projectService.idle();
     const m = media(p.id);
     expect((await c.projectService.get(p.id)).status).toBe("done");
@@ -149,7 +151,10 @@ describe("the video matches the audio", () => {
     const m = media(p.id);
     expect([await fileExists(m.sceneImage(0)), await fileExists(m.sceneImage(1))]).toEqual([false, false]);
     expect(p.media.thumbnail).toBe("thumbnail.jpg");
-    await expect(c.projectService.changeVisuals(p.id, "still")).rejects.toThrow(/no scene pictures/);
+    // Animated pictures draw a picture for every scene, so switching is allowed (the pictures are made then).
+    expect(await c.projectService.changeVisuals(p.id, "still")).toBeTruthy();
+    await c.projectService.idle();
+    expect([await fileExists(m.sceneImage(0)), await fileExists(m.sceneImage(1))]).toEqual([true, true]);
   }, 60_000);
 });
 
