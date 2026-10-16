@@ -221,6 +221,27 @@ export class Project {
     this.touch();
   }
 
+  /**
+   * Leave scenes out of the final video (or put them back). Nothing is deleted: leaving out only rebuilds the final
+   * video from the other clips; putting a scene back means its clip has to be made (Clips step) before the final.
+   */
+  setScenesLeftOut(indexes: number[], out: boolean): void {
+    this.assertEditable();
+    const scenes = this.props.scenes?.scenes;
+    if (!scenes) throw new ConflictError("Make the scenes first");
+    for (const i of indexes) if (!scenes[i]) throw new ValidationError(`No scene ${i + 1}`);
+    const changed = indexes.filter((i) => (scenes[i]!.leftOut === true) !== out);
+    if (!changed.length) return;
+    if (out && scenes.every((s, i) => s.leftOut || indexes.includes(i))) throw new ValidationError("Keep at least one scene in the video");
+    for (const i of changed) scenes[i]!.leftOut = out || undefined;
+    const from: StepName = out ? "final" : "clips";
+    if (this.isStepDone(from)) {
+      this.redoFrom(from);
+      if (this.props.status === "done") this.props.status = "paused";
+    }
+    this.touch();
+  }
+
   setReviewMode(mode: ReviewMode): void {
     this.assertEditable();
     if (!ReviewModeSchema.safeParse(mode).success) throw new ValidationError(`Unknown mode "${mode}"`);
@@ -282,6 +303,19 @@ export class Project {
     if (this.props.status === "done") this.props.status = "paused";
     // Manual mode: check the new character before going on.
     if (this.needsReview("character") && this.props.status !== "failed") this.props.status = "review";
+    this.touch();
+  }
+
+  /**
+   * The sample pictures changed (stored on disk). `redraw`: the scene pictures, videos and clips are made again
+   * with them; the poem, scenes, character and audio are kept. Otherwise only pictures made from now on use them.
+   */
+  changeSamples(redraw: boolean): void {
+    this.assertEditable();
+    if (redraw && this.isStepDone("clips")) {
+      this.redoFrom("clips");
+      if (this.props.status === "done") this.props.status = "paused";
+    }
     this.touch();
   }
 

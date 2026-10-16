@@ -316,6 +316,7 @@ async function showNewVideo() {
   const field = (id, label, control, hint) => h("div", {}, h("label", { for: id, class: "label", text: label }), control, hint ? h("p", { class: "mt-1 text-xs text-stone-500", text: hint }) : null);
   const select = (id, name, options, value) => h("select", { id, name, class: "field" }, options.map(([v, t]) => h("option", { value: v, text: t, selected: v === value })));
   const status = h("p", { role: "status", class: "text-sm" });
+  const samplePicker = samplesPicker("f-samples");
   const form = h("form", { class: "card space-y-5", novalidate: true },
     h("div", {}, h("h2", { class: "text-xl font-bold", text: "Make a new video" }),
       h("p", { class: "mt-1 text-sm text-stone-500", text: `For ${currentKit()?.name ?? "this channel"}. The channel's settings fill this form; change them on the Channel & branding page.` })),
@@ -357,6 +358,7 @@ async function showNewVideo() {
       field("f-character", "Main character (optional)", h("input", { id: "f-character", name: "characterHint", class: "field", value: d.mainCharacter ?? "", placeholder: "a curious little goat named Abeba" })),
       field("f-style", "Art style", h("input", { id: "f-style", name: "style", class: "field", value: d.style })),
     ),
+    samplePicker.el,
     field("f-mode", "Mode", select("f-mode", "reviewMode", [["manual", "Manual — stop after each step so I can review and edit"], ["auto", "Auto — make the whole video in one go"]], "manual"),
       "Every step also has its own page (Poem, Scenes, Character, Audio, Clips, Final video) where you can make, edit or redo it on its own."),
     field("f-provider", "Provider", select("f-provider", "provider", [["gemini", "Gemini (real AI)"], ["mock", "Mock (offline test)"]], config.hasApiKey ? "gemini" : "mock"),
@@ -376,7 +378,7 @@ async function showNewVideo() {
       return;
     }
     topicBox.removeAttribute("aria-invalid");
-    const input = Object.fromEntries([...fd.entries()].filter(([k, v]) => k !== "provider" && k !== "lengthMinutes" && String(v).trim() !== ""));
+    const input = Object.fromEntries([...fd.entries()].filter(([k, v]) => k !== "provider" && k !== "lengthMinutes" && k !== "samples" && String(v).trim() !== ""));
     if (input.sceneCount) input.sceneCount = Number(input.sceneCount);
     if (input.videoConcurrency) input.videoConcurrency = Number(input.videoConcurrency);
     input.subtitles = fd.get("subtitles") === "on";
@@ -389,7 +391,8 @@ async function showNewVideo() {
     btn.disabled = true;
     mount(status, "Starting…");
     try {
-      const p = await post("/api/projects", { input, provider: fd.get("provider"), channelId: channel });
+      const samples = await samplePicker.dataUrls();
+      const p = await post("/api/projects", { input, provider: fd.get("provider"), channelId: channel, samples });
       location.hash = `#/project/${enc(p.id)}`;
     } catch (err) {
       mount(status, errorBox(err));
@@ -408,7 +411,7 @@ async function showNewVideo() {
     const who = $("#f-character").value.trim() || "the character";
     $("#f-length-plan").textContent = `${formatLength(seconds)} video · ${scenes} scenes (${$("#f-nopictures").checked && veo ? "no pictures" : `${scenes} pictures`}${veo ? `, ${scenes} paid video clips` : ""}). `
       + (skipAudio && mode === "song"
-        ? `No audio AI: in every scene the video AI makes ${who} sing that scene's words herself, with her lips in sync.${$("#f-music").checked ? " Soft background music from the music AI plays under the clips." : " No background music (video AIs usually sing without music)."} Each scene is one ~8-second clip, so this needs Visuals = moving video clips. Each clip is made on its own, so the tune can change a little from scene to scene.`
+        ? `No audio AI: in every scene the video AI makes ${who} sing that scene's words herself, with her lips in sync.${$("#f-music").checked ? " Soft background music from the music AI plays under the clips." : " No background music (video AIs usually sing without music)."} Each scene is one ~8-second clip, so this needs Visuals = moving video clips. Each clip is made on its own, so the tune can change a little from scene to scene. For one steady tune all the way through, untick "Skip the audio AI": the music AI makes the whole song once and every clip is cut to it. On the Models page pick Kling Avatar for Scene animation so the character also lip-syncs to her part of that one song.`
         : mode === "song"
         ? (seconds > 180
             ? `Google's song models make at most about 3 minutes per song, so this song is made in ${Math.ceil(seconds / 180)} parts that are joined (with Lyria 3 Clip: ${Math.ceil(seconds / 30)} parts of 30 s, and the tune may change between parts). Pick Lyria 3 Pro or 3.5 on the Models page for long songs.`
@@ -713,6 +716,12 @@ function stepPage(p, step, keepVideo, videoKey) {
         h("p", { class: "mt-1 text-sm text-stone-600", text: sc.visualPrompt }),
         h("div", { class: "mt-2" }, scenePictureToggle(p, sc, act)))));
     }
+    // The sample pictures (a food, a house…) the scene plan and pictures are made from.
+    if (p.media.samples?.length) body = h("div", { class: "space-y-4" },
+      h("section", { class: "rounded-xl bg-sky-50 p-3", "aria-label": "Sample pictures" },
+        h("p", { class: "mb-2 text-sm text-sky-900", text: "Sample pictures: the AI shows these in the scenes where they fit (describe them in a scene's picture description to place them)." }),
+        h("ul", { class: "flex flex-wrap gap-2" }, p.media.samples.map((rel, j) => h("li", {}, h("img", { src: mediaUrl(id, rel), alt: `Sample picture ${j + 1}`, class: "h-24 rounded-xl border border-orange-100 object-cover" }))))),
+      body);
   } else if (step === "character" && p.character?.skipped && done) {
     body = h("p", { class: "rounded-xl bg-sky-50 p-3 text-sm text-sky-900", text: "⏭ Character skipped: there's no character sheet, so each picture and video is made from its scene description (the people and animals may look a little different from scene to scene). Click \"Design a new character\" to add one." });
   } else if (step === "character" && p.character && (done || making)) {
@@ -771,9 +780,11 @@ function stepPage(p, step, keepVideo, videoKey) {
             h("span", { class: "absolute top-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white", text: "🎞️ Veo animation · timed to the audio when the clips are made" }))
         : m?.image ? h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: sc.visualPrompt, class: "aspect-video w-full object-cover" })
         : h("div", { class: "grid aspect-video place-items-center bg-stone-100 text-sm text-stone-500", text: making ? "painting…" : "not made yet" });
-      return h("figure", { class: "overflow-hidden rounded-xl border border-orange-100" }, media,
+      return h("figure", { class: `overflow-hidden rounded-xl border border-orange-100 ${sc.leftOut ? "opacity-60" : ""}` }, media,
+        sc.leftOut ? h("p", { class: "bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-600", text: "⏭ Left out of the video" }) : null,
         h("figcaption", { class: "flex items-start gap-2 p-3 text-sm" },
           h("span", { class: "flex-1 whitespace-pre-line", lang, text: `${sc.index + 1}. ${sc.text}` }),
+          idle && p.completed.includes("audio") ? leaveOutButton(p, sc, m, act) : null,
           idle && p.completed.includes("audio") ? h("button", { type: "button", class: "btn-soft shrink-0 px-3 py-1 text-xs", onclick: act(async () => {
             const cost = p.input.videoMode === "veo" ? " This makes 1 new Veo clip (paid)." : "";
             if (!confirm(`Remake scene ${sc.index + 1} (new picture and clip)?${cost}`)) return SKIP;
@@ -785,11 +796,22 @@ function stepPage(p, step, keepVideo, videoKey) {
     }));
     if (idle && p.completed.includes("audio")) extra = [visualsSwitch(p, act)];
     // Videos uploaded by hand (or made earlier): approve them as they are and go on, without generating anything.
-    const withVideo = p.media.scenes.filter((m) => m.video).length;
+    const kept = p.scenes.scenes.filter((sc) => !sc.leftOut);
+    const hasVideo = (sc) => p.media.scenes.find((m) => m.index === sc.index)?.video;
+    const withVideo = kept.filter(hasVideo).length;
+    const without = kept.filter((sc) => !hasVideo(sc)).map((sc) => sc.index + 1);
     if (idle && p.completed.includes("audio") && p.input.videoMode === "veo" && withVideo > 0 && !done) {
-      extra.unshift(h("button", { type: "button", class: "btn", title: "Put the clips together from the scene videos you have and make the final video. Nothing is generated or paid for.", onclick: act(async () => {
-        await post(`/api/projects/${enc(id)}/clips/approve-videos`);
-      }) }, `✅ Approve these videos and continue (${withVideo} of ${p.scenes.scenes.length})`));
+      if (without.length) {
+        // Some scenes have no video: put the video together from the others (they can be put back later).
+        extra.unshift(h("button", { type: "button", class: "btn", title: "Leave the scenes without a video out and make the final video from the others. Nothing is generated or paid for.", onclick: act(async () => {
+          if (!confirm(`Leave scene${without.length === 1 ? "" : "s"} ${without.join(", ")} out (no video yet) and make the final video from the other ${withVideo} scene${withVideo === 1 ? "" : "s"}? Nothing is generated or paid for. You can put them back later ("↩ Put back").`)) return SKIP;
+          await post(`/api/projects/${enc(id)}/clips/approve-videos`, { skipMissing: true });
+        }) }, `⏭ Skip ${without.length} scene${without.length === 1 ? "" : "s"} without a video and make the final video (${withVideo} of ${p.scenes.scenes.length})`));
+      } else {
+        extra.unshift(h("button", { type: "button", class: "btn", title: "Put the clips together from the scene videos you have and make the final video. Nothing is generated or paid for.", onclick: act(async () => {
+          await post(`/api/projects/${enc(id)}/clips/approve-videos`);
+        }) }, `✅ Approve these videos and continue (${withVideo} of ${p.scenes.scenes.length})`));
+      }
     }
   } else if (step === "final" && p.media.final) {
     const video = keepVideo || h("video", { id: "final-video", "data-key": videoKey, controls: true, preload: "metadata", class: "w-full rounded-xl bg-black", src: mediaUrl(id, p.media.final, p.updatedAt) },
@@ -1109,11 +1131,13 @@ function settingsPanel(p, group = "video") {
   ];
   const audio = group === "audio";
   const panel = h("details", { id: audio ? "audio-settings" : "settings-panel", class: "mt-4 rounded-xl border border-orange-100 p-4", open: audio && !p.completed.includes("audio") },
-    h("summary", { class: "cursor-pointer font-semibold", text: audio ? "🎵 Audio settings: song or story, singer, voice, music…" : "⚙️ Video settings: length, scenes, language, style…" }),
+    h("summary", { class: "cursor-pointer font-semibold", text: audio ? "🎵 Audio settings: song or story, singer, voice, music…" : "⚙️ Video settings: length, scenes, language, style, sample pictures…" }),
     h("div", { class: "mt-4 space-y-4" },
       ...(audio ? audioFields : videoFields),
       keepRow, impact,
-      h("div", { class: "flex flex-wrap items-center gap-3" }, save, status)));
+      h("div", { class: "flex flex-wrap items-center gap-3" }, save, status),
+      // Saved on their own (pictures, not settings): see samplesEditor.
+      audio ? null : samplesEditor(p)));
   update();
   return panel;
 }
@@ -1292,6 +1316,18 @@ function allPicturesButton(p, act) {
   return h("button", { type: "button", class: "btn-soft", title: anyOn ? "No picture for any scene: the video AI makes each scene from the character picture (needs Veo 3.1 Fast or Veo 3.1, not Lite). Pictures already drawn are kept." : "Draw a picture for every scene again; the video AI animates it.", onclick: act(async () => {
     await post(`/api/projects/${enc(p.id)}/scenes/pictures`, { picture: !anyOn }, "PUT");
   }, false) }, anyOn ? "⏭ Skip scene pictures" : "🖼️ Draw scene pictures");
+}
+
+/** Clips page: leave one scene out of the final video, or put it back. */
+function leaveOutButton(p, sc, m, act) {
+  const n = sc.index + 1;
+  if (sc.leftOut) return h("button", { type: "button", class: "btn-soft shrink-0 px-3 py-1 text-xs", title: "Put this scene back in the video. If it has no video yet, make or upload it before the final video.", onclick: act(async () => {
+    await post(`/api/projects/${enc(p.id)}/scenes/left-out`, { scenes: [n], leftOut: false }, "PUT");
+  }, false) }, "↩ Put back");
+  return h("button", { type: "button", class: "btn-soft shrink-0 px-3 py-1 text-xs", title: "Leave this scene out of the final video (nothing is deleted; you can put it back)", onclick: act(async () => {
+    if (!confirm(`Leave scene ${n} out of the video?${p.media.final ? " The final video is put together again without it (nothing is paid for)." : ""}${m?.video ? " Its video is kept, so you can put it back later." : ""}`)) return SKIP;
+    await post(`/api/projects/${enc(p.id)}/scenes/left-out`, { scenes: [n], leftOut: true }, "PUT");
+  }, false) }, "⏭ Leave out");
 }
 
 function scenePictureToggle(p, sc, act) {
@@ -1643,6 +1679,101 @@ function fileToDataUrl(f) {
     r.onerror = () => reject(new Error("Couldn't read the file"));
     r.readAsDataURL(f);
   });
+}
+
+/** Most sample pictures per video (same as MAX_SAMPLES on the server). */
+const MAX_SAMPLES = 3;
+const SAMPLES_HELP = "Photos of things the video should show, e.g. Ethiopian food (injera, buna), a tukul house, a place or clothes. The AI plans the scenes around them and draws them in the scene pictures (in the video's art style). With no scene pictures, Veo 3.1 also gets them. PNG, JPEG or WebP.";
+
+/**
+ * Up to MAX_SAMPLES sample pictures (e.g. Ethiopian food, a house) the AI shows in the scenes, with previews.
+ * `dataUrls()` resolves [] when nothing is chosen and throws when there are too many or too big ones.
+ */
+function samplesPicker(id, { room = () => MAX_SAMPLES, label = `Sample pictures (optional, up to ${MAX_SAMPLES})`, help = SAMPLES_HELP } = {}) {
+  const input = h("input", { id, type: "file", multiple: true, accept: "image/png,image/jpeg,image/webp", class: "field text-sm", "aria-describedby": `${id}-help ${id}-msg` });
+  const previews = h("ul", { class: "flex flex-wrap gap-2", "aria-label": "Chosen sample pictures" });
+  const msg = h("p", { id: `${id}-msg`, role: "status", "aria-live": "polite", class: "text-sm text-red-700" });
+  let urls = [];
+  const problem = (files) => files.length > room()
+    ? (room() === MAX_SAMPLES ? `Choose at most ${MAX_SAMPLES} pictures.` : `A video can have at most ${MAX_SAMPLES} sample pictures: add at most ${room()} more, or remove some.`)
+    : files.some((f) => f.size > MAX_UPLOAD_MB * 1024 * 1024) ? `A picture is too big (max ${MAX_UPLOAD_MB} MB each).` : "";
+  const check = () => {
+    msg.textContent = problem([...input.files]);
+    input.setAttribute("aria-invalid", msg.textContent ? "true" : "false");
+  };
+  input.addEventListener("change", () => {
+    for (const u of urls) URL.revokeObjectURL(u);
+    const files = [...input.files];
+    urls = files.slice(0, MAX_SAMPLES).map((f) => URL.createObjectURL(f));
+    mount(previews, ...urls.map((src, j) => h("li", {}, h("img", { src, alt: `New sample picture ${j + 1}: ${files[j].name}`, class: "h-24 rounded-xl border border-orange-100 object-cover" }))));
+    check();
+  });
+  const el = h("div", {},
+    h("label", { for: id, class: "label", text: label }),
+    input,
+    h("p", { id: `${id}-help`, class: "mt-1 text-xs text-stone-500", text: help }),
+    h("div", { class: "mt-2" }, previews), msg);
+  return {
+    el,
+    input,
+    count: () => input.files.length,
+    /** Check again after the room changed (e.g. a kept picture was removed). */
+    check,
+    async dataUrls() {
+      const files = [...input.files];
+      const p = problem(files);
+      if (p) throw new Error(p);
+      return Promise.all(files.map(fileToDataUrl));
+    },
+  };
+}
+
+/**
+ * Video settings: change the sample pictures of a video that was already started (remove some, add new ones),
+ * and optionally redraw the scene pictures and clips with them.
+ */
+function samplesEditor(p) {
+  const id = p.id;
+  const current = p.media.samples ?? [];
+  const removed = new Set();
+  const status = h("div", { role: "status", "aria-live": "polite", class: "text-sm" });
+  const room = () => MAX_SAMPLES - (current.length - removed.size);
+  const picker = samplesPicker("ps-samples", { room, label: "Add sample pictures", help: `PNG, JPEG or WebP, at most ${MAX_SAMPLES} pictures per video in all.` });
+  const hasPictures = p.media.scenes.some((s) => s.image || s.video || s.clip);
+  const redraw = h("input", { id: "ps-samples-redraw", type: "checkbox", class: "mt-1 size-4 accent-coral" });
+  const redrawRow = hasPictures ? h("div", { class: "flex items-start gap-2 text-sm" }, redraw,
+    h("label", { for: "ps-samples-redraw" }, h("span", { class: "font-semibold", text: "Redraw the scene pictures and video clips with these samples" }),
+      h("span", { class: "block text-xs text-stone-500", text: "The poem, scenes, character and audio are kept; every scene picture and video clip is made again (paid). Unticked: only pictures made from now on use the new samples. To place the samples in the scenes, also plan the scenes again on the Scenes page, or name them in a scene's picture description." }))) : null;
+  const list = h("ul", { class: "flex flex-wrap gap-3", "aria-label": "Current sample pictures" });
+  const draw = () => mount(list, current.length ? current.map((rel, j) => {
+    const gone = removed.has(rel);
+    return h("li", { class: "flex flex-col items-start gap-1" },
+      h("img", { src: mediaUrl(id, rel, p.updatedAt), alt: `Sample picture ${j + 1}${gone ? " (will be removed)" : ""}`, class: `h-24 rounded-xl border border-orange-100 object-cover ${gone ? "opacity-30" : ""}` }),
+      h("button", { type: "button", class: "btn-soft text-xs", "aria-pressed": gone ? "true" : "false", onclick: () => {
+        if (gone) removed.delete(rel); else removed.add(rel);
+        draw();
+        picker.check();
+      } }, gone ? "↩ Keep" : `✕ Remove picture ${j + 1}`));
+  }) : h("li", { class: "text-sm text-stone-500", text: "No sample pictures yet." }));
+  draw();
+  const save = h("button", { type: "button", class: "btn", onclick: async () => {
+    if (!removed.size && !picker.count()) { status.textContent = "Nothing changed."; return; }
+    if (redraw.checked && !confirm("Redraw every scene picture and video clip with the new samples? Clips already made will be made again (paid).")) return;
+    save.disabled = true;
+    mount(status, "Saving…");
+    try {
+      const add = await picker.dataUrls();
+      await post(`/api/projects/${enc(id)}/samples`, { keep: current.filter((r) => !removed.has(r)), add, redraw: redraw.checked }, "PUT");
+      await renderProject(id);
+      const s = $("#run-status");
+      if (s) s.textContent = redraw.checked ? "Sample pictures saved ✓ Next: Clips (the scene pictures and clips are made again)." : "Sample pictures saved ✓";
+    } catch (err) { mount(status, errorBox(err)); save.disabled = false; }
+  } }, "💾 Save sample pictures");
+  return h("section", { class: "space-y-3 rounded-xl border border-orange-100 p-3", "aria-labelledby": "ps-samples-h" },
+    h("h4", { id: "ps-samples-h", class: "font-semibold", text: "Sample pictures" }),
+    h("p", { class: "text-xs text-stone-500", text: SAMPLES_HELP }),
+    list, picker.el, redrawRow,
+    h("div", { class: "flex flex-wrap items-center gap-3" }, save, status));
 }
 
 /** File input with preview and size check. `dataUrl()` resolves undefined when nothing is chosen. */

@@ -40,6 +40,9 @@ export function needsScenePicture(model: string): boolean {
 /** Nano Banana 2 / Pro (Gemini 3 image models) take an output size; older image models don't. */
 export const supportsImageSize = (model: string) => /^gemini-3/.test(model) && /image/.test(model);
 
+/** Veo 3.1 takes at most 3 "asset" reference pictures. */
+const VEO_MAX_REFERENCES = 3;
+
 /** Veo "asset" reference images are a Veo 3.1 feature, and not available on the Lite variant. */
 export function supportsReferenceImages(model: string): boolean {
   return /^veo-3\.1-/.test(model) && !/lite/.test(model);
@@ -190,7 +193,7 @@ export class GeminiProvider implements Provider {
     );
   }
 
-  async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; audio?: Buffer; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
+  async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; samples?: Buffer[]; audio?: Buffer; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
     const { label } = opts;
     if (isInferenceShModel(opts.model)) return this.inferenceShVideo().video(prompt, { ...opts, mime: sniffImageMime });
     const img = (b: Buffer) => ({ imageBytes: b.toString("base64"), mimeType: sniffImageMime(b) });
@@ -215,8 +218,9 @@ export class GeminiProvider implements Provider {
           source: { prompt },
           config: {
             ...base,
-            // No scene picture: the character alone, and Veo makes the scene from the prompt.
-            referenceImages: [opts.character, ...(opts.still ? [opts.still] : [])].map((b) => ({ image: img(b), referenceType: VideoGenerationReferenceType.ASSET })),
+            // No scene picture: the character alone (plus the sample pictures, up to Veo's 3 references), and Veo
+            // makes the scene from the prompt. With a scene picture, it already shows the samples.
+            referenceImages: [opts.character, ...(opts.still ? [opts.still] : (opts.samples ?? []))].slice(0, VEO_MAX_REFERENCES).map((b) => ({ image: img(b), referenceType: VideoGenerationReferenceType.ASSET })),
           },
         }
       : textOnly ? { model: opts.model, source: { prompt }, config: base }

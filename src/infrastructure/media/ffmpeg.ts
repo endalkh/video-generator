@@ -153,6 +153,23 @@ export async function concatAudio(inputs: string[], out: string): Promise<void> 
   await runFfmpeg([...inputs.flatMap((f) => ["-i", f]), "-filter_complex", `${norm};${join}`, "-map", "[a]", "-c:a", "pcm_s16le", "-f", "wav", out]);
 }
 
+/**
+ * Cut the given [start, end) parts out of one audio file and join them, in order, into one WAV (sample-exact, so a
+ * song stays in sync with clips timed to those parts). Touching parts are cut as one, so there's no seam between them.
+ */
+export async function audioParts(opts: { input: string; parts: { start: number; end: number }[]; out: string }): Promise<void> {
+  const ranges: { start: number; end: number }[] = [];
+  for (const r of opts.parts) {
+    const last = ranges.at(-1);
+    if (last && Math.abs(last.end - r.start) < 1e-6) last.end = r.end;
+    else ranges.push({ ...r });
+  }
+  if (!ranges.length) throw new Error("audioParts: nothing to cut");
+  const cuts = ranges.map((r, i) => `[0:a]atrim=start=${r.start.toFixed(3)}:end=${r.end.toFixed(3)},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo[a${i}]`).join(";");
+  const join = `${ranges.map((_, i) => `[a${i}]`).join("")}concat=n=${ranges.length}:v=0:a=1[a]`;
+  await runFfmpeg(["-i", opts.input, "-filter_complex", `${cuts};${join}`, "-map", "[a]", "-c:a", "pcm_s16le", "-f", "wav", opts.out]);
+}
+
 export async function assertFfmpegAvailable(): Promise<void> {
   await run(FFMPEG, ["-version"]);
   await run(FFPROBE, ["-version"]);

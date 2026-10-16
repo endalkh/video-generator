@@ -164,6 +164,8 @@ export const SceneSchema = z.object({
   motion: MotionSchema.default("zoom-in"),
   /** Moving-video mode: false = no picture for this scene (the video AI makes it from the character); unset = the video's default. */
   picture: z.boolean().optional(),
+  /** true = left out of the final video (e.g. its video isn't made); its clip is never made. Unset = in the video. */
+  leftOut: z.boolean().optional(),
 });
 export type Scene = z.infer<typeof SceneSchema>;
 

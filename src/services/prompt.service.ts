@@ -182,6 +182,7 @@ export class PromptService {
         veo: input.videoMode === "veo",
         has_character_hint: Boolean(input.characterHint?.trim()),
         has_reference: false,
+        has_samples: false,
         has_channel_name: false,
         has_title: false,
         ...extra.flags,
@@ -242,7 +243,7 @@ export interface SnapshotExtras {
   songSeconds?: number;
   /** Overrides {{language_name}} (e.g. bilingual channel text). */
   languageName?: string;
-  flags?: Partial<Record<"am" | "en" | "has_reference" | "has_channel_name" | "has_title", boolean>>;
+  flags?: Partial<Record<"am" | "en" | "has_reference" | "has_samples" | "has_channel_name" | "has_title", boolean>>;
 }
 
 /** Placeholder values for step-specific variables in previews. */

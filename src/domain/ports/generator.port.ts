@@ -80,6 +80,8 @@ export interface Provider {
       ctx: GenContext;
       /** Character sheet, so the character stays consistent. */
       character?: Buffer;
+      /** The video's sample pictures (e.g. a food or a house), for models that take extra reference pictures (Veo 3.1). */
+      samples?: Buffer[];
       /** Wanted resolution; providers cap it at what the model can make. */
       resolution?: VideoResolution;
       /** The scene's own audio (MP3), for models that animate to given audio (Kling Avatar). */

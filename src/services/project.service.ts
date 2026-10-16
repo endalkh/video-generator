@@ -13,7 +13,7 @@ import { audioToWav, imageToPng, probeDuration, probeStreams, runFfmpeg } from "
 import { songTimeline } from "../domain/ports/generator.port.js";
 import { ensureDir, fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
-import { ensureScenePiece, mediaPaths, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, wipeSceneVideos, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
+import { ensureScenePiece, mediaPaths, MAX_SAMPLES, sampleFiles, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, wipeSceneVideos, writeSamples, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
 
 export type ProviderFactory = (name: string) => Provider;
 
@@ -22,6 +22,8 @@ export interface ProjectDetailsDto extends ProjectDto {
   lastEvent: PipelineEvent | null;
   media: {
     characterImage: string | null;
+    /** Sample pictures (e.g. a food or a house) the scenes show. */
+    samples: string[];
     final: string | null;
     subtitles: string | null;
     thumbnail: string | null;
@@ -57,11 +59,13 @@ export class ProjectService {
   /** Throws NotFoundError for unknown channels (set by the container). */
   assertChannel: (channel: string) => Promise<void> = async () => {};
 
-  async create(rawInput: unknown, providerName: string, opts: { channelId?: string | null } = {}): Promise<ProjectDto> {
+  async create(rawInput: unknown, providerName: string, opts: { channelId?: string | null; samples?: unknown } = {}): Promise<ProjectDto> {
     const parsed = ProjectInputSchema.safeParse(rawInput);
     if (!parsed.success) throw new ValidationError("Invalid project input", parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`));
     this.providers(providerName); // validate provider (e.g. missing API key) before creating anything
     if (opts.channelId) await this.assertChannel(opts.channelId);
+    // Check the sample pictures before creating anything, so a bad picture doesn't leave a video without them.
+    const samples = await toSamples(opts.samples);
     const base = slugify(parsed.data.topic);
     for (let n = 1; n < 1000; n++) {
       const id = n === 1 ? base : `${base}-${n}`;
@@ -69,10 +73,12 @@ export class ProjectService {
       const project = Project.create({ id, input: parsed.data, provider: providerName, channelId: opts.channelId ?? null });
       try {
         await this.projects.create(project);
-        return ProjectMapper.toDto(project);
       } catch (err) {
         if (!(err instanceof ConflictError)) throw err; // lost a race for this id; try the next
+        continue;
       }
+      if (samples.length) await writeSamples(this.media(id), samples);
+      return ProjectMapper.toDto(project);
     }
     throw new ConflictError("Could not allocate a project id");
   }
@@ -97,6 +103,7 @@ export class ProjectService {
       lastEvent: job?.events.at(-1) ?? this.lastEvents.get(id) ?? null,
       media: {
         characterImage: await rel(p.characterImage),
+        samples: await Promise.all((await sampleFiles(p)).map(async (f) => (await rel(f))!)),
         final: await rel(p.final),
         subtitles: await rel(p.srt),
         thumbnail: await rel(p.thumbnail),
@@ -203,6 +210,9 @@ export class ProjectService {
     const { audioRequest: _wish, ...input } = source.input; // a fresh start: no leftover audio wish
     const created = await this.create(input, opts.provider ?? source.provider, { channelId: source.channelId });
     const copy = await this.load(created.id);
+    // The same sample pictures (a food, a house…) as the original video.
+    const samples = await Promise.all((await sampleFiles(this.media(id))).map((f) => readFile(f)));
+    if (samples.length) await writeSamples(this.media(copy.id), samples);
     if (keepPoem) {
       copy.setPoem(source.poem!);
       copy.completeStep("poem");
@@ -296,6 +306,32 @@ export class ProjectService {
     const media = this.media(id);
     await wipeMediaFrom(media, "audio");
     await wipeSceneVideos(media); // they sing / speak themselves; the new audio replaces that
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
+  }
+
+  /**
+   * Change a video's sample pictures: `keep` = the current ones to keep (their media paths, e.g. "samples/01.png"),
+   * `add` = new pictures (data URLs), at most MAX_SAMPLES in all. `redraw` makes the scene pictures, videos and
+   * clips again with them (paid); otherwise only pictures made from now on (or a new scene plan) use them.
+   */
+  async setSamples(id: string, raw: { keep?: unknown; add?: unknown; redraw?: unknown }): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    const media = this.media(id);
+    const current = await sampleFiles(media);
+    const rel = (f: string) => path.relative(media.dir, f).split(path.sep).join("/");
+    if (raw.keep !== undefined && !Array.isArray(raw.keep)) throw new ValidationError("keep must be a list of sample pictures");
+    const keep = (raw.keep as unknown[] | undefined) ?? current.map(rel);
+    const kept = current.filter((f) => keep.includes(rel(f)));
+    if (kept.length !== new Set(keep).size) throw new ValidationError("A sample picture to keep was not found; reload the page");
+    const added = await toSamples(raw.add);
+    if (kept.length + added.length > MAX_SAMPLES) throw new ValidationError(`A video can have at most ${MAX_SAMPLES} sample pictures`);
+    const pictures = [...(await Promise.all(kept.map((f) => readFile(f)))), ...added];
+    if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is running; stop it first`);
+    const redraw = raw.redraw === true;
+    await writeSamples(media, pictures);
+    if (redraw) await wipeMediaFrom(media, "clips");
+    project.changeSamples(redraw);
     await this.projects.save(project);
     return ProjectMapper.toDto(project);
   }
@@ -488,6 +524,8 @@ export class ProjectService {
       await ensureDir(media.sceneDir(index));
       await writeFileAtomic(media.sceneVideo(index), await readFile(out));
       await Promise.all([media.sceneVideoTask(index), media.sceneClip(index), media.final, media.srt].map((f) => rm(f, { force: true })));
+      // A scene left out for having no video is back in the video now that it has one.
+      if (project.scenes!.scenes[index]!.leftOut) project.setScenesLeftOut([index], false);
       project.redoFrom("clips");
       await this.projects.save(project);
       return ProjectMapper.toDto(project);
@@ -546,23 +584,40 @@ export class ProjectService {
 
   /**
    * Approve the scene videos as they are (uploaded by hand or made earlier) and go on: the clips are put together
-   * from them and the final video is made. Nothing is generated or paid for. Every scene needs a video first.
+   * from them and the final video is made. Nothing is generated or paid for. Every scene needs a video first, unless
+   * `skipMissing`: then the scenes without a video are left out of the final video (they can be put back later).
    */
-  async approveVideos(id: string): Promise<void> {
+  async approveVideos(id: string, opts: { skipMissing?: boolean } = {}): Promise<{ leftOut: number[] }> {
     const project = await this.loadIdle(id);
     if (project.input.videoMode !== "veo") throw new ConflictError("Visuals are animated pictures; there are no scene videos to approve");
     const before = STEP_NAMES.slice(0, STEP_NAMES.indexOf("clips")).find((s) => !project.isStepDone(s));
     if (before) throw new ConflictError(`Make the ${before} first`);
-    const scenes = project.scenes!.scenes;
+    const scenes = project.scenes!.scenes.filter((s) => !s.leftOut);
     const media = this.media(id);
     const missing = (await Promise.all(scenes.map(async (s) => ((await fileExists(media.sceneVideo(s.index))) ? null : s.index + 1)))).filter((n): n is number => n !== null);
-    if (missing.length) {
+    if (missing.length && !opts.skipMissing) {
       const list = missing.length === 1 ? `Scene ${missing[0]} has` : `Scenes ${missing.slice(0, -1).join(", ")} and ${missing.at(-1)} have`;
-      throw new ConflictError(`${list} no video yet. Upload ${missing.length === 1 ? "it" : "them"} (📤 Upload video) or click "Make the clips" to generate ${missing.length === 1 ? "it" : "them"}, then approve again.`);
+      throw new ConflictError(`${list} no video yet. Upload ${missing.length === 1 ? "it" : "them"} (📤 Upload video) or click "Make the clips" to generate ${missing.length === 1 ? "it" : "them"}, then approve again. Or leave ${missing.length === 1 ? "it" : "them"} out of the video ("⏭ Skip scenes without a video").`);
     }
+    if (missing.length === scenes.length) throw new ConflictError("No scene has a video yet: upload or make at least one first");
+    if (missing.length) project.setScenesLeftOut(missing.map((n) => n - 1), true);
     for (const s of STEP_NAMES.slice(0, STEP_NAMES.indexOf("clips"))) project.approve(s);
     await this.projects.save(project);
+    await rm(media.final, { force: true });
     await this.start(id, { noNewVideos: true });
+    return { leftOut: missing };
+  }
+
+  /** Leave scenes out of the final video, or put them back (1-based scene numbers). */
+  async setScenesLeftOut(id: string, raw: { scenes?: unknown; leftOut?: unknown }): Promise<ProjectDto> {
+    if (typeof raw.leftOut !== "boolean") throw new ValidationError("leftOut must be true or false");
+    if (!Array.isArray(raw.scenes) || !raw.scenes.length || !raw.scenes.every((n) => Number.isInteger(n))) throw new ValidationError("scenes must be a list of scene numbers");
+    const project = await this.loadIdle(id);
+    project.setScenesLeftOut((raw.scenes as number[]).map((n) => n - 1), raw.leftOut);
+    const media = this.media(id);
+    await Promise.all([media.final, media.srt].map((f) => rm(f, { force: true })));
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
   }
 
   /** Make one scene's picture and clip again, keeping the others. */
@@ -570,6 +625,8 @@ export class ProjectService {
     const project = await this.loadIdle(id);
     const count = project.scenes?.scenes.length ?? 0;
     if (!Number.isInteger(index) || index < 0 || index >= count) throw new ValidationError(`No scene ${index + 1}`);
+    // Remaking a left-out scene puts it back in the video.
+    if (project.scenes!.scenes[index]!.leftOut) project.setScenesLeftOut([index], false);
     project.redoFrom("clips");
     await wipeScene(this.media(id), index);
     await this.projects.save(project);
@@ -652,6 +709,16 @@ export async function toPng(image: unknown): Promise<Buffer> {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/** Decode the sample pictures sent with a new video (a list of data URLs; nothing = none). */
+export async function toSamples(raw: unknown): Promise<Buffer[]> {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new ValidationError("samples must be a list of pictures");
+  if (raw.length > MAX_SAMPLES) throw new ValidationError(`Choose at most ${MAX_SAMPLES} sample pictures`);
+  return Promise.all(raw.map((image, j) => toPng(image).catch((err: Error) => {
+    throw new ValidationError(`Sample picture ${j + 1}: ${err.message}`);
+  })));
 }
 
 function parse<T>(schema: { safeParse(v: unknown): { success: true; data: T } | { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } } }, raw: unknown, what: string): T {

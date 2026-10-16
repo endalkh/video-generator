@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { MAX_AUDIO_UPLOAD_BYTES, MAX_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_BYTES, type ProjectService } from "../../services/project.service.js";
-import type { PipelineEvent } from "../../services/pipeline.service.js";
+import { MAX_SAMPLES, type PipelineEvent } from "../../services/pipeline.service.js";
 import { HttpError, send, type Router } from "../http.js";
 
 const MEDIA_TYPES: Record<string, string> = {
@@ -23,8 +23,9 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
     .post(
       "/api/projects",
       async ({ body }) => {
-        const b = await body();
-        const project = await projects.create(b.input, str(b.provider) ?? "gemini", { channelId: str(b.channelId) });
+        // Room for up to MAX_SAMPLES sample pictures (base64 data URLs) next to the settings.
+        const b = await body(MAX_SAMPLES * Math.ceil(MAX_UPLOAD_BYTES * 1.4) + 200_000);
+        const project = await projects.create(b.input, str(b.provider) ?? "gemini", { channelId: str(b.channelId), samples: b.samples });
         await projects.start(project.id);
         return project;
       },
@@ -87,10 +88,11 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
       await projects.redoScene(params.id!, Number(params.index) - 1);
       return { id: params.id };
     }, 202)
-    .post("/api/projects/:id/clips/approve-videos", async ({ params }) => {
-      await projects.approveVideos(params.id!);
-      return { id: params.id };
+    .post("/api/projects/:id/clips/approve-videos", async ({ params, body }) => {
+      const r = await projects.approveVideos(params.id!, { skipMissing: (await body()).skipMissing === true });
+      return { id: params.id, ...r };
     }, 202)
+    .put("/api/projects/:id/scenes/left-out", async ({ params, body }) => projects.setScenesLeftOut(params.id!, await body()))
     .post("/api/projects/:id/scenes/:index/audio", async ({ params }) => projects.scenePiece(params.id!, Number(params.index) - 1))
     .put("/api/projects/:id/scenes/:index/video", async ({ params, body }) =>
       projects.uploadSceneVideo(params.id!, Number(params.index) - 1, await body(Math.ceil(MAX_VIDEO_UPLOAD_BYTES * 1.4) + 64_000)))
@@ -99,6 +101,7 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
       const b = await body();
       return projects.changeSettings(params.id!, b.settings, { keepPoem: b.keepPoem === true });
     })
+    .put("/api/projects/:id/samples", async ({ params, body }) => projects.setSamples(params.id!, await body(MAX_SAMPLES * Math.ceil(MAX_UPLOAD_BYTES * 1.4) + 64_000)))
     .put("/api/projects/:id/review-mode", async ({ params, body }) => projects.setReviewMode(params.id!, String((await body()).mode ?? "")))
     .put("/api/projects/:id/poem", async ({ params, body }) => {
       const b = await body();

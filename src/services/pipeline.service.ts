@@ -9,7 +9,7 @@ import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
 import { needsScenePicture } from "../infrastructure/providers/gemini.js";
-import { addEndCard, assertFfmpegAvailable, audioPiece, canDrawText, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, SCENE_TAIL_SEC, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
+import { addEndCard, assertFfmpegAvailable, audioParts, audioPiece, canDrawText, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, SCENE_TAIL_SEC, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
 import { ensureDir, fileExists, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
@@ -88,6 +88,9 @@ export function mediaPaths(dir: string) {
   return {
     dir,
     characterImage: path.join(dir, "character.png"),
+    /** Sample pictures from the parent (e.g. a food or a house) that the scenes should show: samples/01.png… */
+    samplesDir: path.join(dir, "samples"),
+    sample: (j: number) => path.join(dir, "samples", `${String(j + 1).padStart(2, "0")}.png`),
     srt: path.join(dir, "subtitles.srt"),
     final: path.join(dir, "final.mp4"),
     /** YouTube thumbnail for the finished video (1280×720). */
@@ -109,6 +112,23 @@ export function mediaPaths(dir: string) {
   };
 }
 export type MediaPaths = ReturnType<typeof mediaPaths>;
+
+/** Most sample pictures a video can have (Veo takes at most 3 reference pictures, and each one costs input tokens). */
+export const MAX_SAMPLES = 3;
+
+/** The video's sample pictures (relative file names under the project folder), in order. */
+export async function sampleFiles(p: MediaPaths): Promise<string[]> {
+  const names = await readdir(p.samplesDir).catch(() => [] as string[]);
+  return names.filter((f) => /^\d{2}\.png$/.test(f)).sort().slice(0, MAX_SAMPLES).map((f) => path.join(p.samplesDir, f));
+}
+
+/** Replace the video's sample pictures (PNG buffers; an empty list removes them). */
+export async function writeSamples(p: MediaPaths, pictures: Buffer[]): Promise<void> {
+  await rm(p.samplesDir, { recursive: true, force: true });
+  if (!pictures.length) return;
+  await ensureDir(p.samplesDir);
+  await Promise.all(pictures.slice(0, MAX_SAMPLES).map((b, j) => writeFileAtomic(p.sample(j), b)));
+}
 
 /** Delete on-disk media produced by `from` and every later step, so a redo can't reuse stale files. */
 export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void> {
@@ -353,7 +373,9 @@ export class PipelineService {
       const maxSongPart = isTrebloModel(models.song) ? TREBLO_MAX_SONG_SEC : MAX_SONG_PART_SEC;
       // With a chosen video length, long songs are made in parts; without one, a fixed-length model sets it.
       const songSeconds = input.lengthSeconds ?? fixedSongLength ?? input.songSeconds;
-      const prompts: PromptSet = await this.promptService.snapshotFor(input, { songSeconds, channel: project.channelId });
+      // Sample pictures (e.g. a food or a house): the scene plan, every scene picture and (no picture) the video see them.
+      const samples = await Promise.all((await sampleFiles(p)).map((f) => readFile(f)));
+      const prompts: PromptSet = await this.promptService.snapshotFor(input, { songSeconds, channel: project.channelId, flags: { has_samples: samples.length > 0 } });
 
       /** Render a prompt for a model task and record exactly what was sent to which model. */
       const prompt = async (
@@ -427,7 +449,7 @@ export class PipelineService {
           return;
         }
         const r = await prompt("scenes", "scenes", "scenes", { poem_json: JSON.stringify(poem, null, 2), stanza_count: poem.stanzas.length });
-        project.setScenes(await provider.text("scenes", r.text, { model: r.model, ctx: ctx() }));
+        project.setScenes(await provider.text("scenes", r.text, { model: r.model, images: samples.length ? samples : undefined, ctx: ctx() }));
         log.step("scenes", `${project.scenes!.scenes.length} scenes planned`);
       });
       const scenes = project.scenes!.scenes;
@@ -451,13 +473,13 @@ export class PipelineService {
       const character = project.character!;
 
       /** Per-scene work: skip any scene whose artifact already exists (fine-grained resume). */
-      const perScene = async (name: StepName, file: (i: number) => string, verb: string, make: (s: Scene, report: (message: string) => void) => Promise<void>) => {
+      const perScene = async (name: StepName, file: (i: number) => string, verb: string, make: (s: Scene, report: (message: string) => void) => Promise<void>, list: Scene[] = scenes) => {
         let done = 0;
-        const report = (message: string) => emit({ type: "progress", step: name, done, total: scenes.length, message });
+        const report = (message: string) => emit({ type: "progress", step: name, done, total: list.length, message });
         report("starting");
         // Video clips: as many at once as the video model's service allows (see videoConcurrency).
         const limit = name === "clips" && input.videoMode === "veo" ? videoConcurrency(models.scene_video, process.env.VIDEO_CONCURRENCY, input.videoConcurrency) : concurrency;
-        await mapLimit(scenes, limit, async (s) => {
+        await mapLimit(list, limit, async (s) => {
           checkCancel();
           const made = !(await fileExists(file(s.index)));
           if (made) {
@@ -467,7 +489,7 @@ export class PipelineService {
           done++;
           // Scenes whose file is already there are only counted, not made again: say so.
           const what = made ? verb : "already made";
-          log.step(name, `scene ${s.index + 1}/${scenes.length} ${what}`);
+          log.step(name, `scene ${s.index + 1}/${list.length} ${what}`);
           report(`scene ${s.index + 1} ${what}`);
         });
       };
@@ -653,12 +675,14 @@ export class PipelineService {
         return slot ? { duration: slot.end - slot.start } : { audio: p.sceneAudio(i) };
       };
 
-      await step("clips", allExist(scenes.map((s) => p.sceneClip(s.index))), async () => {
+      // Scenes left out of the video (e.g. no video was made for them): no clip, not in the final video.
+      const kept = scenes.filter((s) => !s.leftOut);
+      await step("clips", allExist(kept.map((s) => p.sceneClip(s.index))), async () => {
         // Pictures are off, but the video model can only animate a picture: say so before paying for anything.
         // (Character skipped on Veo: a scene with no picture is made from its words alone, which any Veo model can do.)
         if (useVeo && provider.name === "gemini" && needsScenePicture(models.scene_video) && !(character.skipped && !isInferenceShModel(models.scene_video))) {
           const missing: number[] = [];
-          for (const s of scenes) {
+          for (const s of kept) {
             if (!scenePicture(input, s) && !(await fileExists(p.sceneVideo(s.index))) && !(await fileExists(p.sceneImage(s.index)))) missing.push(s.index + 1);
           }
           if (missing.length) {
@@ -674,7 +698,7 @@ export class PipelineService {
           // No scene pictures: the video model makes the scene from the character picture.
           if (scenePicture(input, s) && !(await fileExists(p.sceneImage(i))) && !(useVeo && (await fileExists(p.sceneVideo(i))))) {
             const r = await prompt("clips", "scene_image", "scene_image", vars, i);
-            await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references: reference ? [reference] : [], label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
+            await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references: [...(reference ? [reference] : []), ...samples], label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
           }
           checkCancel();
           if (useVeo && opts.noNewVideos && !(await fileExists(p.sceneVideo(i)))) {
@@ -690,7 +714,7 @@ export class PipelineService {
               // The scene's length on screen (unknown when the character speaks inside the clip: there's no separate audio).
               const durationSec = t.duration ?? (t.audio && (await fileExists(t.audio)) ? (await probeDuration(t.audio)) + SCENE_TAIL_SEC : undefined);
               const mp4 = await provider.video!(r.text, {
-                model: r.model, character: reference, audio: piece ? await readFile(piece) : undefined, durationSec, still: scenePicture(input, s) && (await fileExists(p.sceneImage(i))) ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
+                model: r.model, character: reference, samples, audio: piece ? await readFile(piece) : undefined, durationSec, still: scenePicture(input, s) && (await fileExists(p.sceneImage(i))) ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
                 resumeTaskId: saved?.model === r.model ? saved.taskId : undefined,
                 onTaskStarted: (taskId) => writeFileAtomic(taskFile, JSON.stringify({ taskId, model: r.model, startedAt: new Date().toISOString() })),
               });
@@ -720,17 +744,28 @@ export class PipelineService {
             }
           }), signal);
           await rename(tmpClip, p.sceneClip(i));
-        });
+        }, kept);
       });
 
       await step("final", allExist([p.final]), async () => {
-        const clips = scenes.map((s) => p.sceneClip(s.index));
+        const clips = kept.map((s) => p.sceneClip(s.index));
         const durations = await Promise.all(clips.map(probeDuration));
         // The .srt is always written (handy for uploading to YouTube); it's only put in the video when asked for.
-        await writeFileAtomic(p.srt, buildSrt(scenes.map((s, i) => ({ text: s.text, duration: durations[i]! }))));
+        await writeFileAtomic(p.srt, buildSrt(kept.map((s, i) => ({ text: s.text, duration: durations[i]! }))));
         const tmp = `${p.final}.part.mp4`;
         const bed = inVideo && input.backgroundMusic ? await musicFile() : undefined;
-        await abortable(concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: timeline ? path.join(p.dir, timeline.file) : undefined, bed }), signal);
+        // One song across the scenes: with scenes left out, only their parts of the song are played (still in sync).
+        const leftOut = kept.length < scenes.length;
+        const keptSong = timeline && leftOut && kept.every((s) => timeline.slots[s.index]) ? path.join(p.dir, "song-kept.part.wav") : undefined;
+        if (timeline && keptSong) {
+          await abortable(audioParts({ input: path.join(p.dir, timeline.file), parts: kept.map((s) => timeline.slots[s.index]!), out: keptSong }), signal);
+          log.step("final", `${scenes.length - kept.length} scene(s) left out: joining the other ${kept.length} scenes and their parts of the audio`);
+        }
+        try {
+          await abortable(concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: keptSong ?? (timeline ? path.join(p.dir, timeline.file) : undefined), bed }), signal);
+        } finally {
+          if (keptSong) await rm(keptSong, { force: true });
+        }
         // Shorts: no clickable links inside the video, so show the channel's YouTube address at the end.
         const handle = input.aspectRatio === "9:16" ? await this.channelHandle?.(project.channelId).catch(() => undefined) : undefined;
         if (handle) {

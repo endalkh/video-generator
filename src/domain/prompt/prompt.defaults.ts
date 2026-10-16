@@ -6,8 +6,12 @@
 
 import { NotFoundError } from "../errors.js";
 
-/** Flags available to every prompt. The has_reference / has_channel_name / has_title flags are only set on the Channel page. */
-export const PROMPT_FLAGS = ["am", "en", "song", "narration", "music_voice", "character_voice", "video_sings", "video_sound", "veo", "has_character_hint", "has_reference", "has_channel_name", "has_title", "has_audio_request"] as const;
+/**
+ * Flags available to every prompt. The has_channel_name / has_title flags are only set on the Channel page;
+ * has_reference when a picture of yours is attached (Channel page, character from your picture);
+ * has_samples when the video has sample pictures (e.g. a food or a house) that the scenes should show.
+ */
+export const PROMPT_FLAGS = ["am", "en", "song", "narration", "music_voice", "character_voice", "video_sings", "video_sound", "veo", "has_character_hint", "has_reference", "has_samples", "has_channel_name", "has_title", "has_audio_request"] as const;
 
 /** Variables available to every prompt. */
 export const COMMON_VARS = ["topic", "language_name", "age_range", "style", "scene_count", "character_hint", "safety", "syllables_per_line", "letters_per_line", "video_seconds", "singer", "voice_style", "audio_request"] as const;
@@ -127,13 +131,22 @@ Return only the new stanza's lines; don't repeat the old one.
     vars: ["poem_json", "stanza_count"],
     template: `Turn this children's song into {{stanza_count}} animated film shots, one per stanza, in order, like a modern 3D kids' animated movie.
 For each shot: "index" (0-based), "text" = the stanza lines verbatim (joined with newlines, keep the original language),
-Every shot takes place OUTDOORS in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky) — never indoors. Adapt the action to the outdoors (e.g. washing hands at an outdoor basin or water jug, not a kitchen sink).
+{{#if has_samples}}The attached sample pictures show things the parent wants in the video (for example a food, a house, a place, an object or clothes). Show them in the shots where they fit the words, and in "visualPrompt" describe them exactly as they look in the pictures (shape, colours, materials, patterns, how the food is served or the house is built). A shot may be indoors when a sample picture shows an inside place; otherwise it takes place outdoors in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky).{{else}}Every shot takes place OUTDOORS in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky) — never indoors. Adapt the action to the outdoors (e.g. washing hands at an outdoor basin or water jug, not a kitchen sink).{{/if}}
 "visualPrompt" = a vivid ENGLISH shot description: where exactly we are in that setting, ONE clear, lively action the main character is doing with her hands and body (e.g. scrubbing soapy hands as bubbles float up, running up the hill, hugging a baby goat), her facial expression, and what the animals do. Prefer medium and close-up shots where the character fills much of the frame; vary the shots. Do not describe the main character's appearance (it is added separately); no text in the image.
 "motion" = one of zoom-in, zoom-out, pan-left, pan-right, static.
 Art style: {{style}}.
 {{safety}}
 
 {{poem_json}}`,
+    previousTemplates: [`Turn this children's song into {{stanza_count}} animated film shots, one per stanza, in order, like a modern 3D kids' animated movie.
+For each shot: "index" (0-based), "text" = the stanza lines verbatim (joined with newlines, keep the original language),
+Every shot takes place OUTDOORS in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky) — never indoors. Adapt the action to the outdoors (e.g. washing hands at an outdoor basin or water jug, not a kitchen sink).
+"visualPrompt" = a vivid ENGLISH shot description: where exactly we are in that setting, ONE clear, lively action the main character is doing with her hands and body (e.g. scrubbing soapy hands as bubbles float up, running up the hill, hugging a baby goat), her facial expression, and what the animals do. Prefer medium and close-up shots where the character fills much of the frame; vary the shots. Do not describe the main character's appearance (it is added separately); no text in the image.
+"motion" = one of zoom-in, zoom-out, pan-left, pan-right, static.
+Art style: {{style}}.
+{{safety}}
+
+{{poem_json}}`],
   },
   {
     key: "character",
@@ -174,14 +187,19 @@ Style: {{style}}. No text. {{safety}}`],
   {
     key: "scene_image",
     title: "Scene illustration",
-    description: "Image prompt for each scene. The character sheet is attached as a reference image.",
+    description: "Image prompt for each scene. The character sheet is attached as the first reference image; with has_samples, the video's sample pictures (e.g. a food or a house) are attached after it.",
     vars: ["scene_number", "scene_text", "visual_prompt", "character_name", "character_description"],
     template: `Still frame from a high-quality 3D animated kids' movie. {{visual_prompt}}
 The main character is the one in the reference image ({{character_name}}: {{character_description}}); keep her look exactly the same. Medium or close-up shot, she is large in frame, caught in the middle of the action, with a clear, happy facial expression.
-Setting: outdoors in a sunny, lush green countryside with soft grass, leafy trees, flowers and blue sky (never indoors).
+{{#if has_samples}}The other attached pictures are samples from the parent. Wherever this shot shows what a sample shows (a food, a house, a place, an object, clothes…), draw it like in that sample, recognisable at a glance (shape, colours, materials, patterns), in the art style below: not a copy of the photo. The main character always stays the one from the character reference.
+Setting: as described above; when nothing else is said, outdoors in a sunny, lush green countryside with soft grass, leafy trees, flowers and blue sky.{{else}}Setting: outdoors in a sunny, lush green countryside with soft grass, leafy trees, flowers and blue sky (never indoors).{{/if}}
 Bright, even lighting, warm sunlight. Deep focus: everything is sharp and in focus, from the character to the far background; rich, crisp, detailed background with no blur, no bokeh and no depth-of-field effect.
 Style: {{style}}. No text, letters or watermarks. {{safety}}`,
     previousTemplates: [`Still frame from a high-quality 3D animated kids' movie. {{visual_prompt}}
+The main character is the one in the reference image ({{character_name}}: {{character_description}}); keep her look exactly the same. Medium or close-up shot, she is large in frame, caught in the middle of the action, with a clear, happy facial expression.
+Setting: outdoors in a sunny, lush green countryside with soft grass, leafy trees, flowers and blue sky (never indoors).
+Bright, even lighting, warm sunlight. Deep focus: everything is sharp and in focus, from the character to the far background; rich, crisp, detailed background with no blur, no bokeh and no depth-of-field effect.
+Style: {{style}}. No text, letters or watermarks. {{safety}}`, `Still frame from a high-quality 3D animated kids' movie. {{visual_prompt}}
 The main character is the one in the reference image ({{character_name}}: {{character_description}}); keep her look exactly the same. Medium or close-up shot, she is large in frame, caught in the middle of the action, with a clear, happy facial expression.
 Setting: outdoors in a sunny, lush green countryside with soft grass, leafy trees, flowers and blue sky (never indoors).
 Cinematic lighting, warm sunlight, shallow depth of field, rich detailed background.
