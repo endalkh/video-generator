@@ -104,4 +104,24 @@ describe("built-in prompt upgrades", () => {
     expect(await service.seedDefaults()).toBe(0); // idempotent
     expect((await service.get("poem")).version).toBe(2);
   });
+
+  it("treats text the app wrote itself as a built-in default: upgrades it and never moves it to a channel", async () => {
+    const repo = new InMemoryPromptRepository();
+    const service = new PromptService(repo);
+    await service.seedDefaults();
+    // An in-between built-in version the app put there (e.g. a build made mid-change), not in previousTemplates.
+    const scenes = (await repo.findByKey("", "scenes"))!;
+    const appRev = scenes.revise(`${scenes.template}\nAn in-between built-in version.`, "built-in default updated")!;
+    await repo.saveRevision(scenes, appRev, 1);
+    // And a real edit by the user.
+    const safety = (await repo.findByKey("", "safety"))!;
+    await repo.saveRevision(safety, safety.revise("Be extra gentle.", "mine")!, 1);
+
+    expect(await service.moveSharedEditsTo("milcah")).toBe(1); // only the user's edit moves
+    expect((await service.get("safety", "milcah")).template).toBe("Be extra gentle.");
+    expect((await service.get("scenes", "milcah")).scope).toBe("shared");
+
+    await service.seedDefaults();
+    expect((await service.get("scenes")).isDefault).toBe(true); // upgraded to the current default
+  });
 });

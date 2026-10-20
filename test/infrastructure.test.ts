@@ -4,7 +4,7 @@ import { encodePng } from "../src/infrastructure/media/png.js";
 import { pcmToWav, toneWav, wavDurationSeconds } from "../src/infrastructure/media/wav.js";
 import { srtToVtt } from "../src/api/routes/projects.routes.js";
 import { mapLimit, videoConcurrency } from "../src/services/pipeline.service.js";
-import { GeminiProvider, maxVeoResolution, supportsImageSize, supportsReferenceImages } from "../src/infrastructure/providers/gemini.js";
+import { GeminiProvider, isNegativePromptRejected, maxVeoResolution, supportsImageSize, supportsReferenceImages } from "../src/infrastructure/providers/gemini.js";
 import { formatFor } from "../src/infrastructure/media/ffmpeg.js";
 import { minResolution, videoResolution } from "../src/domain/project/project.model.js";
 import { InferenceShVideo, isAudioDrivenModel } from "../src/infrastructure/providers/inference-sh.js";
@@ -70,6 +70,41 @@ describe("retry", () => {
       if (before === undefined) delete process.env.GEMINI_TEXT_API_KEY;
       else process.env.GEMINI_TEXT_API_KEY = before;
     }
+  });
+  it("sends Veo's negative prompt, and drops it for good where Veo rejects it", async () => {
+    GeminiProvider.noNegativePrompt.clear();
+    const configs: { negativePrompt?: string; referenceImages?: unknown[] }[] = [];
+    const veo = new GeminiProvider("paid");
+    (veo as unknown as { ai: unknown }).ai = {
+      models: {
+        generateVideos: async (req: { config: { negativePrompt?: string; referenceImages?: unknown[] } }) => {
+          configs.push(req.config);
+          if (req.config.negativePrompt && req.config.referenceImages) {
+            throw Object.assign(new Error('{"error":{"code":400,"message":"Negative prompt is not supported in your use case.","status":"INVALID_ARGUMENT"}}'), { status: 400 });
+          }
+          return { done: true, response: { generatedVideos: [{ video: { videoBytes: Buffer.from("video").toString("base64") } }] } };
+        },
+      },
+    };
+    const png = encodePng(8, 8, () => [200, 100, 50]);
+    const opts = { model: "veo-3.1-fast-generate-preview", still: png, aspectRatio: "16:9", label: "scene" };
+    expect((await veo.video("p", opts)).toString()).toBe("video"); // first frame: negative prompt accepted
+    expect(configs.at(-1)!.negativePrompt).toContain("blurry background");
+    expect((await veo.video("p", { ...opts, character: png })).toString()).toBe("video"); // references: rejected, sent again
+    expect(configs.slice(-2).map((c) => Boolean(c.negativePrompt))).toEqual([true, false]);
+    await veo.video("p", { ...opts, character: png, label: "next scene" });
+    expect(configs.at(-1)!.negativePrompt).toBeUndefined(); // remembered: no failed request first
+    expect(configs).toHaveLength(4);
+    await expect(veo.video("p", { ...opts, model: "veo-3.1-generate-preview", character: png })).resolves.toBeDefined();
+    expect(configs.slice(-2).map((c) => Boolean(c.negativePrompt))).toEqual([true, false]); // other models are tried once on their own
+    GeminiProvider.noNegativePrompt.clear();
+  });
+  it("recognises both ways Veo says it won't take a negative prompt", () => {
+    const err = (message: string) => Object.assign(new Error(message), { status: 400 });
+    expect(isNegativePromptRejected(err('{"error":{"code":400,"message":"Negative prompt is not supported in your use case.","status":"INVALID_ARGUMENT"}}'))).toBe(true);
+    expect(isNegativePromptRejected(err('{"error":{"code":400,"message":"`negativePrompt` isn\'t supported by this model. Please remove it or refer to the Gemini API documentation for supported usage.","status":"INVALID_ARGUMENT"}}'))).toBe(true);
+    expect(isNegativePromptRejected(err('{"error":{"code":400,"message":"Unsupported aspect ratio","status":"INVALID_ARGUMENT"}}'))).toBe(false);
+    expect(isNegativePromptRejected(Object.assign(new Error("negative prompt quota"), { status: 429 }))).toBe(false);
   });
   it("never retries a spending cap, even when the caller retries everything (text models)", async () => {
     let n = 0;

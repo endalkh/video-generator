@@ -55,6 +55,8 @@ export interface ContentPlanRepository {
   list(channelId: string, limit?: number): Promise<ContentPlan[]>;
   /** Insert or replace. */
   save(plan: ContentPlan): Promise<void>;
+  /** Delete one month's plan; false when there was none. */
+  delete(channelId: string, month: string): Promise<boolean>;
   /** Delete every plan of a channel. */
   deleteChannel(channelId: string): Promise<number>;
   /** Move plans from one channel to another (e.g. plans made before channels, channelId ""), skipping months the target already has. */

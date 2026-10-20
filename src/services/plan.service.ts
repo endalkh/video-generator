@@ -125,6 +125,17 @@ export class PlanService {
     }
   }
 
+  /**
+   * Delete a month's plan so it can be planned from scratch. Videos already made from its ideas are kept
+   * (they're projects of their own); only the ideas and schedule go.
+   */
+  async delete(channel: string, month: string): Promise<void> {
+    await this.load(channel, month);
+    const lock = `${channel}#${month}`;
+    if ([...this.generating].some((k) => k === lock || k.startsWith(`${lock}#`))) throw new ConflictError(`${monthName(month)} is being planned right now; try again when it's done`);
+    await this.plans.delete(channel, month);
+  }
+
   async editIdea(channel: string, month: string, index: number, raw: unknown): Promise<ContentPlanDto> {
     const plan = await this.load(channel, month);
     plan.editIdea(index, raw);

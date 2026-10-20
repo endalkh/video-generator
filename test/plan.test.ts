@@ -2,7 +2,7 @@ import type { AddressInfo } from "node:net";
 import type http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/api/server.js";
-import { DomainError, ValidationError } from "../src/domain/errors.js";
+import { DomainError, NotFoundError, ValidationError } from "../src/domain/errors.js";
 import { planToIcs, zonedToUtc } from "../src/domain/plan/plan.calendar.js";
 import { planSlots, PlanInputSchema } from "../src/domain/plan/plan.model.js";
 import { MockProvider } from "../src/infrastructure/providers/mock.js";
@@ -124,6 +124,26 @@ describe("PlanService", () => {
     expect((await c.projectService.get(projectId)).input).toMatchObject({ lengthSeconds: 300, sceneCount: 30, songSeconds: 300 });
   });
 
+  it("deletes a month's plan, keeping videos made from it, so the month can be planned from scratch", async () => {
+    const mock = new MockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ch = await newChannel();
+    const month = `${new Date().getFullYear() + 1}-07`;
+    await c.planService.generate(ch, month, settings, { provider: "mock" });
+    const { projectId } = await c.planService.makeVideo(ch, month, 0, { provider: "mock" });
+    await c.projectService.cancel(projectId);
+    await c.projectService.idle();
+
+    await c.planService.delete(ch, month);
+    await expect(c.planService.get(ch, month)).rejects.toBeInstanceOf(NotFoundError);
+    expect(await c.planService.list(ch)).toEqual([]);
+    expect((await c.projectService.get(projectId)).id).toBe(projectId); // the video stays
+    await expect(c.planService.delete(ch, month)).rejects.toBeInstanceOf(NotFoundError);
+
+    const fresh = await c.planService.generate(ch, month, settings, { provider: "mock" });
+    expect(fresh.ideas.every((i) => i.projectId === null)).toBe(true); // nothing kept from the old plan
+  });
+
   it("fails clearly when the AI plans too few videos", async () => {
     const mock = new MockProvider();
     const text = mock.text.bind(mock);
@@ -158,6 +178,11 @@ describe("plan HTTP API", () => {
       expect(ics.headers.get("content-disposition")).toContain(`posting-plan-${month}.ics`);
       expect((await ics.text()).match(/BEGIN:VEVENT/g)).toHaveLength(plan.ideas.length);
       expect(await (await fetch(`${base}/api/channels/${ch}/plans/last-input`)).json()).toMatchObject({ channelName: "Milcah's World", postDays: [2, 4, 6] });
+      const del = await fetch(`${base}/api/channels/${ch}/plans/${month}`, json("DELETE", {}));
+      expect(del.status).toBe(200);
+      expect(await del.json()).toEqual({ deleted: month });
+      expect((await fetch(`${base}/api/channels/${ch}/plans/${month}`)).status).toBe(404);
+      expect((await fetch(`${base}/api/channels/${ch}/plans/${month}`, json("DELETE", {}))).status).toBe(404);
     } finally {
       server.closeAllConnections();
       await new Promise((r) => server.close(r));

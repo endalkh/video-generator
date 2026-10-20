@@ -100,11 +100,13 @@ export class PromptSet {
 
   constructor(
     private readonly prompts: ReadonlyMap<string, Prompt>,
-    common: Omit<PromptVars, "safety">,
+    common: Omit<PromptVars, "safety" | "local_look">,
     private readonly flags: PromptFlags,
   ) {
-    const safety = this.get("safety").render({ ...common, safety: "" }, flags);
-    this.common = { ...common, safety };
+    const safety = this.get("safety").render({ ...common, safety: "", local_look: "" }, flags);
+    // Older snapshots (and minimal test sets) may not have it: then nothing is added.
+    const look = this.prompts.get("local_look")?.render({ ...common, safety, local_look: "" }, flags) ?? "";
+    this.common = { ...common, safety, local_look: look };
   }
 
   render(key: string, vars: PromptVars = {}): RenderedPrompt {

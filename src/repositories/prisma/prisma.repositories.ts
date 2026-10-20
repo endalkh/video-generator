@@ -178,6 +178,10 @@ export class PrismaContentPlanRepository implements ContentPlanRepository {
     await this.db.contentPlan.upsert({ where: { channelId_month: { channelId, month } }, create: { channelId, month, createdAt, ...data }, update: data });
   }
 
+  async delete(channelId: string, month: string) {
+    return (await this.db.contentPlan.deleteMany({ where: { channelId, month } })).count > 0;
+  }
+
   async deleteChannel(channelId: string) {
     return (await this.db.contentPlan.deleteMany({ where: { channelId } })).count;
   }

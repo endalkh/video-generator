@@ -25,7 +25,7 @@ export const PlanInputSchema = z.object({
   mainCharacter: z.string().transform(tidy).pipe(z.string().max(300)).optional().transform((v) => v || undefined),
   /** "both" alternates Amharic and English videos. */
   language: z.enum(["en", "am", "both"]).default("both"),
-  ageRange: z.string().transform(tidy).default("3-6"),
+  ageRange: z.string().transform(tidy).default("1-6"),
   /** Length of every video this month, in minutes (½–10). Leave out for 30-second songs. */
   videoMinutes: z.number().min(0.5).max(10).multipleOf(0.5).optional(),
   /** Days to post on (0 = Sunday). */

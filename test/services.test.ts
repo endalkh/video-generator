@@ -16,6 +16,26 @@ async function runToEnd(id: string, opts: { from?: string } = {}) {
 }
 
 describe("PromptService", () => {
+  it("adds the channel's local look to the scene prompts and keeps floating things rare", async () => {
+    c = await makeTestContainer();
+    const { ProjectInputSchema } = await import("../src/domain/project/project.model.js");
+    const input = ProjectInputSchema.parse({ topic: "Helping at home", language: "en" });
+    const v = { scene_number: 1, scene_text: "x", visual_prompt: "She sweeps the yard.", character_name: "M", character_description: "a girl" };
+    const set = await c.promptService.snapshotFor(input);
+    for (const text of [set.render("scenes", { poem_json: "{}", stanza_count: 2 }).text, set.render("scene_image", v).text, set.render("scene_video", v).text]) {
+      expect(text).toContain("gojo bet");
+      expect(text).not.toMatch(/\{\{/);
+    }
+    expect(set.render("scene_video", v).text).not.toMatch(/details: bubbles/);
+    expect(set.render("scenes", { poem_json: "{}", stanza_count: 2 }).text).toContain("most videos have none");
+
+    // A channel can describe a different look; other channels keep the shared one.
+    const ch = (await c.channelService.create({ input: { name: "Space Kids" }, provider: "mock" })).id;
+    await c.promptService.update("local_look", "Everything looks like a friendly moon base.", { channel: ch });
+    expect((await c.promptService.snapshotFor(input, { channel: ch })).render("scene_image", v).text).toContain("moon base");
+    expect((await c.promptService.snapshotFor(input)).render("scene_image", v).text).toContain("gojo bet");
+  });
+
   it("seeds once, versions edits, restores, and resets", async () => {
     c = await makeTestContainer();
     expect(await c.promptService.seedDefaults()).toBe(0); // idempotent

@@ -11,6 +11,10 @@ export function planRoutes(router: Router, plans: PlanService): void {
     .get(`${base}/last-input`, ({ params }) => plans.lastInput(params.channel!))
     .post(`${base}/:month/slots`, async ({ params, body }) => plans.slots(params.month!, (await body()).input))
     .get(`${base}/:month`, ({ params }) => plans.get(params.channel!, params.month!))
+    .del(`${base}/:month`, async ({ params }) => {
+      await plans.delete(params.channel!, params.month!);
+      return { deleted: params.month };
+    })
     .post(`${base}/:month/generate`, async ({ params, body }) => {
       const b = await body();
       return plans.generate(params.channel!, params.month!, b.input, { provider: str(b.provider) });

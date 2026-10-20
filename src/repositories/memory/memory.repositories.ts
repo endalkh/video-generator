@@ -129,6 +129,9 @@ export class InMemoryContentPlanRepository implements ContentPlanRepository {
   async save(plan: ContentPlan) {
     this.rows.set(InMemoryContentPlanRepository.id(plan.channelId, plan.month), plan.toProps());
   }
+  async delete(channelId: string, month: string) {
+    return this.rows.delete(InMemoryContentPlanRepository.id(channelId, month));
+  }
   async deleteChannel(channelId: string) {
     let n = 0;
     for (const [id, p] of this.rows) if (p.channelId === channelId) (this.rows.delete(id), n++);

@@ -345,7 +345,7 @@ async function showNewVideo() {
         "Leave empty: one picture about every 10 s (song) or 12 s (story)."),
       field("f-length", "Video length (minutes)", h("input", { id: "f-length", name: "lengthMinutes", type: "number", min: 0.5, max: 10, step: 0.5, value: d.videoMinutes ?? 0.5, class: "field", "aria-describedby": "f-length-plan" }),
         "From ½ to 10 minutes."),
-      field("f-age", "Age range", h("input", { id: "f-age", name: "ageRange", value: d.ageRange ?? "3-6", class: "field" })),
+      field("f-age", "Age range", h("input", { id: "f-age", name: "ageRange", value: d.ageRange ?? "1-6", class: "field" })),
       field("f-aspect", "Shape", select("f-aspect", "aspectRatio", [["16:9", "Landscape 16:9 (YouTube)"], ["9:16", "Portrait 9:16 (Shorts)"]])),
       field("f-quality", "Quality", select("f-quality", "resolution", QUALITY_OPTIONS, config.videoResolution ?? "1080p"), QUALITY_HINT),
       field("f-conc", "Videos at the same time", select("f-conc", "videoConcurrency", CONCURRENCY_OPTIONS, ""), CONCURRENCY_HINT),
@@ -1037,7 +1037,7 @@ function settingsPanel(p, group = "video") {
   const read = () => {
     const minutes = Number(els.length.value);
     return {
-      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, videoAudio: els.videoAudio.checked, backgroundMusic: els.backgroundMusic.checked, ageRange: els.ageRange.value.trim() || "3-6",
+      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, videoAudio: els.videoAudio.checked, backgroundMusic: els.backgroundMusic.checked, ageRange: els.ageRange.value.trim() || "1-6",
       aspectRatio: els.aspectRatio.value, resolution: els.resolution.value, videoMode: els.videoMode.value,
       videoConcurrency: els.videoConcurrency.value ? Number(els.videoConcurrency.value) : null, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
       singer: els.singer.value, voice: els.voice.value || null,
@@ -1825,8 +1825,8 @@ function channelBriefFields(prefix, input = {}) {
     brief: h("textarea", { id: `${prefix}-brief`, rows: 3, class: "field", value: input.brief ?? "", placeholder: "e.g. Fun Amharic songs that teach toddlers colours, numbers and good habits, with a cheerful little goat as the mascot" }),
     name: h("input", { id: `${prefix}-name`, class: "field", maxlength: 100, value: input.name ?? "", placeholder: "Leave empty and the AI suggests one" }),
     language: h("select", { id: `${prefix}-language`, class: "field" }, [["en", "English"], ["am", "አማርኛ (Amharic)"], ["both", "Both — አማርኛ + English"]].map(([v, t]) => h("option", { value: v, text: t, selected: v === (input.language ?? "en") }))),
-    ageRange: h("input", { id: `${prefix}-age`, class: "field", value: input.ageRange ?? "3-6" }),
-    style: h("input", { id: `${prefix}-style`, class: "field", value: input.style ?? "colorful 3D animated kids' movie style, Pixar-like, soft cinematic lighting, expressive characters" }),
+    ageRange: h("input", { id: `${prefix}-age`, class: "field", value: input.ageRange ?? "1-6" }),
+    style: h("input", { id: `${prefix}-style`, class: "field", value: input.style ?? "colorful 3D animated kids' movie style, Pixar-like, bright even lighting, crisp detailed backgrounds, expressive characters" }),
     mainCharacter: h("input", { id: `${prefix}-character`, class: "field", maxlength: 300, value: input.mainCharacter ?? "", placeholder: "e.g. Milcah (ሚልካ), a cheerful, curious little Ethiopian girl" }),
     videoMinutes: h("input", { id: `${prefix}-minutes`, type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: input.videoMinutes ?? "", placeholder: "e.g. 5" }),
     audioMode: h("select", { id: `${prefix}-audio`, class: "field" }, [["", "Not set (song; rhyme over music for Amharic)"], ...AUDIO_MODES].map(([v, t]) => h("option", { value: v, text: t, selected: v === (input.audioMode ?? "") }))),
@@ -1850,7 +1850,7 @@ function channelBriefFields(prefix, input = {}) {
     h("p", { class: "text-xs text-stone-500", text: "The language, age range, style, main character and length fill the New video and Ideas & schedule forms for this channel." }),
   ];
   const read = () => ({
-    brief: els.brief.value.trim(), name: els.name.value.trim(), language: els.language.value, ageRange: els.ageRange.value.trim() || "3-6", style: els.style.value.trim() || undefined,
+    brief: els.brief.value.trim(), name: els.name.value.trim(), language: els.language.value, ageRange: els.ageRange.value.trim() || "1-6", style: els.style.value.trim() || undefined,
     mainCharacter: els.mainCharacter.value.trim(), videoMinutes: els.videoMinutes.value ? Math.round(Number(els.videoMinutes.value) * 2) / 2 : null,
     audioMode: els.audioMode.value || null, singer: els.singer.value === "auto" ? null : els.singer.value, voice: els.voice.value || null,
   });
@@ -2262,6 +2262,23 @@ async function showPlan(month) {
   const byId = new Map(projects.map((p) => [p.id, p]));
   const settings = h("details", { class: "card" }, h("summary", { class: "cursor-pointer font-bold", text: "⚙️ Settings and plan again" }), await planSettingsForm(plan.month, plan.input, true));
   const made = plan.ideas.filter((i) => i.projectId).length;
+  const planStatus = h("div", { role: "status", "aria-live": "polite", class: "mt-2 text-sm" });
+  const planAgain = h("button", { type: "button", class: "btn-soft", onclick: () => {
+    settings.open = true;
+    settings.scrollIntoView({ block: "start" });
+    $("#pl-about", settings)?.focus();
+  } }, "↻ Plan this month again");
+  const deletePlan = h("button", { type: "button", class: "btn-soft text-red-700", onclick: async () => {
+    const keep = made ? `\n\nThe ${made} video${made === 1 ? "" : "s"} already made from it stay in your videos.` : "";
+    if (!confirm(`Delete the plan for ${monthLabel(plan.month)}? All its ideas and posting times are removed; you can plan the month again from scratch.${keep}`)) return;
+    deletePlan.disabled = true;
+    mount(planStatus, "Deleting…");
+    try {
+      await post(planApi(`/${enc(plan.month)}`), {}, "DELETE");
+      // Same month, now without a plan: shows the form to plan it from scratch.
+      await showPlan(plan.month);
+    } catch (err) { mount(planStatus, errorBox(err)); deletePlan.disabled = false; }
+  } }, "🗑 Delete this plan");
   mount($("#main"),
     h("section", { class: "card" },
       h("div", { class: "flex flex-wrap items-center gap-3" },
@@ -2273,7 +2290,9 @@ async function showPlan(month) {
       h("div", { class: "mt-4 flex flex-wrap items-center gap-2" },
         h("a", { class: "btn", href: planApi(`/${enc(plan.month)}/calendar.ics`), download: `posting-plan-${plan.month}.ics` }, "📅 Add to my calendar (.ics)"),
         h("select", { id: "pl-prov", class: "field w-auto py-1.5 text-sm", "aria-label": "Provider for new videos" }, config.providers.map((n) => h("option", { value: n, text: n, selected: n === (config.hasApiKey ? "gemini" : "mock") }))),
-        h("span", { class: "text-xs text-stone-500", text: "The calendar reminds you 2 days before each post to make the video." }))),
+        h("span", { class: "text-xs text-stone-500", text: "The calendar reminds you 2 days before each post to make the video." })),
+      h("div", { class: "mt-3 flex flex-wrap items-center gap-2" }, planAgain, deletePlan),
+      planStatus),
     settings,
     h("ol", { class: "space-y-3", "aria-label": "Videos this month" }, plan.ideas.map((idea, i) => h("li", {}, ideaCard(plan, idea, i, byId.get(idea.projectId))))));
 }
@@ -2392,7 +2411,7 @@ async function planSettingsForm(month, defaults, existing) {
     about: h("textarea", { id: "pl-about", class: "field", rows: 3, value: d.about ?? "", placeholder: "Short animated songs and stories for little kids in Amharic and English, each teaching one good habit or simple lesson…" }),
     mainCharacter: h("input", { id: "pl-character", class: "field", maxlength: 300, value: d.mainCharacter ?? "", placeholder: "e.g. Milcah (ሚልካ), a cheerful, curious little Ethiopian girl" }),
     language: h("select", { id: "pl-language", class: "field" }, [["both", "Both — alternate አማርኛ and English"], ["am", "አማርኛ only"], ["en", "English only"]].map(([v, t]) => h("option", { value: v, text: t, selected: v === (d.language ?? "both") }))),
-    ageRange: h("input", { id: "pl-age", class: "field", value: d.ageRange ?? "3-6" }),
+    ageRange: h("input", { id: "pl-age", class: "field", value: d.ageRange ?? "1-6" }),
     videoMinutes: h("input", { id: "pl-minutes", type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: d.videoMinutes ?? "", placeholder: "e.g. 5" }),
     weekdayTime: h("input", { id: "pl-wtime", type: "time", class: "field", value: d.weekdayTime ?? "16:00" }),
     weekendTime: h("input", { id: "pl-etime", type: "time", class: "field", value: d.weekendTime ?? "09:00" }),
@@ -2405,7 +2424,7 @@ async function planSettingsForm(month, defaults, existing) {
     return h("label", { for: `pl-day-${i}`, class: "flex items-center gap-1.5 rounded-full border border-orange-100 px-3 py-1 text-sm" }, box, name);
   });
   const read = () => ({
-    channelName: els.channelName.value.trim(), about: els.about.value.trim(), mainCharacter: els.mainCharacter.value.trim(), language: els.language.value, ageRange: els.ageRange.value.trim() || "3-6",
+    channelName: els.channelName.value.trim(), about: els.about.value.trim(), mainCharacter: els.mainCharacter.value.trim(), language: els.language.value, ageRange: els.ageRange.value.trim() || "1-6",
     videoMinutes: els.videoMinutes.value ? Math.round(Number(els.videoMinutes.value) * 2) / 2 : undefined,
     postDays: WEEKDAY_NAMES.map((_, i) => i).filter((i) => $(`#pl-day-${i}`, form).checked),
     weekdayTime: els.weekdayTime.value || "16:00", weekendTime: els.weekendTime.value || "09:00", timezone: els.timezone.value.trim(), notes: els.notes.value.trim(),

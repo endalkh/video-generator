@@ -43,6 +43,19 @@ export const supportsImageSize = (model: string) => /^gemini-3/.test(model) && /
 /** Veo 3.1 takes at most 3 "asset" reference pictures. */
 const VEO_MAX_REFERENCES = 3;
 
+/**
+ * What Veo should avoid. Blur words go here rather than in the prompt: "no blur" inside a prompt still puts
+ * blur in the model's mind, while the negative prompt steers away from it.
+ */
+export const VEO_NEGATIVE_PROMPT = "blurry background, bokeh, shallow depth of field, out-of-focus background, soft focus, defocused, rack focus, tilt-shift, haze, motion blur, low detail, text, captions, watermark";
+
+/** Veo's 400 for a negative prompt it won't take: "Negative prompt is not supported in your use case." (Fast with
+ * reference pictures) or "`negativePrompt` isn't supported by this model." (Lite). */
+export function isNegativePromptRejected(err: unknown): boolean {
+  const e = err as { status?: number; message?: string };
+  return (e?.status === 400 || /"code":\s*400|INVALID_ARGUMENT/.test(e?.message ?? "")) && /negative\s*prompt/i.test(e?.message ?? "");
+}
+
 /** Veo "asset" reference images are a Veo 3.1 feature, and not available on the Lite variant. */
 export function supportsReferenceImages(model: string): boolean {
   return /^veo-3\.1-/.test(model) && !/lite/.test(model);
@@ -60,6 +73,8 @@ export const FREE_PREFIX = "free/";
 
 export class GeminiProvider implements Provider {
   readonly name = "gemini";
+  /** "model:mode" pairs where Veo rejected the negative prompt (remembered until the app restarts). */
+  static readonly noNegativePrompt = new Set<string>();
   private readonly ai: GoogleGenAI;
   /** The free-tier key (GEMINI_TEXT_API_KEY), used for models chosen as "free/<model>" on the Models page. */
   private readonly freeAi?: GoogleGenAI;
@@ -211,6 +226,10 @@ export class GeminiProvider implements Provider {
     // 1080p and 4K need 8 s clips, which is what the app makes anyway.
     const resolution = minResolution(opts.resolution ?? "720p", maxVeoResolution(opts.model));
     const base = { numberOfVideos: 1, aspectRatio: opts.aspectRatio, durationSeconds: 8, resolution };
+    // The negative prompt keeps backgrounds sharp, but Veo rejects it in some modes (e.g. with reference
+    // pictures): then send the request again without it, and stop sending it for that model and mode.
+    const mode = `${opts.model}:${useReferences ? "references" : textOnly ? "text" : "first-frame"}`;
+    const negative = GeminiProvider.noNegativePrompt.has(mode) ? {} : { negativePrompt: VEO_NEGATIVE_PROMPT };
     log.debug(`${label}: ${opts.model} at ${resolution}`);
     const request = useReferences && opts.character
       ? {
@@ -225,13 +244,22 @@ export class GeminiProvider implements Provider {
         }
       : textOnly ? { model: opts.model, source: { prompt }, config: base }
       : { model: opts.model, source: { prompt, image: img(opts.still!) }, config: base };
-    // Veo has low per-minute request limits: on 429 wait long enough for the window to reset.
-    let op = await withRetry(() => this.ai.models.generateVideos(request), {
-      label,
-      retries: 4,
-      baseDelayMs: 30_000,
-      maxDelayMs: 120_000,
-      shouldRetry: (err) => !isBillingStop(err) && ((err as { status?: number }).status === 429 || isTransientError(err)),
+    const send = (withNegative: boolean) => {
+      const config = withNegative ? { ...request.config, ...negative } : request.config;
+      // Veo has low per-minute request limits: on 429 wait long enough for the window to reset.
+      return withRetry(() => this.ai.models.generateVideos({ ...request, config }), {
+        label,
+        retries: 4,
+        baseDelayMs: 30_000,
+        maxDelayMs: 120_000,
+        shouldRetry: (err) => !isBillingStop(err) && ((err as { status?: number }).status === 429 || isTransientError(err)),
+      });
+    };
+    let op = await send("negativePrompt" in negative).catch((err: unknown) => {
+      if (!("negativePrompt" in negative) || !isNegativePromptRejected(err)) throw err;
+      GeminiProvider.noNegativePrompt.add(mode);
+      log.info(`${label}: ${opts.model} doesn't take a negative prompt here (${mode.split(":")[1]}); sending it without one`);
+      return send(false);
     });
     const started = Date.now();
     while (!op.done) {

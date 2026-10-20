@@ -7,6 +7,9 @@ import { Prompt, PromptSet, SHARED } from "../domain/prompt/prompt.entity.js";
 import { PromptMapper, type PromptDto, type PromptRevisionDto } from "../domain/prompt/prompt.mapper.js";
 import type { PromptRepository } from "../repositories/repositories.js";
 
+/** Notes the app itself writes on prompt revisions: a prompt whose latest revision has one was never edited by hand. */
+const APP_NOTES = new Set(["default", "built-in default updated", "reset to default"]);
+
 /**
  * Use cases for the editable prompt library. Every channel uses the SHARED prompts unless it has its own copy:
  * editing a prompt for a channel creates that copy (versioned like any prompt); "use the shared prompt" deletes it.
@@ -28,7 +31,7 @@ export class PromptService {
         continue;
       }
       const stored = await this.prompts.findByKey(SHARED, def.key);
-      if (stored && def.previousTemplates?.includes(stored.template)) {
+      if (stored && stored.template !== def.template && (def.previousTemplates?.includes(stored.template) || (await this.writtenByApp(SHARED, def.key)))) {
         const previous = stored.version;
         const revision = stored.revise(def.template, "built-in default updated");
         if (revision) await this.prompts.saveRevision(stored, revision, previous).catch(() => {}); // another process got there first
@@ -125,7 +128,7 @@ export class PromptService {
   async moveSharedEditsTo(channel: string): Promise<number> {
     let moved = 0;
     for (const shared of await this.prompts.list(SHARED)) {
-      if (shared.isDefault || (await this.prompts.findByKey(channel, shared.key))) continue;
+      if (shared.isDefault || (await this.writtenByApp(SHARED, shared.key)) || (await this.prompts.findByKey(channel, shared.key))) continue;
       const copy = Prompt.copyFor(channel, shared);
       await this.prompts.createIfMissing(copy, copy.initialRevision(`your edit (shared v${shared.version}), moved to this channel`));
       await this.reset(shared.key);
@@ -137,6 +140,12 @@ export class PromptService {
   /** Forget a channel's own prompt copies (when the channel is deleted). */
   async deleteChannel(channel: string): Promise<number> {
     return this.prompts.deleteChannelCopies(channel);
+  }
+
+  /** Was the prompt's current text put there by the app (seeded, upgraded or reset), not typed by the user? */
+  private async writtenByApp(channel: string, key: string): Promise<boolean> {
+    const [latest] = await this.prompts.history(channel, key, 1);
+    return !!latest && APP_NOTES.has(latest.note ?? "");
   }
 
   private async effective(channel?: string | null): Promise<Map<string, Prompt>> {
