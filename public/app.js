@@ -1502,21 +1502,41 @@ function characterUpload(p, act, done) {  const id = p.id, lang = p.input.langua
     h("div", { class: "mt-3 flex flex-wrap items-center gap-3" }, useIt, msg));
 }
 
-/** Switch visuals without redoing the poem, song or pictures. */
+/**
+ * Clips step, moving video: Continue (make only the scenes that have no video yet) or Recreate all (every scene's
+ * video made again from its current picture and audio). Both use the Scene animation model on the Models page.
+ * Animated pictures: switch to moving video, or back.
+ */
 function visualsSwitch(p, act) {
-  const veoCount = p.media.scenes.filter((m) => m.video).length;
-  const sceneCount = p.scenes?.scenes.length ?? p.input.sceneCount;
-  const toVeo = p.input.videoMode !== "veo" || veoCount < sceneCount;
-  return h("div", { class: "mt-2 flex w-full flex-wrap items-center gap-3 rounded-xl bg-violet-50 p-3 text-sm" },
-    h("span", { class: "flex-1", text: toVeo
-      ? (p.input.videoMode === "veo"
-          ? `${veoCount} of ${sceneCount} scenes have Veo video. Retry to make the missing ones. The poem, song and pictures are kept.`
-          : `These are animated pictures. Turn each of the ${sceneCount} scenes into a moving AI video clip with Veo? The poem, song and pictures are kept.`)
-      : "These clips use Veo. Switch back to animated pictures (fast, free)?" }),
-    h("button", { type: "button", class: toVeo ? "btn" : "btn-soft", onclick: act(async () => {
-      if (toVeo && !confirm(`This makes ${sceneCount} Veo video requests, which is slow (a few minutes) and uses paid credits. Continue?`)) return SKIP;
-      await post(`/api/projects/${enc(p.id)}/visuals`, { videoMode: toVeo ? "veo" : "still" });
-    }) }, toVeo ? (p.input.videoMode === "veo" ? "🎞️ Retry Veo" : "🎞️ Animate with Veo") : "🖼️ Use animated pictures"));
+  const scenes = (p.scenes?.scenes ?? []).filter((sc) => !sc.leftOut);
+  const withVideo = scenes.filter((sc) => p.media.scenes.find((m) => m.index === sc.index)?.video).length;
+  const missing = scenes.length - withVideo;
+  const box = (...kids) => h("div", { class: "mt-2 flex w-full flex-wrap items-center gap-3 rounded-xl bg-violet-50 p-3 text-sm" }, ...kids);
+  const modelNote = h("span", { class: "w-full text-xs text-violet-900" }, "The videos are made with the Scene animation model chosen on the ", h("a", { href: "#/models", class: "font-semibold underline", text: "Models page" }), " — change it there to use a different model.");
+  if (p.input.videoMode !== "veo") {
+    return box(
+      h("span", { class: "flex-1", text: `These are animated pictures. Turn each of the ${scenes.length} scenes into a moving AI video clip? The words, audio and pictures are kept.` }),
+      h("button", { type: "button", class: "btn", onclick: act(async () => {
+        if (!confirm(`This makes ${scenes.length} AI video requests (paid, a few minutes). Continue?`)) return SKIP;
+        await post(`/api/projects/${enc(p.id)}/visuals`, { videoMode: "veo" });
+      }) }, "🎞 Make moving videos"),
+      modelNote);
+  }
+  const pictures = scenes.every((sc) => !drawsPicture(p, sc) || p.media.scenes.find((m) => m.index === sc.index)?.image || p.media.scenes.find((m) => m.index === sc.index)?.video);
+  return box(
+    h("span", { class: "flex-1", text: `${withVideo} of ${scenes.length} scenes have a video.` }),
+    missing > 0 ? h("button", { type: "button", class: "btn", title: "Make only the scenes that have no video yet; the videos you have are kept. Then the final video is put together.", onclick: act(async () => {
+      if (!confirm(`Continue: make the ${missing} missing video${missing === 1 ? "" : "s"} (paid) and keep the ${withVideo} you have?`)) return SKIP;
+      await post(`/api/projects/${enc(p.id)}/visuals`, { videoMode: "veo" });
+    }) }, `▶ Continue (make ${missing} missing)`) : null,
+    pictures ? h("button", { type: "button", class: missing > 0 ? "btn-soft" : "btn", title: "Delete every scene video and make all of them again from the current pictures and audio, then the final video.", onclick: act(async () => {
+      if (!confirm(`Recreate all: delete the ${withVideo} video${withVideo === 1 ? "" : "s"} you have and make ${scenes.length} new ones (paid, ${p.input.aspectRatio}) from the current pictures and audio?`)) return SKIP;
+      await post(`/api/projects/${enc(p.id)}/video/from-scratch`);
+    }) }, `🎬 Recreate all (${scenes.length})`) : null,
+    h("button", { type: "button", class: "btn-soft", title: "Use the pictures with a gentle camera move instead of AI video (fast, free).", onclick: act(async () => {
+      await post(`/api/projects/${enc(p.id)}/visuals`, { videoMode: "still" });
+    }) }, "🖼 Use animated pictures"),
+    modelNote);
 }
 
 /** Prompts sent to the AI for this step only. */

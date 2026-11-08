@@ -166,7 +166,7 @@ export class ProjectService {
     project.changeVisuals(videoMode as never);
     await wipeRenders(mediaPaths(this.pipeline.mediaDir(id)));
     await this.projects.save(project);
-    await this.start(id);
+    await this.start(id, { noReview: true }); // asked for on purpose: go on to the final video
     return ProjectMapper.toDto(project);
   }
 
