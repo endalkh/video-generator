@@ -1,5 +1,5 @@
 import { ConflictError, NotFoundError } from "../domain/errors.js";
-import { KIDS_SYLLABLES_PER_SEC, LANGUAGE_NAMES, SONG_FRAME_SEC } from "../domain/ports/generator.port.js";
+import { kidsSyllablesPerSec, LANGUAGE_NAMES, SONG_FRAME_SEC } from "../domain/ports/generator.port.js";
 import { pacingMode, SECONDS_PER_SCENE, soundInVideo, type ProjectInput, type Singer } from "../domain/project/project.model.js";
 import { SCENE_TAIL_SEC } from "../infrastructure/media/ffmpeg.js";
 import { DEFAULT_PROMPTS, promptDefinition } from "../domain/prompt/prompt.defaults.js";
@@ -215,9 +215,10 @@ export class PromptService {
 function syllablesPerLine(input: ProjectInput, songSeconds?: number): number {
   // Sound inside the clips: 2 lines per ~8-second clip, like "The character speaks".
   const mode = pacingMode(input);
+  const pace = kidsSyllablesPerSec(mode);
   return mode === "song"
-    ? Math.max(4, Math.floor(((songSeconds ?? input.songSeconds) - SONG_FRAME_SEC) * KIDS_SYLLABLES_PER_SEC / (input.sceneCount * 2)))
-    : Math.max(4, Math.min(14, Math.floor((videoSeconds(input) - input.sceneCount * SCENE_TAIL_SEC) * KIDS_SYLLABLES_PER_SEC / (input.sceneCount * (mode === "character" ? 2 : 4)))));
+    ? Math.max(4, Math.floor(((songSeconds ?? input.songSeconds) - SONG_FRAME_SEC) * pace / (input.sceneCount * 2)))
+    : Math.max(4, Math.min(14, Math.floor((videoSeconds(input) - input.sceneCount * SCENE_TAIL_SEC) * pace / (input.sceneCount * (mode === "character" ? 2 : 4)))));
 }
 
 /** How the music prompt describes the singer (music models have no voice setting). */

@@ -61,7 +61,7 @@ describe("singer / voice", () => {
     const song = await c.projectService.create({ topic: "Counting stars", singer: "kids", sceneCount: 2, reviewMode: "auto" }, "mock");
     await c.projectService.start(song.id);
     await c.projectService.idle();
-    expect(mock.prompts.find((x) => x.kind === "song")!.prompt).toContain("a small, joyful children's choir singing together in unison singing slowly");
+    expect(mock.prompts.find((x) => x.kind === "song")!.prompt).toContain("a small, joyful children's choir singing together in unison singing in English");
 
     const story = await c.projectService.create({ topic: "A goat finds a friend", audioMode: "narration", singer: "man", voice: "Puck", sceneCount: 2, reviewMode: "auto" }, "mock");
     await c.projectService.start(story.id);

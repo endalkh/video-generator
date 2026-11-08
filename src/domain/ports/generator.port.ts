@@ -152,8 +152,14 @@ export function songParts(scenes: Pick<Scene, "text">[], total: number, opts: { 
   return scenes.map((_, i) => ({ scenes: [i], seconds: Math.min(maxPart, Math.round(total / scenes.length)) }));
 }
 
-/** Comfortable, clear singing pace for young children (syllables per second). */
-export const KIDS_SYLLABLES_PER_SEC = 2.5;
+/**
+ * Assumed syllables-per-second used only to size the lyric lines so they fit each scene's time window
+ * (the music model chooses the real tempo). A sung song is written denser for a lively pace; spoken
+ * narration / rhyme-over-music is sparser so each word has room to be heard clearly.
+ */
+export function kidsSyllablesPerSec(mode?: "song" | "narration" | "music_voice" | "character"): number {
+  return mode === "song" ? 3.8 : 2.8;
+}
 /** Instrumental intro + happy ending around the verses (seconds). */
 export const SONG_FRAME_SEC = 4;
 
@@ -170,7 +176,7 @@ export function estimateSyllables(text: string): number {
 /** Seconds a song needs so every word can be sung clearly at a kids' pace. */
 export function singableSeconds(texts: string[]): number {
   const syllables = texts.reduce((n, t) => n + estimateSyllables(t), 0);
-  return Math.ceil(syllables / KIDS_SYLLABLES_PER_SEC + SONG_FRAME_SEC);
+  return Math.ceil(syllables / kidsSyllablesPerSec("song") + SONG_FRAME_SEC);
 }
 
 export function mmss(sec: number): string {

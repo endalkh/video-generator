@@ -115,7 +115,7 @@ describe("singing pace", () => {
     const { estimateSyllables, singableSeconds } = await import("../src/domain/ports/generator.port.js");
     expect(estimateSyllables("Twinkle twinkle little star, how I wonder what you are")).toBe(14);
     expect(estimateSyllables("ቢጫ ቀሚስ ለብሼ ትንሽ በትሬን ይዤ")).toBe(14); // 17 fidel
-    expect(singableSeconds(["ቢጫ ቀሚስ ለብሼ ትንሽ በትሬን ይዤ", "Twinkle twinkle little star, how I wonder what you are"])).toBe(Math.ceil(28 / 2.5 + 4));
+    expect(singableSeconds(["ቢጫ ቀሚስ ለብሼ ትንሽ በትሬን ይዤ", "Twinkle twinkle little star, how I wonder what you are"])).toBe(Math.ceil(28 / 3.8 + 4));
   });
 });
 
@@ -139,7 +139,7 @@ describe("ModelSetting entity", () => {
     expect([s.model, s.isDefault]).toEqual(["gemini-3.1-pro-preview", false]);
     expect(() => s.change("veo-3.1-fast-generate-preview")).toThrow(/needs a text model/);
     expect(() => s.change("bad id!")).toThrow(ValidationError);
-    expect(() => s.change("free/gemini-omni-1.1-flash")).toThrow(/is a video model; "Scene plan" needs a text model/);
+    expect(() => s.change("free/gemini-omni-1.1-flash")).toThrow(/looks like a video model, but "Scene plan" needs a text model/);
     expect(() => ModelSetting.default("nope")).toThrow(/Unknown model task/);
     const v = ModelSetting.default("scene_video");
     v.change("inference.sh/bytedance/seedance-2-5");
@@ -148,7 +148,7 @@ describe("ModelSetting entity", () => {
     expect(() => v.change("other.host/bytedance/seedance-2-5")).toThrow(ValidationError);
     expect([capabilityOf("inference.sh/bytedance/seedance-2-5"), capabilityOf("inference.sh/klingai/avatar-pro"), capabilityOf("inference.sh/klingai/video-v3"), capabilityOf("inference.sh/google/veo-3-1")]).toEqual(["video", "video", "video", undefined]);
     expect([capabilityOf("lyria-3.5"), capabilityOf("gemini-3.8-flash-tts"), capabilityOf("gemini-3-pro-image"), capabilityOf("text-embedding-004")]).toEqual(["music", "tts", "image", undefined]);
-    expect([capabilityOf("gemini-omni-1.1-flash"), capabilityOf("free/gemini-omni-1.1-flash")]).toEqual([undefined, undefined]); // a video model, not text
+    expect([capabilityOf("gemini-omni-1.1-flash"), capabilityOf("free/gemini-omni-1.1-flash")]).toEqual(["video", "video"]); // Omni Flash is a video model (Interactions API)
     // "free/<model>": the same model on the free-tier key.
     s.change("free/gemini-3.8-flash");
     expect(s.model).toBe("free/gemini-3.8-flash");

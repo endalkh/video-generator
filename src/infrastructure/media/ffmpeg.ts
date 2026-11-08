@@ -109,6 +109,19 @@ export async function audioPiece(opts: { input: string; out: string; start?: num
   await runFfmpeg([...cut, "-i", opts.input, "-vn", ...pad, "-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "192k", "-f", "mp3", opts.out]);
 }
 
+/**
+ * A one-scene preview: put `audio` under the clip's video (replacing any clip audio), trimmed to the shorter
+ * of the two so there's no trailing silence/freeze. Used to check lip-sync on a single scene.
+ */
+export async function muxVideoWithAudio(opts: { video: string; audio: string; out: string }): Promise<void> {
+  await runFfmpeg([
+    "-i", opts.video, "-i", opts.audio,
+    "-map", "0:v:0", "-map", "1:a:0",
+    "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+    "-shortest", "-movflags", "+faststart", opts.out,
+  ]);
+}
+
 let drawtextOk: Promise<boolean> | undefined;
 /** Whether this ffmpeg can draw text (needs libfreetype; the Docker image has it, some local builds don't). */
 export function canDrawText(): Promise<boolean> {

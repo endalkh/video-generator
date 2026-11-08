@@ -9,7 +9,7 @@ import { KEEP_LATER_STEPS, Project } from "../domain/project/project.entity.js";
 import { ProjectMapper, type ProjectDto, type ProjectSummaryDto } from "../domain/project/project.mapper.js";
 import { CharacterSchema, MAX_VIDEO_SECONDS, PoemSchema, ProjectInputSchema, ScenePlanSchema, soundInVideo, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
-import { audioToWav, imageToPng, probeDuration, probeStreams, runFfmpeg } from "../infrastructure/media/ffmpeg.js";
+import { audioToWav, imageToPng, muxVideoWithAudio, probeDuration, probeStreams, runFfmpeg } from "../infrastructure/media/ffmpeg.js";
 import { songTimeline } from "../domain/ports/generator.port.js";
 import { ensureDir, fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
@@ -28,7 +28,7 @@ export interface ProjectDetailsDto extends ProjectDto {
     subtitles: string | null;
     thumbnail: string | null;
     music: string | null;
-    scenes: { index: number; image: string | null; clip: string | null; video: string | null; audio: string | null; /** The scene's own piece of the soundtrack (MP3). */ piece: string | null }[];
+    scenes: { index: number; image: string | null; clip: string | null; video: string | null; audio: string | null; /** The scene's own piece of the soundtrack (MP3). */ piece: string | null; /** One-scene lip-sync preview (clip + its audio). */ preview: string | null }[];
   };
 }
 
@@ -109,7 +109,7 @@ export class ProjectService {
         thumbnail: await rel(p.thumbnail),
         // Background music under clips that make their own voice / song.
         music: (await rel(p.music("mp3"))) ?? (await rel(p.music("wav"))),
-        scenes: await Promise.all((project.scenes?.scenes ?? []).map(async (s) => ({ index: s.index, image: await rel(p.sceneImage(s.index)), clip: await rel(p.sceneClip(s.index)), video: await rel(p.sceneVideo(s.index)), audio: await rel(p.sceneAudio(s.index)), piece: await rel(p.scenePiece(s.index)) }))),
+        scenes: await Promise.all((project.scenes?.scenes ?? []).map(async (s) => ({ index: s.index, image: await rel(p.sceneImage(s.index)), clip: await rel(p.sceneClip(s.index)), video: await rel(p.sceneVideo(s.index)), audio: await rel(p.sceneAudio(s.index)), piece: await rel(p.scenePiece(s.index)), preview: await rel(p.scenePreview(s.index)) }))),
       },
     };
   }
@@ -126,7 +126,7 @@ export class ProjectService {
     return file.startsWith(dir + path.sep) ? file : undefined;
   }
 
-  /** Start (or resume) in the background; progress is published to subscribers. */
+  /** Start (or resume) in the background; progress is published to subscribers. Returns a promise that settles when the run finishes. */
   async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean; keepLater?: boolean } = {}): Promise<void> {
     if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is already running`);
     const project = await this.load(id);
@@ -631,6 +631,49 @@ export class ProjectService {
     await wipeScene(this.media(id), index);
     await this.projects.save(project);
     await this.start(id, { until: "clips" });
+  }
+
+  /**
+   * Preview one scene's lip-sync before making the whole video: generate just this scene's clip (if it isn't made
+   * yet), mux its own audio slice (the scene's part of the song / its voice) under it, and write a standalone
+   * preview.mp4 for that scene. Never touches the project's step state, the left-out flags, or the real final.mp4,
+   * so it's a cheap, safe check of whether the mouth matches the audio. Returns the preview file (relative path).
+   */
+  async previewScene(id: string, index: number): Promise<{ preview: string }> {
+    const project = await this.loadIdle(id);
+    const count = project.scenes?.scenes.length ?? 0;
+    if (!Number.isInteger(index) || index < 0 || index >= count) throw new ValidationError(`No scene ${index + 1}`);
+    if (!project.isStepDone("audio")) throw new ConflictError("Make the audio first, then preview a scene");
+    const media = this.media(id);
+    // 1. The scene's clip: make only this one (until "clips") if it isn't on disk yet. Clips already made are reused.
+    if (!(await fileExists(media.sceneClip(index)))) {
+      const wasLeftOut = project.scenes!.scenes[index]!.leftOut === true;
+      if (wasLeftOut) project.setScenesLeftOut([index], false);
+      project.redoFrom("clips");
+      await wipeScene(media, index);
+      await this.projects.save(project);
+      await this.start(id, { until: "clips" });
+      // start() runs the pipeline in the background; wait for this project's run to finish before muxing.
+      await this.jobs.get(id)?.done;
+      // Putting the left-out flag back only affects the final video, not this preview.
+      if (wasLeftOut) {
+        const back = await this.loadIdle(id);
+        back.setScenesLeftOut([index], true);
+        await this.projects.save(back);
+      }
+    }
+    if (!(await fileExists(media.sceneClip(index)))) throw new ConflictError(`Scene ${index + 1} clip couldn't be made; check the Clips step for errors`);
+    // 2. The scene's own audio slice (its part of the song, or its voice), then mux it under the clip.
+    const reloaded = await this.load(id);
+    const piece = await ensureScenePiece(media, reloaded, index);
+    const out = media.scenePreview(index);
+    if (piece) {
+      await muxVideoWithAudio({ video: media.sceneClip(index), audio: piece, out });
+    } else {
+      // The clip carries its own audio (the character sings/speaks in-video): preview the clip as-is.
+      await runFfmpeg(["-i", media.sceneClip(index), "-c", "copy", "-movflags", "+faststart", out]);
+    }
+    return { preview: path.relative(media.dir, out) };
   }
 
   private media(id: string) {

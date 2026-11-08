@@ -378,7 +378,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
     const long = { title: "ዶሮ", stanzas: [{ lines: ["ዶሮዎቻችን በጠዋት ተነስተው ይጮኻሉ", "ጫጩቶቻቸውን ይዘው ወደ ሜዳ ይሄዳሉ"] }, { lines: ["ጥራጥሬ ለቅመው በደስታ ይበላሉ", "ማታ ሲሆን ወደ ቤታቸው ይመለሳሉ"] }] };
     await ps.editPoem(id, long);
     const p = await runToEnd(id);
-    const need = Math.ceil(long.stanzas.flatMap((s) => s.lines).join("").replace(/\s/g, "").length * 0.8 / 2.5 + 4);
+    const need = Math.ceil(long.stanzas.flatMap((s) => s.lines).join("").replace(/\s/g, "").length * 0.8 / 3.8 + 4);
     expect(p.song!.duration).toBeGreaterThan(10);
     expect(p.song!.duration).toBeCloseTo(need, 0);
     const prompt = c.generations.items.find((g) => g.promptKey === "song")!.prompt;
@@ -409,7 +409,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
     try {
       const p = await runToEnd(created.id);
       expect(p.status).toBe("failed");
-      expect(p.error).toMatch(/^Scene \d video \(veo-3.1-fast-generate-preview\) failed: quota exceeded$/);
+      expect(p.error).toMatch(/^Scene \d video \(gemini-omni-1.2-flash\) failed: quota exceeded$/);
       expect(p.media.final).toBeNull();
     } finally {
       MockProvider.prototype.video = orig; // put the real one back for the next tests

@@ -54,9 +54,9 @@ Show it warmly and respectfully, bright and cheerful.`,
     title: "Poem / lyrics",
     description: "Writes the poem (song lyrics or story verses). Must return JSON {title, stanzas:[{lines}], moral}.",
     vars: ["song_seconds"],
-    template: `Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+    template: `Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for young children (age range: {{age_range}}).
 Topic: {{topic}}.
-{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short enough to sing slowly and clearly. Repeat a simple chorus line every few stanzas.{{/if}}{{#if video_sings}} The main character sings each stanza herself, looking at the camera, in one 8-second shot, so each stanza must be easy to sing slowly and clearly in 8 seconds.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if character_voice}}Exactly {{scene_count}} stanzas of 2 short lines each. The main character says each stanza herself, looking at the camera, in one 8-second shot, so each stanza is something she says out loud (talking to the children watching), slowly and clearly. Tell one story from beginning to end, one step per stanza.{{/if}}
+{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short and punchy so they can be sung at a lively, upbeat tempo while staying clear. Repeat a simple chorus line every few stanzas.{{/if}}{{#if video_sings}} The main character sings each stanza herself, looking at the camera, in one 8-second shot, so each stanza must be easy to sing clearly at an upbeat tempo within 8 seconds.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if character_voice}}Exactly {{scene_count}} stanzas of 2 short lines each. The main character says each stanza herself, looking at the camera, in one 8-second shot, so each stanza is something she says out loud (talking to the children watching), slowly and clearly. Tell one story from beginning to end, one step per stanza.{{/if}}
 {{#if en}}Each line has at most {{syllables_per_line}} syllables.{{/if}}{{#if am}}Each line has about {{letters_per_line}} Ge'ez letters (fidel), never more than {{letters_per_line}} + 2.{{/if}}
 Simple vocabulary, repetition, and a positive message.
 {{#if am}}Write a real Amharic children's ግጥም, natively in Ge'ez script (not transliteration, not a translation from English):
@@ -269,13 +269,13 @@ Style: {{style}}. No text, letters or watermarks. {{safety}}`],
     title: "Song (Lyria)",
     description: "Music prompt for the song. {{timed_lyrics}} holds the verses with [m:ss - m:ss] timestamps so scene cuts land on verse boundaries. Songs longer than the model allows (~3 min, or 30 s for Lyria 3 Clip) are made in parts that are joined; {{part_note}} tells each part how it fits (empty for a one-part song).",
     vars: ["title", "timed_lyrics", "song_seconds", "part_note"],
-    template: `Create a cheerful, bouncy children's song for ages {{age_range}} titled "{{title}}", about {{song_seconds}} seconds long.
-Bright, simple melody, ~100 BPM, ukulele, xylophone, light hand percussion, clapping; {{singer}} singing slowly and clearly in {{language_name}}, one syllable per note, never rushing the words.
-{{#if am}}The singer is a native Amharic-speaking Ethiopian vocalist with natural Ethiopian pronunciation (ejective consonants, gemination); a light Ethiopian kids'-song flavour (krar, kebero) is welcome.
-ይህ የልጆች ዘፈን በአማርኛ፣ በግልጽ እና ቀስ ብሎ ይዘመር።{{/if}}
+    template: `Create a children's song for ages {{age_range}} titled "{{title}}", about {{song_seconds}} seconds long.
+Choose a musical style, genre, instruments and arrangement that genuinely fit THIS song's topic and mood, so it sounds distinct rather than generic — e.g. a marching beat for a walking song, a train-chug rhythm for a train, a gentle sway for a bedtime theme, reggae, folk, pop, Motown, bossa, surf, country, a brass band, strings, a kids' rock band, and so on. Don't default to the same ukulele-and-xylophone sound every time. Keep it kid-friendly, warm and singable; {{singer}} singing in {{language_name}} with clear, natural, expressive phrasing (not robotic, not one flat note per syllable), every word easy to understand. You choose the tempo and groove — aim for something lively and fun that makes kids want to move, unless the mood of the words or the parent's wishes below clearly call for something gentler.
+{{#if am}}The singer is a native Amharic-speaking Ethiopian vocalist with natural Ethiopian pronunciation (ejective consonants, gemination); an Ethiopian kids'-song flavour (krar, kebero, masinko, washint) is welcome when it suits the song.
+ይህ የልጆች ዘፈን በአማርኛ፣ በግልጽ ይዘመር፤ ለዘፈኑ ጭብጥ የሚስማማ የራሱ የሆነ የሙዚቃ ዘይቤና ሕያው ምት ምረጥ።{{/if}}
 {{part_note}}
 {{#if has_audio_request}}Extra wishes from the parent (follow them unless they break the rules above): {{audio_request}}{{/if}}
-Sing exactly these lyrics, at these times, and nothing else:
+Sing exactly these lyrics, in order, at roughly these times (phrase them musically; the timings are a guide, not a metronome), and nothing else:
 
 {{timed_lyrics}}`,
     previousTemplates: [`Create a cheerful, bouncy children's song for ages {{age_range}} titled "{{title}}", about {{song_seconds}} seconds long.
@@ -311,9 +311,9 @@ Sing exactly these lyrics, at these times, and nothing else:
     description: "Voice over music mode: the instrumental music played under the chanted rhyme. No singing, so it works for any language. It is looped to the video length and played quietly under the voice.",
     vars: ["title", "song_seconds"],
     template: `Instrumental background music for a children's nursery-rhyme video titled "{{title}}" (ages {{age_range}}), about {{song_seconds}} seconds long.
-Cheerful, warm and bouncy, ~100 BPM, simple and steady so a voice can chant a rhyme over it: ukulele, xylophone, soft hand percussion and light clapping.
-{{#if am}}A light Ethiopian kids'-music flavour (krar, kebero, masinko) is welcome.{{/if}}
-Instrumental only: no vocals, no singing, no humming, no spoken words. Even volume, no big drops or solos, so it loops well.
+Choose a musical style, genre and instruments that fit this video's topic and mood, so each video's music sounds distinct rather than the same every time (e.g. folk, pop, reggae, marching band, bossa, strings, a kids' rock band, Ethiopian kids' music). Warm, cheerful and steady so a voice can chant a rhyme over it; pick a tempo that fits a happy kids' video — lively and fun rather than slow, unless the parent's wishes below say otherwise.
+{{#if am}}An Ethiopian kids'-music flavour (krar, kebero, masinko, washint) is welcome when it suits the video.{{/if}}
+Instrumental only: no vocals, no singing, no humming, no spoken words. Fairly even in volume with no long silences or big solos, so it loops and sits under a voice.
 {{#if has_audio_request}}Extra wishes from the parent (follow them unless they break the rules above): {{audio_request}}{{/if}}`,
     previousTemplates: [`Instrumental background music for a children's nursery-rhyme video titled "{{title}}" (ages {{age_range}}), about {{song_seconds}} seconds long.
 Cheerful, warm and bouncy, ~100 BPM, simple and steady so a voice can chant a rhyme over it: ukulele, xylophone, soft hand percussion and light clapping.
@@ -379,7 +379,7 @@ Style: {{style}}. No speech, no captions, no text. {{safety}}`],
     description: "Final video page: writes the YouTube title, description, tags and thumbnail words for the finished video. {{lyrics}} are the words of the video. Must return JSON {title, description, tags, thumbnailTitle}.",
     vars: ["title", "lyrics", "channel_name", "channel_handle", "video_length"],
     template: `Write the YouTube upload text for a finished kids' video{{#if has_channel_name}} on the channel "{{channel_name}}" (YouTube handle: {{channel_handle}}){{/if}}.
-Working title: "{{title}}". Topic: {{topic}}. Audience: children aged {{age_range}} and their parents. Length: {{video_length}}.
+Working title: "{{title}}". Topic: {{topic}}. Audience: young children (age range: {{age_range}}) and their parents. Length: {{video_length}}.
 The words of the video:
 {{lyrics}}
 
@@ -417,7 +417,7 @@ Style: {{style}}. {{safety}}`,
     vars: ["channel_name"],
     template: `Write the YouTube channel branding text for a kids' channel.
 What the channel is about: {{topic}}
-Audience: children aged {{age_range}} and their parents.
+Audience: young children (age range: {{age_range}}) and their parents.
 {{#if has_channel_name}}The channel name is "{{channel_name}}": use it exactly as "name".{{else}}"name" = invent a short, catchy, easy-to-say channel name in {{language_name}}.{{/if}}
 {{#if has_reference}}The attached picture is the channel's sample photo (its mascot, main character or look); let it inspire the name and the tone.{{/if}}
 "handle" = a matching YouTube handle in Latin letters: 3-30 characters, only letters, numbers, dots, underscores or hyphens, no @ and no spaces.
@@ -468,7 +468,7 @@ Style: {{style}}. {{safety}}`,
     vars: ["month_name", "channel_name", "schedule", "video_count", "notes", "previous_topics", "video_length"],
     template: `Plan {{month_name}} for a YouTube kids' channel{{#if has_channel_name}} called "{{channel_name}}"{{/if}}.
 What the channel is about: {{topic}}
-Audience: children aged {{age_range}} and their parents.
+Audience: young children (age range: {{age_range}}) and their parents.
 {{#if has_character_hint}}Every video stars the same main character: {{character_hint}}.{{/if}}
 Each video is an animated song or story made with an app: it writes a poem from the topic, plans scenes, draws the character and makes the song or a narration. Each video is {{video_length}} long, so pick topics with enough to say for that length.
 
@@ -477,7 +477,7 @@ Plan exactly {{video_count}} videos, one per posting slot below, in the same ord
 
 For each video:
 "title" = a short, catchy YouTube title in the slot's language (at most 60 characters).
-"topic" = exactly what to type in the app's "What is the video about?" field, in the slot's language: one or two sentences naming the subject, the one lesson, and where it happens, e.g. "Washing hands with soap before eating, by the water jug in the green garden". By default the video is set outdoors in a sunny, lush green countryside. Only when the subject clearly belongs somewhere else should you name that setting in the topic instead: a lion or a zebra on the open savanna, a train on its tracks, a plane up in the blue sky among clouds, a car on a country road, a boat on a river. Keep it outdoors, bright, gentle and kid-friendly either way.
+"topic" = exactly what to type in the app's "What is the video about?" field, in the slot's language: one or two sentences naming the subject, the one lesson, and where it happens, e.g. "Washing hands with soap before eating, by the water jug in the green garden". Set videos anywhere that fits the lesson — the setting can be absolutely anywhere: a busy city street, riding a bus, a bike ride, on a train, at a playground, in a park, at a market, at home, in the kitchen, at school, in a classroom, the beach, the seaside, a forest, the mountains, a farm, the countryside, the savanna, up in the sky, on a river or the sea, snow, rain or night-time. Name that setting in the topic. Deliberately vary where each video happens across the month; keep it bright, gentle and kid-friendly wherever it is set.
 "lesson" = the one habit, skill or value it teaches, in English (for the planner).
 "audioMode" = "song" for catchy sing-along topics (most videos), "narration" for small stories.
 "sceneCount" = 3 to 6.
@@ -485,7 +485,7 @@ For each video:
 "videoDescription" = the YouTube description in the slot's language: 2 short sentences for parents about what the child learns, then an invitation to subscribe. No links.
 "tags" = 8 to 12 search tags in the slot's language{{#if am}}; for Amharic slots, also the key Amharic phrases written in English letters the way Ethiopians search (e.g. "ye lijoch mezmur", "Ye lijoch song"), plus a few in English{{/if}}.
 
-Make the month varied and balanced across broad kids' concepts: good habits, feelings and kindness, numbers and letters, colours and shapes, family and friends, nature, specific animals (e.g. horse, lion, elephant, rabbit, dog, cat, cow, duck, monkey) and vehicles and things that go (e.g. car, bus, train, plane, boat, tractor, fire truck). Rotate through these groups so the month isn't all one kind of topic; most videos stay in the green countryside, with a few in the setting their subject calls for. Build a gentle weekly rhythm and repeat favourite formats, but never repeat a topic.
+Make the month varied and balanced across broad kids' concepts: good habits, feelings and kindness, numbers and letters, colours and shapes, family and friends, nature, specific animals (e.g. horse, lion, elephant, rabbit, dog, cat, cow, duck, monkey) and vehicles and things that go (e.g. car, bus, train, plane, boat, tractor, fire truck). Rotate through these groups so the month isn't all one kind of topic, and also vary the setting across the month so the videos happen in many different places — city, bus, bike, train, playground, park, market, home, school, beach, forest, mountains, farm, countryside and more — not all in one place. Build a gentle weekly rhythm and repeat favourite formats, but never repeat a topic.
 {{#if am}}Where it fits naturally, include Ethiopian holidays and seasons that fall in this month (for example Enkutatash, Meskel, Genna, Timkat, Fasika, the rainy season or harvest), placed in the slots just before the date.{{/if}}
 Special requests for this month: {{notes}}
 Topics already used in earlier months (do not repeat them): {{previous_topics}}

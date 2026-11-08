@@ -93,6 +93,8 @@ export function mediaPaths(dir: string) {
     sample: (j: number) => path.join(dir, "samples", `${String(j + 1).padStart(2, "0")}.png`),
     srt: path.join(dir, "subtitles.srt"),
     final: path.join(dir, "final.mp4"),
+    /** One-scene lip-sync preview (scene i) with its audio slice muxed; never overwrites final.mp4. */
+    scenePreview: (i: number) => path.join(sceneDir(i), "preview.mp4"),
     /** YouTube thumbnail for the finished video (1280×720). */
     thumbnail: path.join(dir, "thumbnail.jpg"),
     song: (ext: string) => path.join(dir, `song.${ext}`),

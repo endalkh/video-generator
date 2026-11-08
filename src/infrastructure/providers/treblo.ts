@@ -54,10 +54,10 @@ export function songStylePrompt(ctx: GenContext): string {
   const language = LANGUAGE_NAMES[i.language] ?? i.language;
   const singer = SINGERS[i.singer ?? ""] ?? "a warm, clear singer";
   return [
-    `A happy, catchy children's nursery song sung in ${language} by ${singer}, for kids aged ${i.ageRange}.`,
+    `A catchy children's song sung in ${language} by ${singer}, for young children (age range: ${i.ageRange}).`,
     ctx.poem?.title ? `Title: "${ctx.poem.title}".` : "",
     `About: ${i.topic}.`,
-    "Simple sing-along melody, slow enough that every word is clear, bright playful instruments, a short instrumental intro and a happy ending.",
+    "Choose a musical style, genre and instruments that fit this song's topic and mood, so it sounds distinct rather than a generic kids' tune (e.g. folk, pop, reggae, marching band, bossa, country, a kids' rock band, Ethiopian kids' music). A short instrumental intro and a happy ending; keep every word clear and pick a tempo that fits the song — lively and fun rather than slow, unless the words or the wishes below call for something gentler.",
     i.audioRequest ? `Also: ${i.audioRequest}` : "",
   ].filter(Boolean).join(" ").slice(0, 1500);
 }

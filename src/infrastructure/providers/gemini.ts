@@ -32,9 +32,21 @@ export function maxVeoResolution(model: string): VideoResolution {
   return /lite/.test(model) ? "1080p" : "4k";
 }
 
+/**
+ * Gemini Omni Flash video models (replaced Veo on the Gemini API). Unlike Veo, these are driven by the
+ * Interactions API, not generateVideos — see omniVideo(). Clips up to 15 s with native audio; works from a
+ * text prompt alone or from a first-frame picture.
+ */
+export const isOmniModel = (model: string) => /^gemini-omni/.test(model.replace(/^free\//, ""));
+export const OMNI_MODELS: readonly AvailableModel[] = [
+  { id: "gemini-omni-1.2-flash", displayName: "Gemini Omni 1.2 Flash — Google's video model (replaces Veo), up to 15 s with sound" },
+];
+
 /** Video models that only animate a scene picture, so "Skip scene pictures" can't be used with them. */
 export function needsScenePicture(model: string): boolean {
-  return isInferenceShModel(model) ? !inferenceShWorksWithoutPicture(model) : !supportsReferenceImages(model);
+  if (isInferenceShModel(model)) return !inferenceShWorksWithoutPicture(model);
+  if (isOmniModel(model)) return false; // Omni makes a scene from the prompt (optionally a first-frame picture).
+  return !supportsReferenceImages(model);
 }
 
 /** Nano Banana 2 / Pro (Gemini 3 image models) take an output size; older image models don't. */
@@ -117,8 +129,13 @@ export class GeminiProvider implements Provider {
     const pager = await this.ai.models.list({ config: { pageSize: 1000 } });
     for await (const m of pager) {
       const actions = m.supportedActions ?? [];
-      if (!actions.some((a) => a === "generateContent" || a === "predictLongRunning")) continue;
-      if (m.name) models.push({ id: m.name.replace(/^models\//, ""), displayName: m.displayName });
+      const id = m.name?.replace(/^models\//, "") ?? "";
+      // Text/image use generateContent; Veo and other long-running media advertise predictLongRunning
+      // and/or generateVideos — admit all of them so every Veo video model Google offers this key shows up.
+      // Also admit anything named "veo*" in case a variant reports no (or an unexpected) action.
+      const ok = actions.some((a) => a === "generateContent" || a === "predictLongRunning" || a === "generateVideos") || /^veo/.test(id);
+      if (!ok) continue;
+      if (m.name) models.push({ id, displayName: m.displayName });
     }
     // With a free-tier key: every text and speech model also as "free/<model>" (free tier: text and some speech models).
     if (this.freeAi) {
@@ -128,6 +145,10 @@ export class GeminiProvider implements Provider {
         }
       }
     }
+    // Gemini Omni Flash video (the Gemini-API replacement for Veo). Offer it explicitly as a video suggestion
+    // even if the key's live list labels it differently.
+    const have = new Set(models.map((m) => m.id));
+    for (const o of OMNI_MODELS) if (!have.has(o.id)) models.push(o);
     if (process.env.INFERENCE_API_KEY) models.push(...this.inferenceShVideo().listModels());
     if (process.env.TREBLO_API_KEY?.trim()) models.push(...TREBLO_MODELS);
     this.modelsCache = { at: Date.now(), models };
@@ -211,6 +232,7 @@ export class GeminiProvider implements Provider {
   async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; samples?: Buffer[]; audio?: Buffer; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
     const { label } = opts;
     if (isInferenceShModel(opts.model)) return this.inferenceShVideo().video(prompt, { ...opts, mime: sniffImageMime });
+    if (isOmniModel(opts.model)) return this.omniVideo(prompt, opts);
     const img = (b: Buffer) => ({ imageBytes: b.toString("base64"), mimeType: sniffImageMime(b) });
     // With a character sheet on a model that supports it: character + scene picture as "asset" references keep
     // the character consistent across clips (Veo 3.1 standard/fast). References can't be combined with a first
@@ -279,5 +301,48 @@ export class GeminiProvider implements Provider {
     } finally {
       await rm(tmp, { force: true });
     }
+  }
+
+  /**
+   * Gemini Omni Flash video via the Interactions API (the Gemini-API replacement for Veo). Omni rejects
+   * generateContent and isn't a generateVideos model, so it uses ai.interactions.create. It animates a
+   * first-frame picture when one is given (the scene picture, itself drawn from the character sheet), else
+   * makes the scene from the prompt alone. The clip comes back as base64 video in a "model_output" step.
+   *
+   * When the scene's audio (its slice of the song / voice) is provided, it's sent as an audio reference and the
+   * prompt asks Omni to lip-sync the character's mouth to that exact track and sing/say those exact words. Omni's
+   * Interactions API accepts audio input, but a guaranteed lip-sync-to-audio mode isn't documented, so this is
+   * best-effort: at minimum the mouth matches the words. (The pipeline still overlays the authored song at the
+   * final mux, so the heard audio is always the real song.)
+   */
+  private async omniVideo(prompt: string, opts: { model: string; still?: Buffer; character?: Buffer; aspectRatio: string; label: string; durationSec?: number; audio?: Buffer }): Promise<Buffer> {
+    const { label } = opts;
+    const model = opts.model.replace(/^free\//, "");
+    // Omni makes the scene from the words, optionally starting from a first-frame picture. It takes no
+    // separate character "reference" like Veo, so animate the scene picture (drawn from the character sheet).
+    const first = opts.still ?? opts.character;
+    const seconds = Math.min(15, Math.max(4, Math.ceil(opts.durationSec ?? 8)));
+    const lipSync = opts.audio
+      ? " An audio track of the character's voice for this scene is provided: make the character sing/say exactly those words, with her lip movements and timing matched to that audio track (lip-sync), not an invented voice."
+      : "";
+    const fullPrompt = `${prompt}\n\nMake a ${seconds}-second ${opts.aspectRatio} video clip with gentle, child-friendly motion.${lipSync}`;
+    const imagePart = first ? [{ type: "image" as const, data: first.toString("base64"), mime_type: sniffImageMime(first) }] : [];
+    const audioPart = opts.audio ? [{ type: "audio" as const, data: opts.audio.toString("base64"), mime_type: "audio/mpeg" as const }] : [];
+    const textPart = { type: "text" as const, text: fullPrompt };
+    // A bare string is fine when there's only a text part; otherwise send the content blocks (image/audio/text).
+    const payload = first || opts.audio ? [...imagePart, ...audioPart, textPart] : fullPrompt;
+    return withRetry(
+      async () => {
+        const interaction = await this.ai.interactions.create({ model, input: payload, response_modalities: ["video", "audio"] });
+        for (const step of interaction.steps ?? []) {
+          if ((step as { type?: string }).type !== "model_output") continue;
+          for (const block of (step as { content?: { type?: string; data?: string; mime_type?: string }[] }).content ?? []) {
+            if (block.type === "video" && block.data) return Buffer.from(block.data, "base64");
+          }
+        }
+        throw new Error(`${label}: Gemini Omni returned no video (possibly blocked by a safety filter)`);
+      },
+      { label, retries: 4, baseDelayMs: 30_000, maxDelayMs: 120_000, shouldRetry: (err) => !isBillingStop(err) && ((err as { status?: number }).status === 429 || isTransientError(err)) },
+    );
   }
 }

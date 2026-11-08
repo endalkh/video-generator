@@ -106,7 +106,7 @@ const ProjectInputObject = z.object({
   scenePictures: z.boolean().default(true),
   /** Moving video clips (Veo, Seedance, Kling…) by default; "still" = animated pictures (free, fast). */
   videoMode: VideoModeSchema.default("veo"),
-  ageRange: z.string().default("1-6"),
+  ageRange: z.string().default("all ages"),
   style: z.string().transform(tidy).default("colorful 3D animated kids' movie style, Pixar-like, bright even lighting, crisp detailed backgrounds, expressive characters"),
   reviewMode: ReviewModeSchema.default("manual"),
   /** Leave out to pick it from the video length. */

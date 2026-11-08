@@ -88,6 +88,7 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
       await projects.redoScene(params.id!, Number(params.index) - 1);
       return { id: params.id };
     }, 202)
+    .post("/api/projects/:id/scenes/:index/preview", async ({ params }) => projects.previewScene(params.id!, Number(params.index) - 1))
     .post("/api/projects/:id/clips/approve-videos", async ({ params, body }) => {
       const r = await projects.approveVideos(params.id!, { skipMissing: (await body()).skipMissing === true });
       return { id: params.id, ...r };

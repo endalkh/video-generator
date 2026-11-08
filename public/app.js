@@ -345,7 +345,7 @@ async function showNewVideo() {
         "Leave empty: one picture about every 10 s (song) or 12 s (story)."),
       field("f-length", "Video length (minutes)", h("input", { id: "f-length", name: "lengthMinutes", type: "number", min: 0.5, max: 10, step: 0.5, value: d.videoMinutes ?? 0.5, class: "field", "aria-describedby": "f-length-plan" }),
         "From ½ to 10 minutes."),
-      field("f-age", "Age range", h("input", { id: "f-age", name: "ageRange", value: d.ageRange ?? "1-6", class: "field" })),
+      field("f-age", "Age range", h("input", { id: "f-age", name: "ageRange", value: d.ageRange ?? "all ages", class: "field" })),
       field("f-aspect", "Shape", select("f-aspect", "aspectRatio", [["16:9", "Landscape 16:9 (YouTube)"], ["9:16", "Portrait 9:16 (Shorts)"]])),
       field("f-quality", "Quality", select("f-quality", "resolution", QUALITY_OPTIONS, config.videoResolution ?? "1080p"), QUALITY_HINT),
       field("f-conc", "Videos at the same time", select("f-conc", "videoConcurrency", CONCURRENCY_OPTIONS, ""), CONCURRENCY_HINT),
@@ -773,8 +773,12 @@ function stepPage(p, step, keepVideo, videoKey) {
   } else if (step === "clips" && p.scenes && (done || making || p.media.scenes.some((m) => m.image || m.clip))) {
     body = h("div", { class: "grid gap-4 sm:grid-cols-2" }, p.scenes.scenes.map((sc) => {
       const m = p.media.scenes.find((x) => x.index === sc.index);
-      // Finished clip; else the Veo animation it's made from (kept when the audio changes, re-timed later); else the picture.
-      const media = m?.clip ? h("video", { controls: true, preload: "metadata", class: "aspect-video w-full bg-black", src: mediaUrl(id, m.clip, p.updatedAt), "aria-label": `Scene ${sc.index + 1} clip` })
+      // Prefer a lip-sync preview (clip + its audio slice) when it's been made; else the finished clip; else the Veo
+      // animation it's made from (kept when the audio changes, re-timed later); else the picture.
+      const media = m?.preview ? h("div", { class: "relative" },
+            h("video", { controls: true, preload: "metadata", class: "aspect-video w-full bg-black", src: mediaUrl(id, m.preview, p.updatedAt), "aria-label": `Scene ${sc.index + 1} preview with audio` }),
+            h("span", { class: "absolute top-2 left-2 rounded-full bg-emerald-600/80 px-2 py-0.5 text-xs text-white", text: "🔊 Preview · this scene's clip with its audio (check lip-sync)" }))
+        : m?.clip ? h("video", { controls: true, preload: "metadata", class: "aspect-video w-full bg-black", src: mediaUrl(id, m.clip, p.updatedAt), "aria-label": `Scene ${sc.index + 1} clip` })
         : m?.video ? h("div", { class: "relative" },
             h("video", { controls: true, muted: true, loop: true, preload: "metadata", class: "aspect-video w-full bg-black", src: mediaUrl(id, m.video, p.updatedAt), "aria-label": `Scene ${sc.index + 1} Veo animation` }),
             h("span", { class: "absolute top-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white", text: "🎞️ Veo animation · timed to the audio when the clips are made" }))
@@ -785,6 +789,12 @@ function stepPage(p, step, keepVideo, videoKey) {
         h("figcaption", { class: "flex items-start gap-2 p-3 text-sm" },
           h("span", { class: "flex-1 whitespace-pre-line", lang, text: `${sc.index + 1}. ${sc.text}` }),
           idle && p.completed.includes("audio") ? leaveOutButton(p, sc, m, act) : null,
+          // Preview just this scene with its audio, to check lip-sync before making the whole video (makes 1 clip if not made yet).
+          idle && p.completed.includes("audio") && p.input.videoMode === "veo" ? h("button", { type: "button", class: "btn-soft shrink-0 px-3 py-1 text-xs", title: "Make (if needed) and play only this scene's clip with its part of the audio, to check the mouth matches — without building the whole video.", onclick: act(async () => {
+            const cost = m?.clip ? "" : " This makes 1 new clip (paid).";
+            if (!confirm(`Preview scene ${sc.index + 1} with its audio to check lip-sync?${cost}`)) return SKIP;
+            await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/preview`);
+          }) }, "🔊 Preview audio") : null,
           idle && p.completed.includes("audio") ? h("button", { type: "button", class: "btn-soft shrink-0 px-3 py-1 text-xs", onclick: act(async () => {
             const cost = p.input.videoMode === "veo" ? " This makes 1 new Veo clip (paid)." : "";
             if (!confirm(`Remake scene ${sc.index + 1} (new picture and clip)?${cost}`)) return SKIP;
@@ -1037,7 +1047,7 @@ function settingsPanel(p, group = "video") {
   const read = () => {
     const minutes = Number(els.length.value);
     return {
-      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, videoAudio: els.videoAudio.checked, backgroundMusic: els.backgroundMusic.checked, ageRange: els.ageRange.value.trim() || "1-6",
+      topic: els.topic.value.trim(), language: els.language.value, audioMode: els.audioMode.value, videoAudio: els.videoAudio.checked, backgroundMusic: els.backgroundMusic.checked, ageRange: els.ageRange.value.trim() || "all ages",
       aspectRatio: els.aspectRatio.value, resolution: els.resolution.value, videoMode: els.videoMode.value,
       videoConcurrency: els.videoConcurrency.value ? Number(els.videoConcurrency.value) : null, characterHint: els.characterHint.value.trim() || null, style: els.style.value.trim(),
       singer: els.singer.value, voice: els.voice.value || null,
@@ -1576,7 +1586,7 @@ async function showModels() {
   mount($("#main"), ...[
     h("div", { class: "mb-6" },
       h("h2", { class: "text-2xl font-bold", text: "Models" }),
-      h("p", { class: "text-stone-600", text: "One model per task. The list shows the models your Gemini key can use." })),
+      h("p", { class: "text-stone-600", text: "One model per task. Type any model id; the matching models your Gemini key reports are offered as suggestions." })),
     available.warning ? h("div", { class: "mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm" },
       h("p", { text: available.warning + " — you can still type a model id." }), billingHelp(available.warning)) : null,
     providersCard(),
@@ -1585,14 +1595,13 @@ async function showModels() {
 }
 
 function modelRow(s, options) {
-  const CUSTOM = "__custom__";
-  const known = options.some((o) => o.id === s.model);
-  const select = h("select", { class: "field", "aria-label": `Model for ${s.title}` },
-    !known ? h("option", { value: s.model, text: `${s.model} (current)` }) : null,
-    options.map((o) => h("option", { value: o.id, selected: o.id === s.model, text: o.id === s.defaultModel ? `${o.id} — default` : o.id })),
-    h("option", { value: CUSTOM, text: "Other model id…" }));
-  select.value = s.model;
-  const custom = h("input", { class: "field mt-2 font-mono text-sm", placeholder: "e.g. gemini-3.1-pro-preview", hidden: true, "aria-label": `Custom model id for ${s.title}` });
+  // A plain text field (model ids change often — Veo retired, Omni added — so don't lock the user into a list).
+  // Known models are offered as autocomplete suggestions via a datalist, but any id can be typed.
+  const listId = `models-${s.task}`;
+  const datalist = h("datalist", { id: listId },
+    options.map((o) => h("option", { value: o.id, text: o.displayName ? `${o.id} — ${o.displayName}` : (o.id === s.defaultModel ? `${o.id} — default` : o.id) })));
+  const input = h("input", { class: "field font-mono text-sm", list: listId, value: s.model, spellcheck: "false", autocapitalize: "off",
+    placeholder: `e.g. ${s.defaultModel}`, "aria-label": `Model id for ${s.title}` });
   const status = h("span", { role: "status", "aria-live": "polite", class: "text-sm" });
   const reset = h("button", { type: "button", class: "btn-soft px-3 py-1 text-sm", hidden: s.isDefault }, "↺ Default");
   // Where the chosen model runs: link to that provider's page (keys, usage, prices).
@@ -1604,11 +1613,14 @@ function modelRow(s, options) {
   showProvider(s.model);
 
   const save = async (model) => {
+    model = (model ?? "").trim();
+    if (!model || model === s.model) return;
     status.className = "text-sm text-stone-500";
     status.textContent = "Saving…";
     try {
       const saved = await post(`/api/models/settings/${enc(s.task)}`, { model }, "PUT");
       Object.assign(s, saved);
+      input.value = saved.model;
       showProvider(saved.model);
       reset.hidden = saved.isDefault;
       status.className = "text-sm text-emerald-700";
@@ -1616,25 +1628,19 @@ function modelRow(s, options) {
     } catch (err) {
       status.className = "text-sm text-red-700";
       status.textContent = err.message;
-      select.value = s.model;
+      input.value = s.model;
     }
   };
-  select.addEventListener("change", () => {
-    custom.hidden = select.value !== CUSTOM;
-    if (select.value === CUSTOM) return custom.focus();
-    save(select.value);
-  });
-  custom.addEventListener("keydown", (e) => { if (e.key === "Enter" && custom.value.trim()) save(custom.value.trim()); });
-  custom.addEventListener("change", () => custom.value.trim() && save(custom.value.trim()));
+  // Save when the user leaves the field or presses Enter (not on every keystroke).
+  input.addEventListener("change", () => save(input.value));
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); input.blur(); } });
   reset.addEventListener("click", async () => {
     try {
       const saved = await post(`/api/models/settings/${enc(s.task)}/reset`);
       Object.assign(s, saved);
-      showProvider(saved.model);
-      if (![...select.options].some((o) => o.value === saved.model)) select.prepend(h("option", { value: saved.model, text: saved.model }));
-      select.value = saved.model;
-      custom.hidden = true;
+      input.value = saved.model;
       reset.hidden = true;
+      showProvider(saved.model);
       status.className = "text-sm text-emerald-700";
       status.textContent = "Back to default ✓";
     } catch (err) { status.textContent = err.message; }
@@ -1647,7 +1653,7 @@ function modelRow(s, options) {
         h("h3", { class: "font-semibold", text: s.title }),
         h("span", { class: "chip px-2 py-0 text-xs", text: CAPABILITY_LABEL[s.capability] })),
       h("p", { class: "mt-1 text-sm text-stone-500", text: s.description })),
-    h("div", {}, select, custom, h("div", { class: "mt-2 flex items-center gap-2" }, reset, status), providerLink));
+    h("div", {}, input, datalist, h("div", { class: "mt-2 flex items-center gap-2" }, reset, status), providerLink));
 }
 
 // ---------- Channel art (YouTube brand kit) ----------
@@ -1825,7 +1831,7 @@ function channelBriefFields(prefix, input = {}) {
     brief: h("textarea", { id: `${prefix}-brief`, rows: 3, class: "field", value: input.brief ?? "", placeholder: "e.g. Fun Amharic songs that teach toddlers colours, numbers and good habits, with a cheerful little goat as the mascot" }),
     name: h("input", { id: `${prefix}-name`, class: "field", maxlength: 100, value: input.name ?? "", placeholder: "Leave empty and the AI suggests one" }),
     language: h("select", { id: `${prefix}-language`, class: "field" }, [["en", "English"], ["am", "አማርኛ (Amharic)"], ["both", "Both — አማርኛ + English"]].map(([v, t]) => h("option", { value: v, text: t, selected: v === (input.language ?? "en") }))),
-    ageRange: h("input", { id: `${prefix}-age`, class: "field", value: input.ageRange ?? "1-6" }),
+    ageRange: h("input", { id: `${prefix}-age`, class: "field", value: input.ageRange ?? "all ages" }),
     style: h("input", { id: `${prefix}-style`, class: "field", value: input.style ?? "colorful 3D animated kids' movie style, Pixar-like, bright even lighting, crisp detailed backgrounds, expressive characters" }),
     mainCharacter: h("input", { id: `${prefix}-character`, class: "field", maxlength: 300, value: input.mainCharacter ?? "", placeholder: "e.g. Milcah (ሚልካ), a cheerful, curious little Ethiopian girl" }),
     videoMinutes: h("input", { id: `${prefix}-minutes`, type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: input.videoMinutes ?? "", placeholder: "e.g. 5" }),
@@ -1850,7 +1856,7 @@ function channelBriefFields(prefix, input = {}) {
     h("p", { class: "text-xs text-stone-500", text: "The language, age range, style, main character and length fill the New video and Ideas & schedule forms for this channel." }),
   ];
   const read = () => ({
-    brief: els.brief.value.trim(), name: els.name.value.trim(), language: els.language.value, ageRange: els.ageRange.value.trim() || "1-6", style: els.style.value.trim() || undefined,
+    brief: els.brief.value.trim(), name: els.name.value.trim(), language: els.language.value, ageRange: els.ageRange.value.trim() || "all ages", style: els.style.value.trim() || undefined,
     mainCharacter: els.mainCharacter.value.trim(), videoMinutes: els.videoMinutes.value ? Math.round(Number(els.videoMinutes.value) * 2) / 2 : null,
     audioMode: els.audioMode.value || null, singer: els.singer.value === "auto" ? null : els.singer.value, voice: els.voice.value || null,
   });
@@ -2411,7 +2417,7 @@ async function planSettingsForm(month, defaults, existing) {
     about: h("textarea", { id: "pl-about", class: "field", rows: 3, value: d.about ?? "", placeholder: "Short animated songs and stories for little kids in Amharic and English, each teaching one good habit or simple lesson…" }),
     mainCharacter: h("input", { id: "pl-character", class: "field", maxlength: 300, value: d.mainCharacter ?? "", placeholder: "e.g. Milcah (ሚልካ), a cheerful, curious little Ethiopian girl" }),
     language: h("select", { id: "pl-language", class: "field" }, [["both", "Both — alternate አማርኛ and English"], ["am", "አማርኛ only"], ["en", "English only"]].map(([v, t]) => h("option", { value: v, text: t, selected: v === (d.language ?? "both") }))),
-    ageRange: h("input", { id: "pl-age", class: "field", value: d.ageRange ?? "1-6" }),
+    ageRange: h("input", { id: "pl-age", class: "field", value: d.ageRange ?? "all ages" }),
     videoMinutes: h("input", { id: "pl-minutes", type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: d.videoMinutes ?? "", placeholder: "e.g. 5" }),
     weekdayTime: h("input", { id: "pl-wtime", type: "time", class: "field", value: d.weekdayTime ?? "16:00" }),
     weekendTime: h("input", { id: "pl-etime", type: "time", class: "field", value: d.weekendTime ?? "09:00" }),
@@ -2424,7 +2430,7 @@ async function planSettingsForm(month, defaults, existing) {
     return h("label", { for: `pl-day-${i}`, class: "flex items-center gap-1.5 rounded-full border border-orange-100 px-3 py-1 text-sm" }, box, name);
   });
   const read = () => ({
-    channelName: els.channelName.value.trim(), about: els.about.value.trim(), mainCharacter: els.mainCharacter.value.trim(), language: els.language.value, ageRange: els.ageRange.value.trim() || "1-6",
+    channelName: els.channelName.value.trim(), about: els.about.value.trim(), mainCharacter: els.mainCharacter.value.trim(), language: els.language.value, ageRange: els.ageRange.value.trim() || "all ages",
     videoMinutes: els.videoMinutes.value ? Math.round(Number(els.videoMinutes.value) * 2) / 2 : undefined,
     postDays: WEEKDAY_NAMES.map((_, i) => i).filter((i) => $(`#pl-day-${i}`, form).checked),
     weekdayTime: els.weekdayTime.value || "16:00", weekendTime: els.weekendTime.value || "09:00", timezone: els.timezone.value.trim(), notes: els.notes.value.trim(),
