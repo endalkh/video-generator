@@ -104,6 +104,11 @@ describe("manual review mode", () => {
     await ps.approve(created.id, "audio");
     await ps.start(created.id); // Approve no longer starts the next step
     p = await settle();
+    // Storyboard: the pictures are drawn first, then the run stops before any video.
+    expect([p.status, p.awaitingReview, p.completed.includes("clips")]).toEqual(["paused", null, false]);
+    expect(p.media.scenes.every((m) => m.image && !m.clip)).toBe(true);
+    await ps.start(created.id);
+    p = await settle();
     expect(p.awaitingReview).toBe("clips");
     await ps.redoScene(created.id, 1);
     p = await settle();

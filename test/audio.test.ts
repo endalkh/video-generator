@@ -135,6 +135,9 @@ describe("your own recording", () => {
     await c.projectService.approve(p.id, "audio");
     await c.projectService.start(p.id); // Approve no longer starts the next step
     await c.projectService.idle();
+    expect((await c.projectService.get(p.id)).status).toBe("paused"); // storyboard: pictures first, no videos yet
+    await c.projectService.start(p.id);
+    await c.projectService.idle();
     const mid = await c.projectService.get(p.id);
     expect([mid.status, mid.error, mid.completed]).toEqual(["review", null, ["poem", "scenes", "character", "audio", "clips"]]);
     await c.projectService.approve(p.id, "clips");

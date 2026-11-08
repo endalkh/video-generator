@@ -811,7 +811,11 @@ function stepPage(p, step, keepVideo, videoKey) {
         ? h("a", { href: mediaUrl(id, m.image, p.updatedAt), target: "_blank", rel: "noopener", class: "block px-3 pt-2 text-xs text-stone-500" },
             h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: `Scene ${sc.index + 1} picture: ${sc.visualPrompt}`, class: "h-24 rounded-lg border border-orange-100 object-cover" }), "Picture the video is made from")
         : null;
-      return h("figure", { class: `overflow-hidden rounded-xl border border-orange-100 ${sc.leftOut ? "opacity-60" : ""}` }, media, pictureThumb,
+      // Storyboard (picture, no clip yet): play the scene's audio with its picture, to check them together before the video.
+      const sound = m?.image && !(m.preview || m.clip) && (m.piece || m.audio)
+        ? h("audio", { controls: true, preload: "none", class: "w-full px-3 pt-2", src: mediaUrl(id, m.piece || m.audio, p.updatedAt), "aria-label": `Scene ${sc.index + 1} audio` })
+        : null;
+      return h("figure", { class: `overflow-hidden rounded-xl border border-orange-100 ${sc.leftOut ? "opacity-60" : ""}` }, media, pictureThumb, sound,
         sc.leftOut ? h("p", { class: "bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-600", text: "⏭ Left out of the video" }) : null,
         h("figcaption", { class: "flex items-start gap-2 p-3 text-sm" },
           h("span", { class: "flex-1 whitespace-pre-line", lang, text: `${sc.index + 1}. ${sc.text}` }),
@@ -839,6 +843,9 @@ function stepPage(p, step, keepVideo, videoKey) {
         idle ? h("div", { class: "px-3 pb-3" }, scenePictureToggle(p, sc, act)) : null);
     }));
     if (idle && p.completed.includes("audio")) extra = [visualsSwitch(p, act)];
+    // Storyboard: pictures drawn, videos not made yet.
+    const storyboard = p.input.videoMode === "veo" && !done && p.scenes.scenes.some((sc) => { const x = p.media.scenes.find((y) => y.index === sc.index); return x?.image && !x.clip && !x.video; });
+    if (idle && storyboard) extra.unshift(h("p", { class: "w-full rounded-xl bg-sky-50 p-3 text-sm text-sky-900", text: "🖼 Storyboard: check each scene's picture with its audio. Use 🖼 Fix picture to change one (no video is made). When they all look right, make the clips — the videos are made from these pictures." }));
     // Draw the pictures first (no videos), check and fix them, then make the clips from them.
     const noPicture = p.scenes.scenes.filter((sc) => !sc.leftOut && drawsPicture(p, sc) && !p.media.scenes.find((x) => x.index === sc.index)?.image && !p.media.scenes.find((x) => x.index === sc.index)?.video);
     if (idle && p.completed.includes("audio") && noPicture.length) {

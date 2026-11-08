@@ -823,22 +823,48 @@ export class PipelineService {
           }
           return out;
         };
-        await perScene("clips", p.sceneClip, "rendered", async (s, report) => {
-          const i = s.index;
+        /** The prompt variables of a scene, and the cast members in it that have a reference image. */
+        const sceneVars = async (s: Scene) => {
           const present = character.skipped ? [] : await sceneCast(s);
           // A reference-order note so the image model matches each extra reference to the named character.
           const castBlock = present.length
             ? `Also in this shot, each matching one of the attached reference images (in this order, after the main character): ${present.map((c) => `${c.member.name} (${c.member.description})`).join("; ")}. Keep each of them looking exactly like their reference image.\n`
             : "";
-          const vars = { scene_number: i + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description, cast_in_scene: castBlock };
+          return { present, vars: { scene_number: s.index + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description, cast_in_scene: castBlock } };
+        };
+        /** Draw the scene's picture if it needs one and doesn't have it yet. Returns whether one was drawn. */
+        const drawPicture = async (s: Scene): Promise<boolean> => {
+          const i = s.index;
           // An uploaded (or already made) Veo video doesn't need a picture: don't pay for one.
           // No scene pictures: the video model makes the scene from the character picture.
-          if (scenePicture(input, s) && !(await fileExists(p.sceneImage(i))) && !(useVeo && (await fileExists(p.sceneVideo(i))))) {
-            const r = await prompt("clips", "scene_image", "scene_image", vars, i);
-            // References: main character first, then the present cast (so they stay on-model), then the parent's samples.
-            const references = [...(reference ? [reference] : []), ...present.map((c) => c.image), ...samples];
-            await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references, label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
+          if (!scenePicture(input, s) || (await fileExists(p.sceneImage(i))) || (useVeo && (await fileExists(p.sceneVideo(i))))) return false;
+          const { present, vars } = await sceneVars(s);
+          const r = await prompt("clips", "scene_image", "scene_image", vars, i);
+          // References: main character first, then the present cast (so they stay on-model), then the parent's samples.
+          const references = [...(reference ? [reference] : []), ...present.map((c) => c.image), ...samples];
+          await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references, label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
+          return true;
+        };
+        const todo = opts.onlyScene !== undefined ? kept.filter((s) => s.index === opts.onlyScene) : kept;
+        // Manual review with moving video: the pictures are a storyboard step of their own. Before the first video is
+        // made, draw every missing picture and stop, so they can be checked with each scene's audio (and fixed) before
+        // any video is paid for. Once videos exist (e.g. remaking one scene), the clips are made straight away.
+        const noVideosYet = async () => {
+          for (const s of kept) if ((await fileExists(p.sceneVideo(s.index))) || (await fileExists(p.sceneClip(s.index)))) return false;
+          return true;
+        };
+        if (useVeo && !inVideo && project.isManual && opts.onlyScene === undefined && !opts.noNewVideos && !opts.picturesOnly && (await noVideosYet())) {
+          let drawn = 0;
+          await perScene("clips", p.sceneImage, "drawn", async (s) => { if (await drawPicture(s)) drawn++; }, todo);
+          if (drawn > 0) {
+            await save();
+            throw new StopAfter("clips");
           }
+        }
+        await perScene("clips", p.sceneClip, "rendered", async (s, report) => {
+          const i = s.index;
+          const { present, vars } = await sceneVars(s);
+          await drawPicture(s);
           checkCancel();
           if (opts.picturesOnly) return; // pictures only: no video, no clip yet
           if (useVeo && opts.noNewVideos && !(await fileExists(p.sceneVideo(i)))) {
@@ -884,7 +910,7 @@ export class PipelineService {
             }
           }), signal);
           await rename(tmpClip, p.sceneClip(i));
-        }, opts.onlyScene !== undefined ? kept.filter((s) => s.index === opts.onlyScene) : kept);
+        }, todo);
       });
 
       await step("final", allExist([p.final]), async () => {

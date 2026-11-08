@@ -307,3 +307,26 @@ describe("scene pictures first", () => {
     expect(p.completed).toContain("audio"); // the words and audio stay
   }, 60_000);
 });
+
+describe("storyboard before videos (manual review)", () => {
+  it("making the clips first draws every picture and stops; the next run makes the videos from them", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "goats on the hill", sceneCount: 3, audioMode: "narration", videoMode: "veo", reviewMode: "manual" }, "mock");
+    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+    const m = media(id);
+    await ps.generateStep(id, "clips");
+    await ps.idle();
+    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(0);
+    for (const i of [0, 1, 2]) expect(await fileExists(m.sceneImage(i))).toBe(true);
+    expect((await ps.get(id)).completed).not.toContain("clips");
+
+    const images = mock.prompts.filter((x) => x.kind === "image").length;
+    await ps.generateStep(id, "clips");
+    await ps.idle();
+    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(3);
+    expect(mock.prompts.filter((x) => x.kind === "image").length).toBe(images); // the storyboard pictures are reused
+    expect((await ps.get(id)).completed).toContain("clips");
+  }, 60_000);
+});
