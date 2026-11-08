@@ -204,7 +204,7 @@ For each shot: "index" (0-based).
    GOOD (the lion cub speaks): "እናቴ የት ናት? ጠፋሁ!" ("Where is my mother? I'm lost!"). Milcah replies: "አትፍራ፣ እረዳሃለሁ!" ("Don't be afraid, I'll help you!").
    BAD (narration pretending to be a line): "ትንሹ አንበሳ እያለቀሰ ተገኘ" ("the little lion was found crying") — never put third-person narration in a character's mouth.
  - The narrator (use sparingly, 0–1 short lines per shot) may set the scene in third person; every other speaker talks in first/second person.
- - Give the supporting characters real speaking turns — a back-and-forth, not only the main character.
+ - Give the supporting characters real speaking turns — a back-and-forth, not only the main character. Every supporting character in the story speaks at least once in the video.
  - 1–3 short lines per shot; keep them brief so each shot is about {{shot_seconds}} seconds when spoken (the whole video is about {{video_seconds}} seconds).
 "text" = all this shot's lines joined with newlines (the words only, no speaker names), in {{language_name}}.
 "characters" = the slug ids of the supporting characters that appear in this shot (besides the main character); empty if none.

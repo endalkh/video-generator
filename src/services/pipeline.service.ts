@@ -457,7 +457,8 @@ export class PipelineService {
       await step("scenes", async () => project.scenes !== null, async () => {
         const poem = project.poem!;
         // New words, same pictures: scenes kept on purpose get the new stanzas; no AI call, no new pictures.
-        if (project.scenes?.scenes.length === poem.stanzas.length) {
+        // Not for dialogue: there the stanzas are a story outline, and the spoken lines must be written again.
+        if (input.audioMode !== "dialogue" && project.scenes?.scenes.length === poem.stanzas.length) {
           project.rewordScenes();
           log.step("scenes", "kept the scenes, put the new words in");
           return;

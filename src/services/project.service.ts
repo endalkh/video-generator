@@ -372,7 +372,8 @@ export class ProjectService {
     const poem = parse(PoemSchema, raw, "poem");
     const project = await this.loadIdle(id);
     // "The character speaks": her voice is inside each Veo clip, so new words always need new clips.
-    const keep = opts.keepVisuals === true && !soundInVideo(project.input);
+    // Dialogue: the poem is only the story outline, so the dialogue is always written again (no keeping).
+    const keep = opts.keepVisuals === true && !soundInVideo(project.input) && project.input.audioMode !== "dialogue";
     project.editPoem(poem, { keepVisuals: keep });
     await wipeMediaFrom(this.media(id), "audio");
     if (!keep) await wipePictures(this.media(id));
