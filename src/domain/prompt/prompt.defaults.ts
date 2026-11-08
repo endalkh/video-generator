@@ -80,63 +80,6 @@ Simple, clear vocabulary and a warm, fun tone.
 - All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
 {{safety}}`,
     /** Earlier built-in versions: a prompt still on one of these (never edited) is upgraded automatically. */
-    previousTemplates: [`Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
-Topic: {{topic}}.
-{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short enough to sing slowly and clearly. Repeat a simple chorus line every few stanzas.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if character_voice}}Exactly {{scene_count}} stanzas of 2 short lines each. The main character says each stanza herself, looking at the camera, in one 8-second shot, so each stanza is something she says out loud (talking to the children watching), slowly and clearly. Tell one story from beginning to end, one step per stanza.{{/if}}
-{{#if en}}Each line has at most {{syllables_per_line}} syllables.{{/if}}{{#if am}}Each line has about {{letters_per_line}} Ge'ez letters (fidel), never more than {{letters_per_line}} + 2.{{/if}}
-Simple vocabulary, repetition, and a positive message.
-{{#if am}}Write a real Amharic children's ግጥም, natively in Ge'ez script (not transliteration, not a translation from English):
-- ቤት (rhyme): the lines of each stanza end on the same sound, the same last syllable (for example ተነሳች / ታጠበች, ሳሙና / ጤና), like traditional Amharic poems and children's songs.
-- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is shown on its own picture. Never let a sentence run on into the next stanza.
-- Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
-- All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
-{{safety}}`, `Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
-Topic: {{topic}}.
-{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short enough to sing slowly and clearly. Repeat a simple chorus line every few stanzas.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}
-{{#if en}}Each line has at most {{syllables_per_line}} syllables.{{/if}}{{#if am}}Each line has about {{letters_per_line}} Ge'ez letters (fidel), never more than {{letters_per_line}} + 2.{{/if}}
-Simple vocabulary, repetition, and a positive message.
-{{#if am}}Write a real Amharic children's ግጥም, natively in Ge'ez script (not transliteration, not a translation from English):
-- ቤት (rhyme): the lines of each stanza end on the same sound, the same last syllable (for example ተነሳች / ታጠበች, ሳሙና / ጤና), like traditional Amharic poems and children's songs.
-- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is shown on its own picture. Never let a sentence run on into the next stanza.
-- Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
-- All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
-{{safety}}`, `Write a rhythmic {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
-Topic: {{topic}}.
-{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), so each line has at most {{syllables_per_line}} syllables (in Ge'ez script, about one letter per syllable): short enough to sing slowly and clearly. Repeat a simple chorus line every few stanzas.{{else}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds), so each line has about {{syllables_per_line}} syllables (in Ge'ez script, about one letter per syllable). Tell one story from beginning to end, one step per stanza.{{/if}} Simple vocabulary, repetition, and a positive message.
-{{#if am}}Write natively in Amharic using Ge'ez script (not transliteration, not translation-ese).{{/if}}
-{{safety}}`, `Write a short, rhythmic {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
-Topic: {{topic}}.
-{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), so each line has at most {{syllables_per_line}} syllables (in Ge'ez script, about one letter per syllable): short enough to sing slowly and clearly. Repeat a simple chorus line.{{else}}Exactly {{scene_count}} stanzas of 2-4 short lines each.{{/if}} Simple vocabulary, repetition, and a positive message.
-{{#if am}}Write natively in Amharic using Ge'ez script (not transliteration, not translation-ese).{{/if}}
-{{safety}}`, `Write a short, rhythmic {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
-Topic: {{topic}}.
-{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds).{{else}}Exactly {{scene_count}} stanzas of 2-4 short lines each.{{/if}} Simple vocabulary, repetition, and a positive message.
-{{#if am}}Write natively in Amharic using Ge'ez script (not transliteration, not translation-ese).{{/if}}
-{{safety}}`],
-  },
-  {
-    key: "poem_stanza",
-    title: "Rewrite one stanza",
-    description: "Poem and Scenes pages: writes ONE stanza (scene) again, keeping the rest of the poem. {{poem_text}} is the whole poem with numbered stanzas, {{hint}} what the parent wants changed. Must return JSON {lines}.",
-    vars: ["title", "poem_text", "stanza_number", "stanza_text", "line_count", "hint"],
-    template: `Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
-Topic: {{topic}}. Title: "{{title}}".
-
-The whole poem (stanza {{stanza_number}} is the one to rewrite):
-{{poem_text}}
-
-Write a new stanza {{stanza_number}} to replace:
-{{stanza_text}}
-
-It must fit between the stanzas around it: the same rhythm and tone, and the story keeps going in the same order. Exactly {{line_count}} short lines{{#if en}}, each with at most {{syllables_per_line}} syllables{{/if}}{{#if am}}, each with about {{letters_per_line}} Ge'ez letters (fidel){{/if}}{{#if song}}, easy to sing slowly and clearly{{/if}}. If the poem has a chorus line and this stanza had it, keep it.
-What the parent wants changed: {{hint}}
-{{#if am}}Write a real Amharic children's ግጥም, natively in Ge'ez script (not transliteration, not a translation from English):
-- ቤት (rhyme): the lines of each stanza end on the same sound, the same last syllable (for example ተነሳች / ታጠበች, ሳሙና / ጤና), like traditional Amharic poems and children's songs.
-- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is shown on its own picture. Never let a sentence run on into the next stanza.
-- Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
-- All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
-Return only the new stanza's lines; don't repeat the old one.
-{{safety}}`,
     previousTemplates: [`Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for young children (age range: {{age_range}}).
 Topic: {{topic}}.
 {{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short and punchy so they can be sung at a lively, upbeat tempo while staying clear. Repeat a simple chorus line every few stanzas.{{/if}}{{#if video_sings}} The main character sings each stanza herself, looking at the camera, in one 8-second shot, so each stanza must be easy to sing clearly at an upbeat tempo within 8 seconds.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if character_voice}}Exactly {{scene_count}} stanzas of 2 short lines each. The main character says each stanza herself, looking at the camera, in one 8-second shot, so each stanza is something she says out loud (talking to the children watching), slowly and clearly. Tell one story from beginning to end, one step per stanza.{{/if}}{{#if dialogue}}This is a fun animated MOVIE, not a lesson. Write a short story outline in {{scene_count}} beats (one per scene), as {{scene_count}} plain stanzas of 1-2 lines each describing what HAPPENS in that beat — an exciting little adventure with a beginning, a middle and a happy ending. Keep it playful and cinematic; do NOT teach a lesson or moral, do not force rhymes, and do not write it as something to read aloud (characters will speak their own lines later).{{/if}}
@@ -147,9 +90,7 @@ Simple, clear vocabulary and a warm, fun tone.
 - Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is shown on its own picture. Never let a sentence run on into the next stanza.
 - Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
 - All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
-{{safety}}`,
-    /** Earlier built-in versions: a prompt still on one of these (never edited) is upgraded automatically. */
-    previousTemplates: [`Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+{{safety}}`, `Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
 Topic: {{topic}}.
 {{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short enough to sing slowly and clearly. Repeat a simple chorus line every few stanzas.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if character_voice}}Exactly {{scene_count}} stanzas of 2 short lines each. The main character says each stanza herself, looking at the camera, in one 8-second shot, so each stanza is something she says out loud (talking to the children watching), slowly and clearly. Tell one story from beginning to end, one step per stanza.{{/if}}
 {{#if en}}Each line has at most {{syllables_per_line}} syllables.{{/if}}{{#if am}}Each line has about {{letters_per_line}} Ge'ez letters (fidel), never more than {{letters_per_line}} + 2.{{/if}}
@@ -205,7 +146,8 @@ What the parent wants changed: {{hint}}
 - Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
 - All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
 Return only the new stanza's lines; don't repeat the old one.
-{{safety}}`, `Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+{{safety}}`,
+    previousTemplates: [`Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
 Topic: {{topic}}. Title: "{{title}}".
 
 The whole poem (stanza {{stanza_number}} is the one to rewrite):
