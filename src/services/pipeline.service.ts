@@ -4,7 +4,7 @@ import type { GenContext, Provider } from "../domain/ports/generator.port.js";
 import { MAX_SONG_PART_SEC, mmss, singableSeconds, songParts, songTimeline } from "../domain/ports/generator.port.js";
 import { isTrebloModel, TREBLO_MAX_SONG_SEC } from "../infrastructure/providers/treblo.js";
 import type { Project } from "../domain/project/project.entity.js";
-import { assignCastVoices, defaultVoice, minResolution, scenePicture, soundInVideo, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
+import { assignCastVoices, defaultVoice, minResolution, scenePicture, soundInVideo, speakerVoice, SPEAKER_NARRATOR, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
@@ -705,6 +705,35 @@ export class PipelineService {
           project.setSong({ file: "song.wav", duration, slots, lyrics: lyrics.join("\n\n") || undefined });
           emit({ type: "progress", step: "audio", done: parts.length, total: parts.length, message: `song ready (${parts.length} parts, ${duration.toFixed(1)}s)` });
           log.step("audio", `song.wav ${duration.toFixed(1)}s from ${parts.length} parts`);
+        });
+      } else if (input.audioMode === "dialogue") {
+        await step("audio", allExist(scenes.map((s) => p.sceneAudio(s.index))), async () => {
+          project.setSong(null);
+          const mainVoice = input.voice ?? defaultVoice(input.singer, input.audioMode);
+          await perScene("audio", p.sceneAudio, "voiced", async (s) => {
+            // Each line is spoken in its speaker's own voice, then the lines are stitched into the scene's audio.
+            const lines = s.dialogue?.length ? s.dialogue : [{ speaker: SPEAKER_NARRATOR, line: s.text }];
+            const parts: string[] = [];
+            try {
+              for (const [j, dl] of lines.entries()) {
+                checkCancel();
+                const lineVoice = speakerVoice(dl.speaker, project.cast, mainVoice);
+                const r = await prompt("audio", "scene_speech", "narration", { scene_number: s.index + 1, scene_text: dl.line }, s.index);
+                const part = path.join(p.sceneDir(s.index), `line-${String(j + 1).padStart(2, "0")}.wav`);
+                await writeFileAtomic(part, await provider.speech(r.text, { model: r.model, voice: lineVoice, label: `scene ${s.index + 1} line ${j + 1} (${dl.speaker})`, ctx: ctx({ scene: s }) }));
+                parts.push(part);
+              }
+              if (parts.length === 1) {
+                await rename(parts[0]!, p.sceneAudio(s.index));
+              } else {
+                await concatAudio(parts, `${p.sceneAudio(s.index)}.part.wav`);
+                await rename(`${p.sceneAudio(s.index)}.part.wav`, p.sceneAudio(s.index));
+              }
+            } finally {
+              // Clean up the per-line temp files (the joined scene audio is what matters).
+              await Promise.all(parts.map((f) => rm(f, { force: true })));
+            }
+          });
         });
       } else {
         await step("audio", allExist(scenes.map((s) => p.sceneAudio(s.index))), async () => {

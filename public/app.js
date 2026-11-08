@@ -285,6 +285,7 @@ const AUDIO_MODES = [
   ["music_voice", "Rhyme over music — clear voice + instrumental music (best for Amharic)"],
   ["narration", "Narrated story — a narrator reads, the character acts it out"],
   ["character", "The character speaks — she says the words herself in the video (lip-sync; needs Veo)"],
+  ["dialogue", "Dialogue story — characters talk to each other, each in its own voice"],
 ];
 const SINGERS = [["auto", "Any (let the AI choose)"], ["woman", "Woman"], ["man", "Man"], ["girl", "Girl (child)"], ["boy", "Boy (child)"], ["kids", "Group of children"]];
 const TTS_VOICES = {
@@ -296,7 +297,7 @@ const TTS_VOICES = {
   Alnilam: "male, firm", Schedar: "male, even", Achird: "male, friendly", Zubenelgenubi: "male, casual", Sadachbia: "male, lively", Sadaltager: "male, knowledgeable",
 };
 const VOICE_OPTIONS = [["", "Matching the singer (recommended)"], ...Object.entries(TTS_VOICES).map(([v, d]) => [v, `${v} — ${d}`])];
-const AUDIO_LABEL = { song: "song", music_voice: "rhyme over music", narration: "narrated story", character: "the character speaks" };
+const AUDIO_LABEL = { song: "song", music_voice: "rhyme over music", narration: "narrated story", character: "the character speaks", dialogue: "dialogue story" };
 const CONCURRENCY_OPTIONS = [["", "Auto — 4 on inference.sh, 2 on Google Veo"], ...[1, 2, 3, 4, 5, 6, 8, 10].map((n) => [String(n), n === 1 ? "1 — one at a time (safest for rate limits)" : `${n} at a time`])];
 const CONCURRENCY_HINT = "How many scene videos are made at once. More is faster; Google Veo may answer \"too many requests\" (the app waits and retries).";
 const VISUALS_OPTIONS = [["veo", "Moving video clips — AI video per scene (Veo, Seedance, Kling, Wan, FLUX, MiniMax, Omni or Grok on the Models page; paid)"], ["still", "Animated pictures — still images with camera motion (fast, free)"]];
@@ -408,8 +409,9 @@ async function showNewVideo() {
     const seconds = lengthSecondsOf($("#f-length").value);
     const chosen = $("#f-audio").value;
     const still = $("#f-video").value === "still";
-    // Animated pictures use no video model, so "the video AI makes the voice" can't apply: force it off.
-    if (still) $("#f-videoaudio").checked = false;
+    // Dialogue is always a separate multi-voice track; animated pictures use no video model: both force "video AI makes the voice" off.
+    const dialogue = chosen === "dialogue";
+    if (still || dialogue) $("#f-videoaudio").checked = false;
     const skipAudio = $("#f-videoaudio").checked;
     // Skipping the audio AI: a song is sung in the clips, everything else is spoken there ("the character speaks").
     const mode = skipAudio && chosen !== "song" ? "character" : chosen;
@@ -427,13 +429,16 @@ async function showNewVideo() {
           ? `In every scene the video AI makes ${who} say that scene's words herself, with her lips in sync${$("#f-music").checked ? ", plus soft background music from the music AI" : " (no audio AI, no background music)"}. Each scene is one 8-second clip, so this needs Visuals = moving video clips (${scenes} paid clips). Video AIs' Amharic speech isn't documented: try a short video first.`
           : mode === "music_voice"
           ? "The rhyme is chanted clearly by the voice AI over instrumental music from the music AI (one music piece, looped). Amharic words come out clear, because the voice AI speaks Amharic while the music AI can't sing it well."
+          : mode === "dialogue"
+          ? `The characters talk to each other: each line is read by the speech AI in that character's own voice, and the lines are joined into each scene's audio. Give each character a voice on the Character page. The video shows the scene (the mouths aren't perfectly synced to who speaks).`
           : "The story is written to be read aloud in about this time; the exact length depends on the voice.");
-    // Singer only matters for a sung song or when the character sings/speaks in the clips; narration & rhyme-over-music use the voice picker.
-    $("#f-singer").closest("div").hidden = mode === "narration" || mode === "music_voice";
-    // Voice picker is for spoken modes (narration, rhyme over music) — not for a song or the character speaking.
-    $("#f-voice").closest("div").hidden = mode === "song" || mode === "character";
-    // Animated pictures use no video model: the "video AI makes the voice", "no scene pictures" and "videos at once" options don't apply.
-    $("#f-videoaudio-row").hidden = still;
+    // Singer only matters for a sung song or when the character sings/speaks in the clips; narration, rhyme & dialogue use the voice picker.
+    $("#f-singer").closest("div").hidden = mode === "narration" || mode === "music_voice" || mode === "dialogue";
+    // Voice picker is for spoken modes (narration, rhyme over music) — not for a song or the character speaking. For
+    // dialogue each character has its own voice (set on the Character page), so the single voice picker is hidden too.
+    $("#f-voice").closest("div").hidden = mode === "song" || mode === "character" || mode === "dialogue";
+    // Animated pictures use no video model; dialogue is a separate track: both hide "the video AI makes the voice".
+    $("#f-videoaudio-row").hidden = still || dialogue;
     $("#f-conc").closest("div").hidden = still;
     $("#f-music-row").hidden = !(skipAudio || mode === "character");
     const noPictures = $("#f-nopictures").checked;
