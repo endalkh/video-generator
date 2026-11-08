@@ -395,45 +395,6 @@ describe("make the video from scratch", () => {
   }, 90_000);
 });
 
-describe("lip-sync pass", () => {
-  it("syncs each new scene video to its audio once, keeps the raw video, and syncs again after new audio", async () => {
-    const mock = mockProvider();
-    c = await makeTestContainer({ provider: () => mock });
-    await c.modelSettingsService.update("lip_sync", "inference.sh/falai/pixverse-lipsync");
-    const ps = c.projectService;
-    const { id } = await ps.create({ topic: "goats on the hill", sceneCount: 2, audioMode: "narration", videoMode: "veo", reviewMode: "manual" }, "mock");
-    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
-    await ps.drawScenePictures(id);
-    await ps.idle();
-    await ps.makeVideoFromScratch(id);
-    await ps.idle();
-    const syncs = () => mock.prompts.filter((x) => x.kind === "lipsync").length;
-    expect(syncs()).toBe(2);
-    const m = media(id);
-    for (const i of [0, 1]) {
-      expect(await fileExists(m.sceneVideoRaw(i))).toBe(true);
-      expect(await fileExists(m.sceneLipSync(i))).toBe(true);
-    }
-    expect((await ps.get(id)).status).toBe("done");
-    // New audio: the videos are kept (not paid again) but synced again to the new voice.
-    await ps.regenerate(id, "audio");
-    await ps.idle();
-    expect(await fileExists(m.sceneLipSync(0))).toBe(false);
-    expect(await fileExists(m.sceneVideo(0))).toBe(true); // the paid video is kept
-    await ps.approve(id, "audio");
-    await ps.start(id, { noReview: true });
-    await ps.idle();
-    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(2);
-    expect(syncs()).toBe(4);
-  }, 120_000);
-
-  it("is off by default", async () => {
-    const mock = mockProvider();
-    c = await makeTestContainer({ provider: () => mock });
-    expect((await c.modelSettingsService.list()).find((s) => s.task === "lip_sync")!.model).toBe("none");
-  });
-});
-
 describe("dialogue spoken inside the video", () => {
   it("keeps the script, sends every line with its speaker to the video model, and keeps the clip's own sound", async () => {
     const mock = mockProvider();

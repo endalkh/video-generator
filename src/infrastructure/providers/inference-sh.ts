@@ -49,12 +49,6 @@ export function inferenceShMaxConcurrency(model: string): number | undefined {
 /** The service behind an app was busy (too many tasks at once): the task can simply be sent again later. */
 export const isBusyError = (message: string) => /concurrency limit|please try later|too many (concurrent )?requests/i.test(message);
 
-/** Lip-sync apps: re-time the mouth in an existing video to an audio track. */
-export const INFERENCE_SH_LIPSYNC_APPS = [
-  { id: "falai/pixverse-lipsync", app: "falai/pixverse-lipsync", kind: "pixverse", displayName: "PixVerse Lipsync — syncs the speaking face in the scene video to its audio (inference.sh)" },
-  { id: "infsh/latentsync-1-6", app: "infsh/latentsync-1-6", kind: "latentsync", displayName: "LatentSync 1.6 — lip-syncs the face in the scene video to its audio, best on human-like faces (inference.sh)" },
-] as const;
-
 /** Can this inference.sh model make a scene without a scene picture? (Unknown models: assume not.) */
 export function inferenceShWorksWithoutPicture(model: string): boolean {
   const def = INFERENCE_SH_VIDEO_APPS.find((a) => INFERENCE_SH_PREFIX + a.id === model);
@@ -135,18 +129,7 @@ export class InferenceShVideo {
   }
 
   listModels(): AvailableModel[] {
-    return [...INFERENCE_SH_VIDEO_APPS, ...INFERENCE_SH_LIPSYNC_APPS].map((a) => ({ id: INFERENCE_SH_PREFIX + a.id, displayName: a.displayName }));
-  }
-
-  /** Lip-sync an existing video to an audio track (PixVerse Lipsync or LatentSync). */
-  async lipSync(opts: { model: string; video: Buffer; audio: Buffer; label: string }): Promise<Buffer> {
-    const id = opts.model.slice(INFERENCE_SH_PREFIX.length);
-    const def = INFERENCE_SH_LIPSYNC_APPS.find((a) => a.id === id);
-    if (!def) throw new Error(`Unknown inference.sh lip-sync app "${id}" (known: ${INFERENCE_SH_LIPSYNC_APPS.map((a) => a.id).join(", ")})`);
-    const video: PendingFile = { bytes: opts.video, contentType: "video/mp4" };
-    const audio: PendingFile = { bytes: opts.audio, contentType: "audio/mpeg" };
-    const input = def.kind === "latentsync" ? { video_path: video, audio_path: audio } : { video, audio };
-    return this.run(def.app, input, opts.label);
+    return INFERENCE_SH_VIDEO_APPS.map((a) => ({ id: INFERENCE_SH_PREFIX + a.id, displayName: a.displayName }));
   }
 
   /**

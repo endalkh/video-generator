@@ -257,11 +257,6 @@ export class GeminiProvider implements Provider {
     );
   }
 
-  async lipSync(opts: { model: string; video: Buffer; audio: Buffer; label: string }): Promise<Buffer> {
-    if (!isInferenceShModel(opts.model)) throw new Error(`Lip-sync model "${opts.model}" isn't supported: pick an inference.sh lip-sync model on the Models page, or "none"`);
-    return this.inferenceShVideo().lipSync(opts);
-  }
-
   async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; cast?: Buffer[]; samples?: Buffer[]; audio?: Buffer; singAudio?: boolean; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
     const { label } = opts;
     if (isInferenceShModel(opts.model)) return this.inferenceShVideo().video(prompt, { ...opts, mime: sniffImageMime });
@@ -356,10 +351,10 @@ export class GeminiProvider implements Provider {
     const seconds = Math.min(15, Math.max(4, Math.ceil(opts.durationSec ?? 8)));
     // Audio references are allowlisted by Google: only sent when OMNI_AUDIO_REFERENCE=1 (the account has access).
     const audio = process.env.OMNI_AUDIO_REFERENCE === "1" ? opts.audio : undefined;
-    const lipSync = audio
+    const audioNote = audio
       ? " The attached audio is this scene's soundtrack (the characters' voices / the song): the characters say or sing exactly those words, with their mouths and timing matched to that audio (lip-sync), in those same voices."
       : "";
-    const fullPrompt = `${prompt}\n\nMake a ${seconds}-second ${opts.aspectRatio} video clip with lively, expressive, child-friendly motion.${lipSync}`;
+    const fullPrompt = `${prompt}\n\nMake a ${seconds}-second ${opts.aspectRatio} video clip with lively, expressive, child-friendly motion.${audioNote}`;
     const imagePart = first ? [{ type: "image" as const, data: first.toString("base64"), mime_type: sniffImageMime(first) }] : [];
     const audioPart = audio ? [{ type: "audio" as const, data: audio.toString("base64"), mime_type: "audio/mpeg" as const }] : [];
     const textPart = { type: "text" as const, text: fullPrompt };

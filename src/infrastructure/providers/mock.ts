@@ -102,12 +102,6 @@ export class MockProvider implements Provider {
     return { audio: toneWav(durationSec, 3), ext: "wav", lyrics: "(mock song)" };
   }
 
-  /** Lip-sync stand-in: the same video back. */
-  async lipSync({ model, video }: { model: string; video: Buffer }): Promise<Buffer> {
-    this.prompts.push({ kind: "lipsync", prompt: "", model });
-    return video;
-  }
-
   /** Short MP4 made from the still (or, with no scene picture, from the character), standing in for Veo. */
   async video(prompt: string, { still, character, model }: { still?: Buffer; character?: Buffer; model: string }): Promise<Buffer> {
     this.prompts.push({ kind: "video", prompt, model });
