@@ -28,7 +28,7 @@ export const INFERENCE_SH_VIDEO_APPS = [
   { id: "klingai/video-v3", app: "klingai/video-v3", kind: "kling-v3", displayName: "Kling V3 — animates the scene picture, real 4K, clip as long as the scene (inference.sh)" },
   { id: "klingai/avatar", app: "klingai/avatar", kind: "avatar", mode: "std", displayName: "Kling Avatar · standard — sings/speaks the scene's audio (inference.sh)" },
   { id: "klingai/avatar-pro", app: "klingai/avatar", kind: "avatar", mode: "pro", displayName: "Kling Avatar · pro — more natural movement (inference.sh)" },
-  { id: "bytedance/omnihuman-1-5", app: "bytedance/omnihuman-1-5", kind: "omnihuman", displayName: "OmniHuman 1.5 — the largest face in the scene picture speaks/sings the scene's audio, lip-synced (inference.sh)" },
+  { id: "bytedance/omnihuman-1-5", app: "bytedance/omnihuman-1-5", kind: "omnihuman", maxConcurrency: 1, displayName: "OmniHuman 1.5 — the largest face in the scene picture speaks/sings the scene's audio, lip-synced (inference.sh)" },
   { id: "bytedance/seedance-2-0-fast", app: "bytedance/seedance-2-0-fast", kind: "seedance", maxResolution: "720p", displayName: "Seedance 2.0 Fast — cheaper and quicker, up to 720p (inference.sh)" },
   { id: "alibaba/wan-2-7-i2v", app: "alibaba/wan-2-7-i2v", kind: "wan", displayName: "Wan 2.7 — animates the scene picture, up to 1080p, 2-15 s (inference.sh)" },
   { id: "bfl/flux-3-video", app: "bfl/flux-3-video", kind: "flux", displayName: "FLUX 3 Video — animates the scene picture with sound, up to 1080p, 5-20 s (inference.sh)" },
@@ -39,6 +39,15 @@ export const INFERENCE_SH_VIDEO_APPS = [
   { id: "pruna/p-video", app: "pruna/p-video", kind: "p-video", displayName: "Pruna P-Video — cheapest: animates the scene picture with sound, 720p/1080p, 1-10 s (inference.sh)" },
   { id: "pixverse/v6", app: "pixverse/v6", kind: "pixverse", displayName: "PixVerse v6 — low cost: animates the scene picture, up to 1080p, 5-15 s (inference.sh)" },
 ] as const;
+
+/** At most this many tasks of the model at once (the service behind it refuses more), or undefined = no own limit. */
+export function inferenceShMaxConcurrency(model: string): number | undefined {
+  const def = INFERENCE_SH_VIDEO_APPS.find((a) => INFERENCE_SH_PREFIX + a.id === model);
+  return def && "maxConcurrency" in def ? def.maxConcurrency : undefined;
+}
+
+/** The service behind an app was busy (too many tasks at once): the task can simply be sent again later. */
+export const isBusyError = (message: string) => /concurrency limit|please try later|too many (concurrent )?requests/i.test(message);
 
 /** Lip-sync apps: re-time the mouth in an existing video to an audio track. */
 export const INFERENCE_SH_LIPSYNC_APPS = [
@@ -119,7 +128,7 @@ export class InferenceShVideo {
   constructor(
     apiKey = process.env.INFERENCE_API_KEY,
     private readonly fetchImpl: typeof fetch = fetch,
-    private readonly opts: { baseUrl?: string; pollMs?: number; timeoutMs?: number; downloadRetries?: number; retryDelayMs?: number } = {},
+    private readonly opts: { baseUrl?: string; pollMs?: number; timeoutMs?: number; downloadRetries?: number; retryDelayMs?: number; busyRetries?: number; busyDelayMs?: number } = {},
   ) {
     if (!apiKey) throw new Error("INFERENCE_API_KEY is not set. Add it to .env to use inference.sh video models.");
     this.apiKey = apiKey;
@@ -290,7 +299,17 @@ export class InferenceShVideo {
       }
       log.info(`${label}: earlier inference.sh task ${opts.resumeTaskId} ${prev ? st : "not found"}; starting a new one`);
     }
-    return this.run(app, input, label, opts.onTaskStarted);
+    // The service behind the app was busy (its own limit on tasks at once): wait and send it again (a failed task isn't charged).
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.run(app, input, label, opts.onTaskStarted);
+      } catch (err) {
+        if (attempt >= (this.opts.busyRetries ?? 6) || !isBusyError((err as Error).message)) throw err;
+        const wait = (this.opts.busyDelayMs ?? 30_000) * attempt;
+        log.warn(`${label}: ${app} is busy (too many tasks at once); trying again in ${Math.round(wait / 1000)} s (attempt ${attempt + 1})`);
+        await sleep(wait);
+      }
+    }
   }
 
   /** Upload the input files, start the app and wait for its video. */

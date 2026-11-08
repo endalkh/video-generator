@@ -339,6 +339,27 @@ describe("inference.sh Seedance video", () => {
     expect(fresh.calls.some((c) => c.url.endsWith("/apps/run"))).toBe(true);
   });
 
+  it("sends a task again when the service behind the app is busy (too many at once)", async () => {
+    let runs = 0;
+    const ok = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 });
+    const busy = (async (url: string) => {
+      if (url.endsWith("/files")) return ok([{ uri: "https://cloud.inference.sh/u/1.png", upload_url: "https://upload.example/1" }]);
+      if (url.startsWith("https://upload.example/")) return new Response(null, { status: 200 });
+      if (url.endsWith("/apps/run")) return ok({ id: `t${++runs}`, status: 2 });
+      if (url.endsWith("/tasks/t1/status")) return ok({ status: 11 });
+      if (url.endsWith("/tasks/t1")) return ok({ status: 11, error: "Task submission failed: Request Has Reached API Concurrency Limit, Please Try Later" });
+      if (url.endsWith("/tasks/t2/status")) return ok({ status: 10 });
+      if (url.endsWith("/tasks/t2")) return ok({ status: 10, output: { video: "https://cloud.inference.sh/v.mp4" } });
+      if (url === "https://cloud.inference.sh/v.mp4") return new Response(MP4);
+      return new Response("nope", { status: 404 });
+    }) as unknown as typeof fetch;
+    const v = new InferenceShVideo("k", busy, { pollMs: 1, retryDelayMs: 1, busyDelayMs: 1 });
+    expect((await v.video("p", base)).equals(MP4)).toBe(true);
+    expect(runs).toBe(2);
+    expect(videoConcurrency("inference.sh/bytedance/omnihuman-1-5", undefined, 4)).toBe(1);
+    expect(videoConcurrency("inference.sh/bytedance/seedance-2-5")).toBe(4);
+  });
+
   it("surfaces failed tasks and HTTP errors with their status", async () => {
     const failed = new InferenceShVideo("k", fakeApi({ status: 11, error: "content rejected" }).impl, { pollMs: 1, retryDelayMs: 1 });
     await expect(failed.video("p", base)).rejects.toThrow(/task t1 failed: content rejected/);

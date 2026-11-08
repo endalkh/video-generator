@@ -7,7 +7,7 @@ import type { Project } from "../domain/project/project.entity.js";
 import { assignCastVoices, defaultVoice, minResolution, scenePicture, soundInVideo, speakerVoice, SPEAKER_MAIN, SPEAKER_NARRATOR, STEP_NAMES, syncCastToScript, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
-import { isAudioDrivenModel, isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
+import { inferenceShMaxConcurrency, isAudioDrivenModel, isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
 import { needsScenePicture } from "../infrastructure/providers/gemini.js";
 import { addEndCard, assertFfmpegAvailable, audioParts, audioPiece, canDrawText, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, SCENE_TAIL_SEC, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
@@ -251,10 +251,12 @@ export async function ensureScenePiece(p: MediaPaths, project: Project, i: numbe
  * limits (a 429 is waited out and retried), so it gets 2.
  */
 export function videoConcurrency(model: string, env = process.env.VIDEO_CONCURRENCY, setting?: number): number {
-  if (setting && setting >= 1) return Math.min(setting, 10);
+  // Some models' services take only so many tasks at once (OmniHuman: 1): never ask for more.
+  const cap = inferenceShMaxConcurrency(model) ?? 10;
+  if (setting && setting >= 1) return Math.min(setting, cap);
   const n = Number.parseInt(env ?? "", 10);
-  if (Number.isInteger(n) && n >= 1) return Math.min(n, 10);
-  return isInferenceShModel(model) ? 4 : 2;
+  if (Number.isInteger(n) && n >= 1) return Math.min(n, cap);
+  return Math.min(isInferenceShModel(model) ? 4 : 2, cap);
 }
 
 /** Runs local renders one after another (across all videos being made), in the order they ask. */
