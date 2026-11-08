@@ -96,6 +96,8 @@ export function mediaPaths(dir: string) {
     sample: (j: number) => path.join(dir, "samples", `${String(j + 1).padStart(2, "0")}.png`),
     srt: path.join(dir, "subtitles.srt"),
     final: path.join(dir, "final.mp4"),
+    /** Storyboard: every scene's picture with its audio, joined (made locally, before any video is paid for). */
+    storyboard: path.join(dir, "storyboard.mp4"),
     /** One-scene lip-sync preview (scene i) with its audio slice muxed; never overwrites final.mp4. */
     scenePreview: (i: number) => path.join(sceneDir(i), "preview.mp4"),
     /** YouTube thumbnail for the finished video (1280×720). */
@@ -154,6 +156,7 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
     const i = Number(d) - 1;
     if (Number.isInteger(i) && i >= 0) files.push(...perScene.map((f) => f(i)));
   }
+  files.push(p.storyboard); // any redo changes the pictures or the audio it was made from
   await Promise.all(files.map((f) => rm(f, { force: true })));
   // The secondary cast's reference images belong to the character step: a character redo regenerates them.
   if (at("character")) await rm(p.castDir, { recursive: true, force: true });
@@ -194,7 +197,7 @@ export async function wipeSceneVideos(p: MediaPaths): Promise<void> {
 
 /** Delete one scene's picture, video and clip (plus the final video) so only that scene is made again. */
 export async function wipeScene(p: MediaPaths, i: number): Promise<void> {
-  await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.final, p.srt].map((f) => rm(f, { force: true })));
+  await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.final, p.srt, p.storyboard].map((f) => rm(f, { force: true })));
 }
 
 /**

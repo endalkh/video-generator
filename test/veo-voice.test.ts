@@ -330,3 +330,28 @@ describe("storyboard before videos (manual review)", () => {
     expect((await ps.get(id)).completed).toContain("clips");
   }, 60_000);
 });
+
+describe("storyboard video", () => {
+  it("joins every scene picture with its audio into storyboard.mp4, with no video model", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "goats on the hill", sceneCount: 3, audioMode: "narration", videoMode: "veo", reviewMode: "manual" }, "mock");
+    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+    await expect(ps.makeStoryboard(id)).rejects.toThrow(/no picture/);
+    await ps.drawScenePictures(id);
+    await ps.idle();
+    const { storyboard } = await ps.makeStoryboard(id);
+    expect(storyboard).toBe("storyboard.mp4");
+    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(0);
+    const m = media(id);
+    let audio = 0;
+    for (const i of [0, 1, 2]) audio += await probeDuration(m.scenePiece(i));
+    expect(Math.abs((await probeDuration(m.storyboard)) - audio)).toBeLessThan(0.5);
+    expect((await ps.get(id)).media.storyboard).toBe("storyboard.mp4");
+    // Redrawing a picture makes the storyboard stale: it's removed.
+    await ps.redrawScenePicture(id, 0, "In the magical forest");
+    await ps.idle();
+    expect((await ps.get(id)).media.storyboard).toBeNull();
+  }, 90_000);
+});

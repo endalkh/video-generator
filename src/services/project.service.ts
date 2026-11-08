@@ -9,7 +9,7 @@ import { KEEP_LATER_STEPS, Project } from "../domain/project/project.entity.js";
 import { ProjectMapper, type ProjectDto, type ProjectSummaryDto } from "../domain/project/project.mapper.js";
 import { CharacterSchema, MAX_VIDEO_SECONDS, PoemSchema, ProjectInputSchema, ScenePlanSchema, soundInVideo, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
-import { audioToWav, imageToPng, muxVideoWithAudio, probeDuration, probeStreams, runFfmpeg } from "../infrastructure/media/ffmpeg.js";
+import { audioToWav, concatClips, formatFor, imageToPng, muxVideoWithAudio, probeDuration, probeStreams, runFfmpeg, stillToClip } from "../infrastructure/media/ffmpeg.js";
 import { songTimeline } from "../domain/ports/generator.port.js";
 import { ensureDir, fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
@@ -29,6 +29,7 @@ export interface ProjectDetailsDto extends ProjectDto {
     final: string | null;
     subtitles: string | null;
     thumbnail: string | null;
+    storyboard: string | null;
     music: string | null;
     scenes: { index: number; image: string | null; clip: string | null; video: string | null; audio: string | null; /** The scene's own piece of the soundtrack (MP3). */ piece: string | null; /** One-scene lip-sync preview (clip + its audio). */ preview: string | null }[];
   };
@@ -108,6 +109,7 @@ export class ProjectService {
         cast: await Promise.all(project.cast.map(async (c) => ({ id: c.id, name: c.name, description: c.description, voice: c.voice ?? null, image: await rel(p.castImage(c.id)) }))),
         samples: await Promise.all((await sampleFiles(p)).map(async (f) => (await rel(f))!)),
         final: await rel(p.final),
+        storyboard: await rel(p.storyboard),
         subtitles: await rel(p.srt),
         thumbnail: await rel(p.thumbnail),
         // Background music under clips that make their own voice / song.
@@ -677,6 +679,46 @@ export class ProjectService {
     await wipeScene(this.media(id), index);
     await this.projects.save(project);
     await this.start(id, { until: "clips", picturesOnly: true, onlyScene: index });
+  }
+
+  /**
+   * Storyboard: every scene's picture (with its gentle camera move) and its audio, joined into storyboard.mp4, so the
+   * whole film can be watched and checked before any video is made. Local ffmpeg only (720p): nothing is paid for.
+   * Scenes left out are skipped; a scene without a picture is an error (draw the pictures first).
+   */
+  async makeStoryboard(id: string): Promise<{ storyboard: string }> {
+    const project = await this.loadIdle(id);
+    if (!project.isStepDone("audio")) throw new ConflictError("Make the audio first, then the storyboard");
+    const scenes = (project.scenes?.scenes ?? []).filter((s) => !s.leftOut);
+    const media = this.media(id);
+    const missing: number[] = [];
+    for (const s of scenes) if (!(await fileExists(media.sceneImage(s.index)))) missing.push(s.index + 1);
+    if (missing.length) throw new ConflictError(`Scene${missing.length === 1 ? "" : "s"} ${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no picture yet: draw the scene pictures first`);
+    const fmt = formatFor(project.input.aspectRatio, "720p");
+    const work = await mkdtemp(path.join(os.tmpdir(), "storyboard-"));
+    try {
+      const clips: string[] = [];
+      for (const s of scenes) {
+        const silent = path.join(work, `${s.index}-v.mp4`);
+        const out = path.join(work, `${s.index}.mp4`);
+        // The scene's own piece of the soundtrack (its voices + tail, or its slot of the song), timed like its clip.
+        const piece = await ensureScenePiece(media, project, s.index);
+        if (piece) {
+          await stillToClip({ duration: await probeDuration(piece), image: media.sceneImage(s.index), out: silent, motion: s.motion, fmt });
+          await muxVideoWithAudio({ video: silent, audio: piece, out });
+        } else {
+          // The sound is made inside each video clip (no separate audio): show the picture for a few silent seconds.
+          await stillToClip({ duration: 5, image: media.sceneImage(s.index), out, motion: s.motion, fmt });
+        }
+        clips.push(out);
+      }
+      const tmp = path.join(work, "storyboard.mp4");
+      await concatClips({ clips, out: tmp, workDir: work });
+      await writeFileAtomic(media.storyboard, await readFile(tmp));
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+    return { storyboard: path.relative(media.dir, media.storyboard) };
   }
 
   /** Make one scene's picture and clip again, keeping the others. */

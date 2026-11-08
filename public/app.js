@@ -845,7 +845,18 @@ function stepPage(p, step, keepVideo, videoKey) {
     if (idle && p.completed.includes("audio")) extra = [visualsSwitch(p, act)];
     // Storyboard: pictures drawn, videos not made yet.
     const storyboard = p.input.videoMode === "veo" && !done && p.scenes.scenes.some((sc) => { const x = p.media.scenes.find((y) => y.index === sc.index); return x?.image && !x.clip && !x.video; });
-    if (idle && storyboard) extra.unshift(h("p", { class: "w-full rounded-xl bg-sky-50 p-3 text-sm text-sky-900", text: "🖼 Storyboard: check each scene's picture with its audio. Use 🖼 Fix picture to change one (no video is made). When they all look right, make the clips — the videos are made from these pictures." }));
+    if (idle && storyboard) extra.unshift(h("p", { class: "w-full rounded-xl bg-sky-50 p-3 text-sm text-sky-900", text: "🖼 Storyboard: watch the whole film as pictures with their audio (▶ Watch the storyboard), or check each scene below. Use 🖼 Fix picture to change one (no video is made). When they all look right, make the clips — the videos are made from these pictures." }));
+    // The whole film as pictures + audio, before any video: made locally, free.
+    const allPictures = p.scenes.scenes.filter((sc) => !sc.leftOut).every((sc) => p.media.scenes.find((x) => x.index === sc.index)?.image);
+    if (p.completed.includes("audio") && allPictures) {
+      const player = p.media.storyboard
+        ? h("video", { controls: true, preload: "metadata", class: "max-h-[70vh] w-full rounded-xl bg-black", src: mediaUrl(id, p.media.storyboard, p.updatedAt), "aria-label": "Storyboard: every scene's picture with its audio" })
+        : null;
+      extra.unshift(h("div", { class: "w-full space-y-2" }, player,
+        idle ? h("button", { type: "button", class: "btn", title: "Join every scene's picture with its audio into one video, to watch the whole film before any video is made. Made on this computer: nothing is paid for.", onclick: act(async () => {
+          await post(`/api/projects/${enc(id)}/storyboard`);
+        }) }, p.media.storyboard ? "↻ Remake the storyboard" : "▶ Watch the storyboard (pictures + audio, free)") : null));
+    }
     // Draw the pictures first (no videos), check and fix them, then make the clips from them.
     const noPicture = p.scenes.scenes.filter((sc) => !sc.leftOut && drawsPicture(p, sc) && !p.media.scenes.find((x) => x.index === sc.index)?.image && !p.media.scenes.find((x) => x.index === sc.index)?.video);
     if (idle && p.completed.includes("audio") && noPicture.length) {
