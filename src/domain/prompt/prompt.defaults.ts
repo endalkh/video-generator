@@ -196,13 +196,17 @@ Art style: {{style}}.
     title: "Scene plan — dialogue story",
     description: "Dialogue mode: splits the story into scenes, and for each scene gives the spoken lines with their speaker. Must return JSON {scenes:[{index,text,visualPrompt,motion,characters,dialogue:[{speaker,line}]}]}. speaker is \"main\" (the main character), \"narrator\", or a cast id.",
     vars: ["poem_json", "stanza_count"],
-    template: `Turn this children's story into {{stanza_count}} animated film shots, one per stanza, in order, like a modern 3D kids' animated movie. This is a DIALOGUE story: characters talk to each other.
+    template: `Write {{stanza_count}} short DIALOGUE scenes for a 3D kids' animated movie, based on the STORY below. The story below is a plain summary — do NOT read it out word for word. Instead, write what the characters actually SAY OUT LOUD to each other.
 For each shot: "index" (0-based).
-"dialogue" = the lines spoken in this shot, in order, each as {"speaker","line"}:
- - "speaker" is "main" for the main character{{#if has_character_hint}} ({{character_hint}}){{/if}}, "narrator" for an unseen narrator, or the short lowercase slug id of a supporting character (e.g. "rabbit", "lion-cub", "sun"). Use the SAME ids consistently across all shots.
- - "line" is what they say, in {{language_name}}, short and natural for young children. 1–3 lines per shot; keep each line brief so the shot stays about {{video_seconds}} seconds when read aloud.
- - Give the supporting characters real speaking turns too — don't let only the main character talk.
-"text" = all this shot's lines joined with newlines (the same words as in "dialogue", speaker names NOT included), in the original language.
+"dialogue" = the spoken lines in this shot, in order, each as {"speaker","line"}:
+ - "speaker" is "main" for the main character{{#if has_character_hint}} ({{character_hint}}){{/if}}, "narrator" for a brief unseen narrator, or the short lowercase slug id of a supporting character (e.g. "rabbit", "lion-cub", "sun"). Use the SAME ids in every shot.
+ - "line" is REAL SPEECH in {{language_name}}: what that character says in the moment, in the first or second person, the way a person actually talks — a greeting, a question, a feeling, a reply. NOT a description of the story.
+   GOOD (the lion cub speaks): "እናቴ የት ናት? ጠፋሁ!" ("Where is my mother? I'm lost!"). Milcah replies: "አትፍራ፣ እረዳሃለሁ!" ("Don't be afraid, I'll help you!").
+   BAD (narration pretending to be a line): "ትንሹ አንበሳ እያለቀሰ ተገኘ" ("the little lion was found crying") — never put third-person narration in a character's mouth.
+ - The narrator (use sparingly, 0–1 short lines per shot) may set the scene in third person; every other speaker talks in first/second person.
+ - Give the supporting characters real speaking turns — a back-and-forth, not only the main character.
+ - 1–3 short lines per shot; keep each brief so the shot is about {{video_seconds}} seconds when read aloud.
+"text" = all this shot's lines joined with newlines (the words only, no speaker names), in {{language_name}}.
 "characters" = the slug ids of the supporting characters that appear in this shot (besides the main character); empty if none.
 {{#if has_samples}}The attached sample pictures show things to include; describe them exactly in "visualPrompt".{{/if}}By default shots are OUTDOORS in a bright, friendly setting unless the story clearly calls for another place; keep it sunny, gentle and never scary.
 How the place looks:
@@ -212,6 +216,7 @@ How the place looks:
 Art style: {{style}}.
 {{safety}}
 
+STORY (summary to dramatise, not to read aloud):
 {{poem_json}}`,
   },
   {
