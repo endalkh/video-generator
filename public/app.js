@@ -806,7 +806,12 @@ function stepPage(p, step, keepVideo, videoKey) {
             h("span", { class: "absolute top-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white", text: "🎞️ Veo animation · timed to the audio when the clips are made" }))
         : m?.image ? h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: sc.visualPrompt, class: "aspect-video w-full object-cover" })
         : h("div", { class: "grid aspect-video place-items-center bg-stone-100 text-sm text-stone-500", text: making ? "painting…" : "not made yet" });
-      return h("figure", { class: `overflow-hidden rounded-xl border border-orange-100 ${sc.leftOut ? "opacity-60" : ""}` }, media,
+      // The picture the video is made from, when a video/clip is shown above it.
+      const pictureThumb = m?.image && (m.preview || m.clip || m.video)
+        ? h("a", { href: mediaUrl(id, m.image, p.updatedAt), target: "_blank", rel: "noopener", class: "block px-3 pt-2 text-xs text-stone-500" },
+            h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: `Scene ${sc.index + 1} picture: ${sc.visualPrompt}`, class: "h-24 rounded-lg border border-orange-100 object-cover" }), "Picture the video is made from")
+        : null;
+      return h("figure", { class: `overflow-hidden rounded-xl border border-orange-100 ${sc.leftOut ? "opacity-60" : ""}` }, media, pictureThumb,
         sc.leftOut ? h("p", { class: "bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-600", text: "⏭ Left out of the video" }) : null,
         h("figcaption", { class: "flex items-start gap-2 p-3 text-sm" },
           h("span", { class: "flex-1 whitespace-pre-line", lang, text: `${sc.index + 1}. ${sc.text}` }),
@@ -822,11 +827,25 @@ function stepPage(p, step, keepVideo, videoKey) {
             if (!confirm(`Remake scene ${sc.index + 1} (new picture and clip)?${cost}`)) return SKIP;
             await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/redo`);
           }) }, "↻ Remake") : null,
+          // Fix the picture before any video is made: edit its description and draw only the picture again.
+          idle && p.completed.includes("audio") && drawsPicture(p, sc) ? h("button", { type: "button", class: "btn-soft shrink-0 px-3 py-1 text-xs", title: "Change what this scene's picture shows and draw only the picture again. No video is made; this scene's old video and clip are removed.", onclick: act(async () => {
+            const desc = prompt(`Scene ${sc.index + 1} picture — what should it show? (English; the characters' looks are added automatically)`, sc.visualPrompt);
+            if (desc === null || !desc.trim()) return SKIP;
+            if (m?.video && !confirm(`Scene ${sc.index + 1} already has a video. Redrawing the picture removes it (a new video is paid when you make the clips). Continue?`)) return SKIP;
+            await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/picture/redraw`, { visualPrompt: desc.trim() });
+          }) }, "🖼 Fix picture") : null,
           p.completed.includes("audio") && p.input.audioMode !== "character" ? scenePieceButton(p, sc, m) : null,
           idle && p.input.videoMode === "veo" ? sceneVideoUpload(p, sc, act) : null),
         idle ? h("div", { class: "px-3 pb-3" }, scenePictureToggle(p, sc, act)) : null);
     }));
     if (idle && p.completed.includes("audio")) extra = [visualsSwitch(p, act)];
+    // Draw the pictures first (no videos), check and fix them, then make the clips from them.
+    const noPicture = p.scenes.scenes.filter((sc) => !sc.leftOut && drawsPicture(p, sc) && !p.media.scenes.find((x) => x.index === sc.index)?.image && !p.media.scenes.find((x) => x.index === sc.index)?.video);
+    if (idle && p.completed.includes("audio") && noPicture.length) {
+      extra.unshift(h("button", { type: "button", class: "btn", title: "Draw the scene pictures only. No videos are made, so you can check and fix each picture (🖼 Fix picture) before paying for videos.", onclick: act(async () => {
+        await post(`/api/projects/${enc(id)}/scenes/pictures/draw`);
+      }) }, `🖼 Draw the ${noPicture.length} scene picture${noPicture.length === 1 ? "" : "s"} first (no videos)`));
+    }
     // Videos uploaded by hand (or made earlier): approve them as they are and go on, without generating anything.
     const kept = p.scenes.scenes.filter((sc) => !sc.leftOut);
     const hasVideo = (sc) => p.media.scenes.find((m) => m.index === sc.index)?.video;
@@ -1840,6 +1859,11 @@ function samplesEditor(p) {
     h("p", { class: "text-xs text-stone-500", text: SAMPLES_HELP }),
     list, picker.el, redrawRow,
     h("div", { class: "flex flex-wrap items-center gap-3" }, save, status));
+}
+
+/** Whether a scene gets a picture (same rule as the server's scenePicture): always for stills; on Veo unless turned off. */
+function drawsPicture(p, sc) {
+  return p.input.videoMode !== "veo" || (sc.picture ?? p.input.scenePictures !== false);
 }
 
 /** File input with preview and size check. `dataUrl()` resolves undefined when nothing is chosen. */

@@ -130,7 +130,7 @@ export class ProjectService {
   }
 
   /** Start (or resume) in the background; progress is published to subscribers. Returns a promise that settles when the run finishes. */
-  async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean; keepLater?: boolean; onlyScene?: number } = {}): Promise<void> {
+  async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean; keepLater?: boolean; onlyScene?: number; picturesOnly?: boolean } = {}): Promise<void> {
     if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is already running`);
     const project = await this.load(id);
     if (opts.from !== undefined && !STEP_NAMES.includes(opts.from as StepName)) throw new ValidationError(`Unknown step "${opts.from}"`);
@@ -144,7 +144,7 @@ export class ProjectService {
     };
     job.done = this.pipeline
       // "final" ends the run anyway, so it never needs an explicit stop.
-      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, noNewVideos: opts.noNewVideos, keepLater: opts.keepLater, onlyScene: opts.onlyScene, signal: job.controller.signal, onEvent })
+      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, noNewVideos: opts.noNewVideos, keepLater: opts.keepLater, onlyScene: opts.onlyScene, picturesOnly: opts.picturesOnly, signal: job.controller.signal, onEvent })
       .then(
         () => undefined,
         (err) => {
@@ -651,6 +651,32 @@ export class ProjectService {
     await writeFileAtomic(media.castImage(member.id), await this.pipeline.drawCastImage(project, member, provider));
     await this.projects.save(project);
     return ProjectMapper.toDto(project);
+  }
+
+  /**
+   * Draw the scene pictures only — no videos or clips (nothing paid for video) — so they can be checked and fixed
+   * before the videos are made. Pictures already drawn are kept. Runs in the background.
+   */
+  async drawScenePictures(id: string): Promise<void> {
+    const project = await this.loadIdle(id);
+    if (!project.isStepDone("audio")) throw new ConflictError("Make the audio first, then draw the scene pictures");
+    await this.start(id, { until: "clips", picturesOnly: true });
+  }
+
+  /**
+   * Draw one scene's picture again (optionally from a new picture description), without making its video.
+   * Its old picture, video and clip are deleted; the words and audio stay. Runs in the background.
+   */
+  async redrawScenePicture(id: string, index: number, visualPrompt?: string): Promise<void> {
+    const project = await this.loadIdle(id);
+    const count = project.scenes?.scenes.length ?? 0;
+    if (!Number.isInteger(index) || index < 0 || index >= count) throw new ValidationError(`No scene ${index + 1}`);
+    if (!project.isStepDone("audio")) throw new ConflictError("Make the audio first, then draw the scene pictures");
+    if (visualPrompt !== undefined) project.setSceneVisualPrompt(index, visualPrompt);
+    project.redoFrom("clips");
+    await wipeScene(this.media(id), index);
+    await this.projects.save(project);
+    await this.start(id, { until: "clips", picturesOnly: true, onlyScene: index });
   }
 
   /** Make one scene's picture and clip again, keeping the others. */

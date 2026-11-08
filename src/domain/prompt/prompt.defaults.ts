@@ -43,11 +43,19 @@ export const DEFAULT_PROMPTS: readonly PromptDefinition[] = [
     template: `Everything people have built or made in the shot looks Ethiopian, never European or American:
 - Homes: the traditional Ethiopian gojo bet (ጎጆ ቤት, tukul): a round house with thick, smooth earthen walls of mud and straw (chika) over a frame of wooden poles, a tall cone-shaped thatched grass roof, often crowned with a small clay pot at the top, a low wooden door, and a swept earthen yard with a fence of woven sticks. In towns, simple rectangular chika houses with corrugated tin roofs and painted wooden doors and windows. No brick or timber cottages, no picket fences, chimneys, shingled roofs, red barns or suburban houses.
 - Inside a home: an earthen floor sprinkled with fresh green grass, a woven mesob basket table, a clay jebena coffee pot with small sini cups, injera on a mitad, gourds and woven mats.
-- Land and animals: the green Ethiopian highlands: rolling and terraced hills, eucalyptus and acacia trees, teff fields, donkeys, humped zebu cattle, goats, sheep and chickens.
+- Land and animals, only when the story names no other place (a forest, jungle, river, sky… stays that place): the green Ethiopian highlands: rolling and terraced hills, eucalyptus and acacia trees, teff fields, donkeys, humped zebu cattle, goats, sheep and chickens.
 - Food: injera with wot, kolo, dabo bread, bananas, mangoes, oranges.
 - Clothes of the people around her: everyday Ethiopian clothes; for holidays and celebrations, white habesha kemis and netela with colourful tibeb borders.
 - Modern topics (cars, buses, a city, a school) show modern Ethiopian life: Addis Ababa streets, blue-and-white minibus taxis, the light rail, Ethiopian schools and markets.
 Show it warmly and respectfully, bright and cheerful.`,
+    previousTemplates: [`Everything people have built or made in the shot looks Ethiopian, never European or American:
+- Homes: the traditional Ethiopian gojo bet (ጎጆ ቤት, tukul): a round house with thick, smooth earthen walls of mud and straw (chika) over a frame of wooden poles, a tall cone-shaped thatched grass roof, often crowned with a small clay pot at the top, a low wooden door, and a swept earthen yard with a fence of woven sticks. In towns, simple rectangular chika houses with corrugated tin roofs and painted wooden doors and windows. No brick or timber cottages, no picket fences, chimneys, shingled roofs, red barns or suburban houses.
+- Inside a home: an earthen floor sprinkled with fresh green grass, a woven mesob basket table, a clay jebena coffee pot with small sini cups, injera on a mitad, gourds and woven mats.
+- Land and animals: the green Ethiopian highlands: rolling and terraced hills, eucalyptus and acacia trees, teff fields, donkeys, humped zebu cattle, goats, sheep and chickens.
+- Food: injera with wot, kolo, dabo bread, bananas, mangoes, oranges.
+- Clothes of the people around her: everyday Ethiopian clothes; for holidays and celebrations, white habesha kemis and netela with colourful tibeb borders.
+- Modern topics (cars, buses, a city, a school) show modern Ethiopian life: Addis Ababa streets, blue-and-white minibus taxis, the light rail, Ethiopian schools and markets.
+Show it warmly and respectfully, bright and cheerful.`],
   },
   {
     key: "poem",
@@ -208,6 +216,31 @@ For each shot: "index" (0-based).
  - 1–3 short lines per shot; keep them brief so each shot is about {{shot_seconds}} seconds when spoken (the whole video is about {{video_seconds}} seconds).
 "text" = all this shot's lines joined with newlines (the words only, no speaker names), in {{language_name}}.
 "characters" = the slug ids of the supporting characters that appear in this shot (besides the main character); empty if none.
+{{#if has_samples}}The attached sample pictures show things to include; describe them exactly in "visualPrompt".{{/if}}WHERE IT HAPPENS: the BRIEF below names the place (e.g. "a vibrant magical forest"). EVERY shot takes place in that same place, never somewhere else (no meadows, hills, fields or villages when the brief says forest). Start every "visualPrompt" by naming that place and showing the details the brief gives it (e.g. "In the vibrant magical forest, among colourful flowers, butterflies, lush green trees and beams of sunlight, ..."). Only if the brief names no place are the shots OUTDOORS in a bright, friendly setting. Keep it sunny, gentle and never scary.
+How homes, people and things look where they appear (this never replaces the brief's setting):
+{{local_look}}
+"visualPrompt" = a vivid ENGLISH shot description: where we are, what the characters are doing and their expressions (do NOT describe the main character's appearance; it is added separately), who is talking to whom. No text in the image.
+"motion" = one of zoom-in, zoom-out, pan-left, pan-right, static.
+Art style: {{style}}.
+{{safety}}
+
+BRIEF (the place, mood and characters of the video):
+{{topic}}
+
+STORY (summary to dramatise, not to read aloud):
+{{poem_json}}`,
+    previousTemplates: [`Write {{stanza_count}} short DIALOGUE scenes for a 3D kids' animated movie, based on the STORY below. The story below is a plain summary — do NOT read it out word for word. Instead, write what the characters actually SAY OUT LOUD to each other.
+For each shot: "index" (0-based).
+"dialogue" = the spoken lines in this shot, in order, each as {"speaker","line"}:
+ - "speaker" is "main" for the main character{{#if has_character_hint}} ({{character_hint}}){{/if}}, "narrator" for a brief unseen narrator, or the short lowercase slug id of a supporting character (e.g. "rabbit", "lion-cub", "sun"). Use the SAME ids in every shot.
+ - "line" is REAL SPEECH in {{language_name}}: what that character says in the moment, in the first or second person, the way a person actually talks — a greeting, a question, a feeling, a reply. NOT a description of the story.
+   GOOD (the lion cub speaks): "እናቴ የት ናት? ጠፋሁ!" ("Where is my mother? I'm lost!"). Milcah replies: "አትፍራ፣ እረዳሃለሁ!" ("Don't be afraid, I'll help you!").
+   BAD (narration pretending to be a line): "ትንሹ አንበሳ እያለቀሰ ተገኘ" ("the little lion was found crying") — never put third-person narration in a character's mouth.
+ - The narrator (use sparingly, 0–1 short lines per shot) may set the scene in third person; every other speaker talks in first/second person.
+ - Give the supporting characters real speaking turns — a back-and-forth, not only the main character. Every supporting character in the story speaks at least once in the video.
+ - 1–3 short lines per shot; keep them brief so each shot is about {{shot_seconds}} seconds when spoken (the whole video is about {{video_seconds}} seconds).
+"text" = all this shot's lines joined with newlines (the words only, no speaker names), in {{language_name}}.
+"characters" = the slug ids of the supporting characters that appear in this shot (besides the main character); empty if none.
 {{#if has_samples}}The attached sample pictures show things to include; describe them exactly in "visualPrompt".{{/if}}By default shots are OUTDOORS in a bright, friendly setting unless the story clearly calls for another place; keep it sunny, gentle and never scary.
 How the place looks:
 {{local_look}}
@@ -217,7 +250,7 @@ Art style: {{style}}.
 {{safety}}
 
 STORY (summary to dramatise, not to read aloud):
-{{poem_json}}`,
+{{poem_json}}`],
   },
   {
     key: "character",

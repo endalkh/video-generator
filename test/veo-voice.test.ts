@@ -278,3 +278,32 @@ describe("one-scene preview", () => {
     expect((await ps.get(id)).completed).not.toContain("clips"); // two clips are still missing
   }, 60_000);
 });
+
+describe("scene pictures first", () => {
+  it("draws the pictures without making any video, then redraws one from a new description", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "goats on the hill", sceneCount: 3, audioMode: "narration", videoMode: "veo", reviewMode: "manual" }, "mock");
+    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+    const m = media(id);
+    await ps.drawScenePictures(id);
+    await ps.idle();
+    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(0);
+    for (const i of [0, 1, 2]) {
+      expect(await fileExists(m.sceneImage(i))).toBe(true);
+      expect(await fileExists(m.sceneClip(i))).toBe(false);
+    }
+    expect((await ps.get(id)).completed).not.toContain("clips");
+
+    const images = () => mock.prompts.filter((x) => x.kind === "image").length;
+    const before = images();
+    await ps.redrawScenePicture(id, 1, "In the vibrant magical forest, goats dance among flowers");
+    await ps.idle();
+    expect(images()).toBe(before + 1); // only scene 2's picture
+    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(0);
+    const p = await ps.get(id);
+    expect(p.scenes!.scenes[1]!.visualPrompt).toBe("In the vibrant magical forest, goats dance among flowers");
+    expect(p.completed).toContain("audio"); // the words and audio stay
+  }, 60_000);
+});

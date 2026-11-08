@@ -288,6 +288,21 @@ export class Project {
     this.invalidateAfterEdit("scenes", "audio");
   }
 
+  /** Change one scene's picture description only (its words and audio stay); its picture, video and clip are made again. */
+  setSceneVisualPrompt(index: number, visualPrompt: string): void {
+    this.assertEditable();
+    const scene = this.props.scenes?.scenes[index];
+    if (!scene) throw new ValidationError(`No scene ${index + 1}`);
+    const text = visualPrompt.trim();
+    if (!text) throw new ValidationError("The picture description can't be empty");
+    scene.visualPrompt = text;
+    if (this.isStepDone("clips")) {
+      this.redoFrom("clips");
+      if (this.props.status === "done") this.props.status = "paused";
+    }
+    this.touch();
+  }
+
   /** Replace the character's name/look; only the character image and later steps are made again. */
   editCharacter(character: Character): void {
     this.assertEditable();

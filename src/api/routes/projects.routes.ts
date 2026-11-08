@@ -88,6 +88,15 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
       await projects.redoScene(params.id!, Number(params.index) - 1);
       return { id: params.id };
     }, 202)
+    .post("/api/projects/:id/scenes/pictures/draw", async ({ params }) => {
+      await projects.drawScenePictures(params.id!);
+      return { started: true };
+    }, 202)
+    .post("/api/projects/:id/scenes/:index/picture/redraw", async ({ params, body }) => {
+      const b = await body();
+      await projects.redrawScenePicture(params.id!, Number(params.index) - 1, typeof b.visualPrompt === "string" ? b.visualPrompt : undefined);
+      return { started: true };
+    }, 202)
     .post("/api/projects/:id/scenes/:index/preview", async ({ params }) => projects.previewScene(params.id!, Number(params.index) - 1))
     .put("/api/projects/:id/cast/:castId", async ({ params, body }) => {
       const b = await body();

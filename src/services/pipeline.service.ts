@@ -275,6 +275,8 @@ export interface RunOptions {
   keepLater?: boolean;
   /** Clips step only: make just this scene's clip (0-based) and stop, without marking the step done (one-scene preview). */
   onlyScene?: number;
+  /** Clips step only: draw the missing scene pictures and stop — no videos, no clips — so they can be checked and fixed first. */
+  picturesOnly?: boolean;
   concurrency?: number;
   signal?: AbortSignal;
   onEvent?: (e: PipelineEvent) => void;
@@ -431,8 +433,8 @@ export class PipelineService {
         emit({ type: "step-start", step: name });
         log.step(name, "running…");
         await produce();
-        // One-scene preview: only that scene's clip was made, so the step isn't done yet.
-        if (name === "clips" && opts.onlyScene !== undefined) {
+        // One-scene preview / pictures only: not every clip was made, so the step isn't done yet.
+        if (name === "clips" && (opts.onlyScene !== undefined || opts.picturesOnly)) {
           await save();
           throw new StopAfter(name);
         }
@@ -838,6 +840,7 @@ export class PipelineService {
             await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references, label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
           }
           checkCancel();
+          if (opts.picturesOnly) return; // pictures only: no video, no clip yet
           if (useVeo && opts.noNewVideos && !(await fileExists(p.sceneVideo(i)))) {
             throw new Error(`Scene ${i + 1} has no video yet: upload it (📤 Upload video) or click "Make the clips" to generate it`);
           }
