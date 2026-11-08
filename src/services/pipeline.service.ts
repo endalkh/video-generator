@@ -7,7 +7,7 @@ import type { Project } from "../domain/project/project.entity.js";
 import { assignCastVoices, defaultVoice, minResolution, scenePicture, soundInVideo, speakerVoice, SPEAKER_MAIN, SPEAKER_NARRATOR, STEP_NAMES, syncCastToScript, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
-import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
+import { isAudioDrivenModel, isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
 import { needsScenePicture } from "../infrastructure/providers/gemini.js";
 import { addEndCard, assertFfmpegAvailable, audioParts, audioPiece, canDrawText, buildSrt, concatAudio, concatClips, mixVoiceOverMusic, formatFor, probeDuration, SCENE_TAIL_SEC, stillToClip, videoToClip } from "../infrastructure/media/ffmpeg.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
@@ -15,7 +15,7 @@ import { ensureDir, fileExists, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
 import type { ModelSettingsService } from "./model-settings.service.js";
 import type { PromptService } from "./prompt.service.js";
-import type { ModelTask } from "../domain/model-setting/model-setting.entity.js";
+import { LIPSYNC_OFF, type ModelTask } from "../domain/model-setting/model-setting.entity.js";
 
 export type PipelineEvent =
   | { type: "step-start"; step: StepName }
@@ -113,6 +113,10 @@ export function mediaPaths(dir: string) {
     scenePiece: (i: number) => path.join(sceneDir(i), "scene-audio.mp3"),
     sceneImage: (i: number) => path.join(sceneDir(i), "image.png"),
     sceneVideo: (i: number) => path.join(sceneDir(i), "video.mp4"),
+    /** The scene video as the video model made it, before the lip-sync pass. */
+    sceneVideoRaw: (i: number) => path.join(sceneDir(i), "video-raw.mp4"),
+    /** Marker: video.mp4 is lip-synced to the current audio (removed when the audio changes). */
+    sceneLipSync: (i: number) => path.join(sceneDir(i), "lipsync.json"),
     /** Remote task that is making / made this scene's video (inference.sh), so a failed download isn't paid for twice. */
     sceneVideoTask: (i: number) => path.join(sceneDir(i), "video-task.json"),
     sceneClip: (i: number) => path.join(sceneDir(i), "clip.mp4"),
@@ -142,10 +146,10 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   const at = (s: StepName) => STEP_NAMES.indexOf(s) >= STEP_NAMES.indexOf(from);
   const files: string[] = [];
   const perScene: ((i: number) => string)[] = [];
-  if (at("character")) files.push(p.characterImage, p.thumbnail), perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);  if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio, p.scenePiece);
+  if (at("character")) files.push(p.characterImage, p.thumbnail), perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoRaw, p.sceneLipSync, p.sceneVideoTask);  if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio, p.scenePiece, p.sceneLipSync);
   // Pictures and Veo videos don't depend on the audio: a new song only re-times (re-renders) the clips.
   if (at("clips")) perScene.push(p.sceneClip, p.scenePreview);
-  if (from === "clips") perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);
+  if (from === "clips") perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoRaw, p.sceneLipSync, p.sceneVideoTask);
   if (at("final")) files.push(p.final, p.srt);
   if (at("audio")) {
     const top = await readdir(p.dir).catch(() => [] as string[]);
@@ -154,7 +158,10 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   const dirs = await readdir(path.join(p.dir, "scenes")).catch(() => [] as string[]);
   for (const d of dirs) {
     const i = Number(d) - 1;
-    if (Number.isInteger(i) && i >= 0) files.push(...perScene.map((f) => f(i)));
+    if (!Number.isInteger(i) || i < 0) continue;
+    // New audio, same video: put back the video as it was made, so it's lip-synced again to the new audio.
+    if (at("audio") && !perScene.includes(p.sceneVideo) && (await fileExists(p.sceneVideoRaw(i)))) await rename(p.sceneVideoRaw(i), p.sceneVideo(i));
+    files.push(...perScene.map((f) => f(i)));
   }
   files.push(p.storyboard); // any redo changes the pictures or the audio it was made from
   await Promise.all(files.map((f) => rm(f, { force: true })));
@@ -190,14 +197,14 @@ export async function wipeSceneVideos(p: MediaPaths): Promise<void> {
   const files = [p.final, p.srt];
   for (const d of dirs) {
     const i = Number(d) - 1;
-    if (Number.isInteger(i) && i >= 0) files.push(p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.scenePreview(i));
+    if (Number.isInteger(i) && i >= 0) files.push(p.sceneVideo(i), p.sceneVideoRaw(i), p.sceneLipSync(i), p.sceneVideoTask(i), p.sceneClip(i), p.scenePreview(i));
   }
   await Promise.all(files.map((f) => rm(f, { force: true })));
 }
 
 /** Delete one scene's picture, video and clip (plus the final video) so only that scene is made again. */
 export async function wipeScene(p: MediaPaths, i: number): Promise<void> {
-  await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.scenePreview(i), p.final, p.srt, p.storyboard].map((f) => rm(f, { force: true })));
+  await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneVideoRaw(i), p.sceneLipSync(i), p.sceneVideoTask(i), p.sceneClip(i), p.scenePreview(i), p.final, p.srt, p.storyboard].map((f) => rm(f, { force: true })));
 }
 
 /** Delete one scene's video and clip but keep its picture (e.g. a preview made from the picture you checked). */
@@ -211,7 +218,7 @@ export function withoutStudioNames<T extends { text: string }>(r: T): T {
 }
 
 export async function wipeSceneVideo(p: MediaPaths, i: number): Promise<void> {
-  await Promise.all([p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.scenePreview(i), p.final, p.srt].map((f) => rm(f, { force: true })));
+  await Promise.all([p.sceneVideo(i), p.sceneVideoRaw(i), p.sceneLipSync(i), p.sceneVideoTask(i), p.sceneClip(i), p.scenePreview(i), p.final, p.srt].map((f) => rm(f, { force: true })));
 }
 
 /**
@@ -915,6 +922,25 @@ export class PipelineService {
                 ? ` — the request limit for ${r.model} on your account was reached. Finished clips are kept: wait a few minutes (or until tomorrow for a daily limit), then click "Make the clips" on the Clips page. A cheaper Veo model (fast or lite, on the Models page) has higher limits.`
                 : "";
               throw new Error(`Scene ${i + 1} video (${r.model}) failed: ${(err as Error).message}${hint}`);
+            }
+          }
+          // Lip-sync pass: the speaking face follows this scene's own audio (its voices + tail). The video as the
+          // video model made it is kept (video-raw.mp4), so new audio is synced again from it, never from a synced copy.
+          const lip = models.lip_sync;
+          if (useVeo && !inVideo && lip && lip !== LIPSYNC_OFF && !isAudioDrivenModel(models.scene_video) && (await fileExists(p.sceneVideo(i))) && !(await fileExists(p.sceneLipSync(i)))) {
+            const piece = await ensureScenePiece(p, project, i);
+            if (piece) {
+              if (typeof provider.lipSync !== "function") throw new Error(`Provider "${provider.name}" can't lip-sync; set Lip-sync to "none" on the Models page`);
+              if (!(await fileExists(p.sceneVideoRaw(i)))) await writeFileAtomic(p.sceneVideoRaw(i), await readFile(p.sceneVideo(i)));
+              report(`scene ${i + 1}: lip-syncing to its audio`);
+              await this.generations.add({ projectId: project.id, step: "clips", sceneIndex: i, promptKey: "lip_sync", promptVersion: 1, prompt: `lip-sync scene ${i + 1}'s video to its audio`, provider: provider.name, model: lip });
+              try {
+                await writeFileAtomic(p.sceneVideo(i), await provider.lipSync({ model: lip, video: await readFile(p.sceneVideoRaw(i)), audio: await readFile(piece), label: `scene ${i + 1} lip-sync`, ctx: ctx({ scene: s }) }));
+              } catch (err) {
+                if (err instanceof PipelineCancelled) throw err;
+                throw new Error(`Scene ${i + 1} lip-sync (${lip}) failed: ${(err as Error).message}. The scene video itself is kept; set Lip-sync to "none" on the Models page to use it without lip-sync.`);
+              }
+              await writeFileAtomic(p.sceneLipSync(i), JSON.stringify({ model: lip, at: new Date().toISOString() }));
             }
           }
           const tmpClip = `${p.sceneClip(i)}.part.mp4`;

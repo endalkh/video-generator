@@ -39,6 +39,12 @@ export const INFERENCE_SH_VIDEO_APPS = [
   { id: "pixverse/v6", app: "pixverse/v6", kind: "pixverse", displayName: "PixVerse v6 — low cost: animates the scene picture, up to 1080p, 5-15 s (inference.sh)" },
 ] as const;
 
+/** Lip-sync apps: re-time the mouth in an existing video to an audio track. */
+export const INFERENCE_SH_LIPSYNC_APPS = [
+  { id: "falai/pixverse-lipsync", app: "falai/pixverse-lipsync", kind: "pixverse", displayName: "PixVerse Lipsync — syncs the speaking face in the scene video to its audio (inference.sh)" },
+  { id: "infsh/latentsync-1-6", app: "infsh/latentsync-1-6", kind: "latentsync", displayName: "LatentSync 1.6 — lip-syncs the face in the scene video to its audio, best on human-like faces (inference.sh)" },
+] as const;
+
 /** Can this inference.sh model make a scene without a scene picture? (Unknown models: assume not.) */
 export function inferenceShWorksWithoutPicture(model: string): boolean {
   const def = INFERENCE_SH_VIDEO_APPS.find((a) => INFERENCE_SH_PREFIX + a.id === model);
@@ -119,7 +125,18 @@ export class InferenceShVideo {
   }
 
   listModels(): AvailableModel[] {
-    return INFERENCE_SH_VIDEO_APPS.map((a) => ({ id: INFERENCE_SH_PREFIX + a.id, displayName: a.displayName }));
+    return [...INFERENCE_SH_VIDEO_APPS, ...INFERENCE_SH_LIPSYNC_APPS].map((a) => ({ id: INFERENCE_SH_PREFIX + a.id, displayName: a.displayName }));
+  }
+
+  /** Lip-sync an existing video to an audio track (PixVerse Lipsync or LatentSync). */
+  async lipSync(opts: { model: string; video: Buffer; audio: Buffer; label: string }): Promise<Buffer> {
+    const id = opts.model.slice(INFERENCE_SH_PREFIX.length);
+    const def = INFERENCE_SH_LIPSYNC_APPS.find((a) => a.id === id);
+    if (!def) throw new Error(`Unknown inference.sh lip-sync app "${id}" (known: ${INFERENCE_SH_LIPSYNC_APPS.map((a) => a.id).join(", ")})`);
+    const video: PendingFile = { bytes: opts.video, contentType: "video/mp4" };
+    const audio: PendingFile = { bytes: opts.audio, contentType: "audio/mpeg" };
+    const input = def.kind === "latentsync" ? { video_path: video, audio_path: audio } : { video, audio };
+    return this.run(def.app, input, opts.label);
   }
 
   /**
@@ -267,6 +284,11 @@ export class InferenceShVideo {
       }
       log.info(`${label}: earlier inference.sh task ${opts.resumeTaskId} ${prev ? st : "not found"}; starting a new one`);
     }
+    return this.run(app, input, label, opts.onTaskStarted);
+  }
+
+  /** Upload the input files, start the app and wait for its video. */
+  private async run(app: string, input: Record<string, unknown>, label: string, onTaskStarted?: (taskId: string) => Promise<void> | void): Promise<Buffer> {
     const upload = async (v: unknown): Promise<unknown> => {
       if (Array.isArray(v)) return Promise.all(v.map(upload));
       const f = v as PendingFile;
@@ -277,7 +299,7 @@ export class InferenceShVideo {
     log.debug(`${label}: running ${app} on inference.sh`);
     const created = await this.api<{ id: string; status?: unknown }>("POST", "/apps/run", { app, input: uploaded });
     log.info(`${label}: inference.sh task ${created.id} (${app})`);
-    await opts.onTaskStarted?.(created.id);
+    await onTaskStarted?.(created.id);
     return this.finish(created.id, statusOf(created.status), label);
   }
 
@@ -321,7 +343,7 @@ export class InferenceShVideo {
   private async upload(f: PendingFile): Promise<string> {
     const ext = ({ "audio/mpeg": "mp3" } as Record<string, string>)[f.contentType] ?? f.contentType.split("/")[1] ?? "bin";
     const [file] = await this.api<{ uri: string; upload_url?: string }[]>("POST", "/files", {
-      files: [{ uri: "", filename: `${f.contentType.startsWith("audio/") ? "audio" : "image"}.${ext}`, content_type: f.contentType, size: f.bytes.length }],
+      files: [{ uri: "", filename: `${f.contentType.split("/")[0] === "audio" ? "audio" : f.contentType.startsWith("video/") ? "video" : "image"}.${ext}`, content_type: f.contentType, size: f.bytes.length }],
     });
     if (!file?.upload_url) throw new Error("inference.sh didn't return an upload URL");
     const put = await this.fetchImpl(file.upload_url, { method: "PUT", body: new Uint8Array(f.bytes), headers: { "Content-Type": f.contentType } });

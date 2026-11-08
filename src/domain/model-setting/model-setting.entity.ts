@@ -1,7 +1,10 @@
 import { NotFoundError, ValidationError } from "../errors.js";
 
 /** Kind of model a task needs; used to filter the model list offered in the UI. */
-export type ModelCapability = "text" | "image" | "tts" | "music" | "video";
+export type ModelCapability = "text" | "image" | "tts" | "music" | "video" | "lipsync";
+
+/** Lip-sync task value meaning "no lip-sync pass". */
+export const LIPSYNC_OFF = "none";
 
 export interface ModelTaskDefinition {
   task: string;
@@ -13,7 +16,7 @@ export interface ModelTaskDefinition {
   envVar: string;
 }
 
-export const MODEL_TASK_IDS = ["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "channel_text", "channel_image", "plan_text"] as const;
+export const MODEL_TASK_IDS = ["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "lip_sync", "channel_text", "channel_image", "plan_text"] as const;
 export type ModelTask = (typeof MODEL_TASK_IDS)[number];
 
 /** Every task in the pipeline that calls an AI model, in pipeline order. */
@@ -26,6 +29,7 @@ export const MODEL_TASKS: readonly (ModelTaskDefinition & { task: ModelTask })[]
   { task: "song", title: "Song", description: "Music for every video. Audio = Song: composes and sings the whole song. Audio = Rhyme over music: only the instrumental music (the Narration model says the words). Each video's Audio choice is on its Audio step.", capability: "music", defaultModel: "lyria-3.5", envVar: "GEMINI_MUSIC_MODEL" },
   { task: "narration", title: "Narration / TTS", description: "Reads each scene aloud (Narration mode).", capability: "tts", defaultModel: "gemini-3.8-flash-tts", envVar: "GEMINI_TTS_MODEL" },
   { task: "scene_video", title: "Scene animation", description: "Animates each scene (Visuals = Veo).", capability: "video", defaultModel: "gemini-omni-1.2-flash", envVar: "GEMINI_VIDEO_MODEL" },
+  { task: "lip_sync", title: "Lip-sync", description: "Optional pass after each new scene video: moves the speaking character's mouth to the scene's audio (dialogue / narration voices). \"none\" = off. Works best on human-like faces; one face per clip.", capability: "lipsync", defaultModel: LIPSYNC_OFF, envVar: "LIPSYNC_MODEL" },
   { task: "channel_text", title: "Channel name & description", description: "Writes the YouTube channel name, handle, description and keywords (Channel page), and each finished video's title, description and tags.", capability: "text", defaultModel: "gemini-3.8-flash", envVar: "GEMINI_CHANNEL_TEXT_MODEL" },
   { task: "channel_image", title: "Channel art", description: "Draws the YouTube logo, banner and thumbnails (Channel page and each finished video).", capability: "image", defaultModel: "gemini-3.1-flash-image", envVar: "GEMINI_CHANNEL_IMAGE_MODEL" },
   { task: "plan_text", title: "Monthly ideas & schedule", description: "Plans a month of video ideas for the posting schedule (Ideas & schedule page).", capability: "text", defaultModel: "gemini-3.8-flash", envVar: "GEMINI_PLAN_MODEL" },
@@ -49,7 +53,9 @@ export function capabilityOf(modelId: string): ModelCapability | undefined {
   // "free/<model>" = the same Gemini model on the free-tier key (GEMINI_TEXT_API_KEY).
   const id = modelId.toLowerCase().replace(/^free\//, "");
   // inference.sh apps ("inference.sh/bytedance/seedance-2-5", "inference.sh/klingai/avatar"): only these video apps are wired up.
+  if (id === LIPSYNC_OFF) return "lipsync";
   if (id.startsWith("inference.sh/")) {
+    if (/^inference\.sh\/(falai\/pixverse-lipsync|infsh\/latentsync-1-6)$/.test(id)) return "lipsync";
     return /\/seedance|^inference\.sh\/(klingai\/(avatar(-pro)?|video-v3)|alibaba\/wan-2-7-i2v|bfl\/flux-3-video|minimax\/h3|falai\/minimax-h3-max|google\/gemini-omni-flash|xai\/grok-imagine-video-1-5|pruna\/p-video|pixverse\/v6)$/.test(id) ? "video" : undefined;
   }
   if (id.startsWith("treblo/")) return "music";

@@ -1661,8 +1661,8 @@ function renderPromptEditor(p) {
 }
 
 // ---------- Models ----------
-const CAPABILITY_LABEL = { text: "Text", image: "Image", tts: "Speech", music: "Music", video: "Video" };
-const CAPABILITY_ICON = { text: "✍️", image: "🎨", tts: "🗣️", music: "🎵", video: "🎞️" };
+const CAPABILITY_LABEL = { text: "Text", image: "Image", tts: "Speech", music: "Music", video: "Video", lipsync: "Lip-sync" };
+const CAPABILITY_ICON = { text: "✍️", image: "🎨", tts: "🗣️", music: "🎵", video: "🎞️", lipsync: "👄" };
 
 async function showModels() {
   setNav("models");

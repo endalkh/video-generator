@@ -222,7 +222,7 @@ describe("inference.sh Seedance video", () => {
     const ids = new InferenceShVideo("k").listModels().map((m) => m.id);
     const added = ["bytedance/seedance-2-0-fast", "alibaba/wan-2-7-i2v", "bfl/flux-3-video", "minimax/h3", "falai/minimax-h3-max", "google/gemini-omni-flash", "xai/grok-imagine-video-1-5", "pruna/p-video", "pixverse/v6"].map((a) => `inference.sh/${a}`);
     expect(ids).toEqual(expect.arrayContaining(added));
-    for (const id of ids) expect(capabilityOf(id)).toBe("video");
+    for (const id of ids) expect(capabilityOf(id)).toBe(/lipsync|latentsync/.test(id) ? "lipsync" : "video");
     expect(capabilityOf("inference.sh/xai/grok-imagine-video")).toBeUndefined();
   });
 
