@@ -273,6 +273,8 @@ export interface RunOptions {
   noNewVideos?: boolean;
   /** Remaking one step on its own: keep the later steps that are done (don't invalidate them). */
   keepLater?: boolean;
+  /** Clips step only: make just this scene's clip (0-based) and stop, without marking the step done (one-scene preview). */
+  onlyScene?: number;
   concurrency?: number;
   signal?: AbortSignal;
   onEvent?: (e: PipelineEvent) => void;
@@ -429,6 +431,11 @@ export class PipelineService {
         emit({ type: "step-start", step: name });
         log.step(name, "running…");
         await produce();
+        // One-scene preview: only that scene's clip was made, so the step isn't done yet.
+        if (name === "clips" && opts.onlyScene !== undefined) {
+          await save();
+          throw new StopAfter(name);
+        }
         project.completeStep(name);
         if (name === "clips" && opts.noNewVideos) project.approveInRun("clips"); // the user approved the videos they have
         await save();
@@ -874,7 +881,7 @@ export class PipelineService {
             }
           }), signal);
           await rename(tmpClip, p.sceneClip(i));
-        }, kept);
+        }, opts.onlyScene !== undefined ? kept.filter((s) => s.index === opts.onlyScene) : kept);
       });
 
       await step("final", allExist([p.final]), async () => {

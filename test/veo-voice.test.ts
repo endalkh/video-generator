@@ -262,3 +262,19 @@ describe("approving uploaded videos", () => {
     }
   });
 });
+
+describe("one-scene preview", () => {
+  it("makes (and pays for) only that scene's clip, then muxes its audio", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "goats on the hill", sceneCount: 3, audioMode: "narration", videoMode: "veo", reviewMode: "manual" }, "mock");
+    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+    const { preview } = await ps.previewScene(id, 1);
+    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(1); // only scene 2, not all three
+    const m = media(id);
+    expect([await fileExists(m.sceneClip(0)), await fileExists(m.sceneClip(1)), await fileExists(m.sceneClip(2))]).toEqual([false, true, false]);
+    expect(preview).toBe("scenes/02/preview.mp4");
+    expect((await ps.get(id)).completed).not.toContain("clips"); // two clips are still missing
+  }, 60_000);
+});

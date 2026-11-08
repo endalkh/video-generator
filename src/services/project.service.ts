@@ -130,7 +130,7 @@ export class ProjectService {
   }
 
   /** Start (or resume) in the background; progress is published to subscribers. Returns a promise that settles when the run finishes. */
-  async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean; keepLater?: boolean } = {}): Promise<void> {
+  async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean; keepLater?: boolean; onlyScene?: number } = {}): Promise<void> {
     if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is already running`);
     const project = await this.load(id);
     if (opts.from !== undefined && !STEP_NAMES.includes(opts.from as StepName)) throw new ValidationError(`Unknown step "${opts.from}"`);
@@ -144,7 +144,7 @@ export class ProjectService {
     };
     job.done = this.pipeline
       // "final" ends the run anyway, so it never needs an explicit stop.
-      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, noNewVideos: opts.noNewVideos, keepLater: opts.keepLater, signal: job.controller.signal, onEvent })
+      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, noNewVideos: opts.noNewVideos, keepLater: opts.keepLater, onlyScene: opts.onlyScene, signal: job.controller.signal, onEvent })
       .then(
         () => undefined,
         (err) => {
@@ -685,7 +685,8 @@ export class ProjectService {
       project.redoFrom("clips");
       await wipeScene(media, index);
       await this.projects.save(project);
-      await this.start(id, { until: "clips" });
+      // Only this scene's clip: the other scenes' clips aren't made (or paid for) by a preview.
+      await this.start(id, { until: "clips", onlyScene: index });
       // start() runs the pipeline in the background; wait for this project's run to finish before muxing.
       await this.jobs.get(id)?.done;
       // Putting the left-out flag back only affects the final video, not this preview.
