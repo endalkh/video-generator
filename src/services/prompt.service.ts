@@ -184,7 +184,7 @@ export class PromptService {
         // Sound made inside the clips: a song is still a song (sung by the character in each clip); every other
         // mode becomes "the character speaks" (one ~8 s spoken stanza per clip).
         song: input.audioMode === "song",
-        narration: (input.audioMode === "narration" || input.audioMode === "dialogue") && !inVideo,
+        narration: input.audioMode === "narration" && !inVideo,
         music_voice: input.audioMode === "music_voice" && !inVideo,
         character_voice: inVideo === "speaks",
         video_sings: inVideo === "sings",

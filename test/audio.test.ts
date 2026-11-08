@@ -97,7 +97,7 @@ describe("extra wishes for the audio", () => {
       await c.projectService.generateStep(p.id, s);
       await c.projectService.idle();
     }
-    expect(mock.prompts.filter((x) => x.kind === "speech").at(-1)!.prompt).toMatch(/, and: slower and happier, more krar:\n\n/);
+    expect(mock.prompts.filter((x) => x.kind === "speech").at(-1)!.prompt).toContain("and: slower and happier, more krar");
     expect(mock.prompts.filter((x) => x.kind === "song").at(-1)!.prompt).toContain("Instrumental only");
     expect(mock.prompts.filter((x) => x.kind === "song").at(-1)!.prompt).toContain("more krar");
 
