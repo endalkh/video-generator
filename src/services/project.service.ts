@@ -13,7 +13,7 @@ import { audioToWav, concatClips, formatFor, imageToPng, muxVideoWithAudio, prob
 import { songTimeline } from "../domain/ports/generator.port.js";
 import { ensureDir, fileExists, slugify, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
-import { ensureScenePiece, mediaPaths, MAX_SAMPLES, sampleFiles, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, wipeSceneVideo, wipeSceneVideos, writeSamples, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
+import { ensureScenePiece, mediaPaths, MAX_SAMPLES, sampleFiles, wipeMediaFrom, wipePictures, wipeRenders, wipeScene, wipeSceneVideos, writeSamples, PipelineCancelled, type PipelineEvent, type PipelineService } from "./pipeline.service.js";
 
 export type ProviderFactory = (name: string) => Provider;
 
@@ -774,7 +774,8 @@ export class ProjectService {
       const wasLeftOut = project.scenes!.scenes[index]!.leftOut === true;
       if (wasLeftOut) project.setScenesLeftOut([index], false);
       project.redoFrom("clips");
-      await wipeSceneVideo(media, index); // keep the picture you checked: the video is made from it
+      // Keep the picture you checked and any video already made (paid): only the clip is put together again.
+      await Promise.all([media.sceneClip(index), media.scenePreview(index), media.final, media.srt].map((f) => rm(f, { force: true })));
       await this.projects.save(project);
       // Only this scene's clip: the other scenes' clips aren't made (or paid for) by a preview.
       await this.start(id, { until: "clips", onlyScene: index });
