@@ -31,6 +31,8 @@ model Project {
   poem        Json?
   scenes      Json?
   character   Json?
+  /// Secondary recurring characters (besides `character`), each with its own reference image on disk.
+  cast        Json?
   song        Json?
   /// YouTube upload info made at the end: title, description, tags, thumbnail text.
   publish     Json?

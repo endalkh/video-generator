@@ -2,12 +2,31 @@ import { describe, expect, it } from "vitest";
 import { ConflictError, ValidationError } from "../src/domain/errors.js";
 import { songParts, songTimeline, mmss } from "../src/domain/ports/generator.port.js";
 import { Project } from "../src/domain/project/project.entity.js";
-import { ProjectInputSchema } from "../src/domain/project/project.model.js";
+import { CastSchema, ProjectInputSchema, SceneSchema } from "../src/domain/project/project.model.js";
 import { DEFAULT_PROMPTS, PROMPT_FLAGS, allowedVars, promptDefinition } from "../src/domain/prompt/prompt.defaults.js";
 import { Prompt } from "../src/domain/prompt/prompt.entity.js";
 import { renderTemplate, validateTemplate } from "../src/domain/prompt/prompt.template.js";
 
 const input = ProjectInputSchema.parse({ topic: "brushing teeth" });
+
+describe("cast (secondary characters)", () => {
+  it("validates cast ids as lowercase slugs and caps the list", () => {
+    expect(CastSchema.safeParse([{ id: "lion-cub", name: "Leo", description: "a small golden lion cub" }]).success).toBe(true);
+    expect(CastSchema.safeParse([{ id: "Lion Cub", name: "Leo", description: "x" }]).success).toBe(false); // spaces/caps not allowed
+    expect(CastSchema.safeParse(Array.from({ length: 9 }, (_, i) => ({ id: `a${i}`, name: "n", description: "d" }))).success).toBe(false); // max 8
+  });
+  it("lets a scene tag which cast members appear, and defaults to none", () => {
+    const tagged = SceneSchema.parse({ index: 0, text: "hi", visualPrompt: "a shot", characters: ["rabbit", "lion-cub"] });
+    expect(tagged.characters).toEqual(["rabbit", "lion-cub"]);
+    expect(SceneSchema.parse({ index: 1, text: "hi", visualPrompt: "a shot" }).characters).toBeUndefined();
+  });
+  it("round-trips the cast through the entity (default empty)", () => {
+    const p = Project.create({ id: "cast-test", input, provider: "mock" });
+    expect(p.cast).toEqual([]);
+    p.setCast([{ id: "rabbit", name: "Tutu", description: "a fluffy white rabbit" }]);
+    expect(Project.restore(p.toProps()).cast).toEqual([{ id: "rabbit", name: "Tutu", description: "a fluffy white rabbit" }]);
+  });
+});
 
 describe("ProjectInput", () => {
   it("applies defaults", () => {

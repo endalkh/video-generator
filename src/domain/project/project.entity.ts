@@ -3,6 +3,7 @@ import {
   ProjectInputSchema,
   STEP_NAMES,
   type Character,
+  type CastMember,
   type Poem,
   type ProjectInput,
   type ProjectStatus,
@@ -35,6 +36,8 @@ export interface ProjectProps {
   poem: Poem | null;
   scenes: ScenePlan | null;
   character: Character | null;
+  /** Secondary recurring characters (besides the main one), each with its own reference image. */
+  cast: CastMember[];
   song: SongTimeline | null;
   /** YouTube title / description / tags / thumbnail text (made when the video is finished). */
   publish: PublishInfo | null;
@@ -74,6 +77,7 @@ export class Project {
       poem: null,
       scenes: null,
       character: null,
+      cast: [],
       song: null,
       publish: null,
       createdAt: now,
@@ -83,7 +87,7 @@ export class Project {
 
   /** Rehydrate from persistence (mappers only). */
   static restore(props: ProjectProps): Project {
-    return new Project({ ...props, channelId: props.channelId ?? null, publish: props.publish ?? null, completed: [...props.completed], approved: [...(props.approved ?? [])] });
+    return new Project({ ...props, channelId: props.channelId ?? null, publish: props.publish ?? null, cast: [...(props.cast ?? [])], completed: [...props.completed], approved: [...(props.approved ?? [])] });
   }
 
   get id() { return this.props.id; }
@@ -97,6 +101,7 @@ export class Project {
   get poem() { return this.props.poem; }
   get scenes() { return this.props.scenes; }
   get character() { return this.props.character; }
+  get cast(): readonly CastMember[] { return this.props.cast; }
   get song() { return this.props.song; }
   get publish() { return this.props.publish; }
   get createdAt() { return this.props.createdAt; }
@@ -551,6 +556,12 @@ export class Project {
     this.touch();
   }
 
+  /** Set the secondary cast (recurring characters besides the main one). Replaces the whole list. */
+  setCast(cast: CastMember[]): void {
+    this.props.cast = [...cast];
+    this.touch();
+  }
+
   /** YouTube upload info (generated or edited); clamped to YouTube's limits. */
   setPublish(info: PublishInfo | null): void {
     this.props.publish = info ? normalizePublishInfo(info) : null;
@@ -563,7 +574,7 @@ export class Project {
   }
 
   toProps(): ProjectProps {
-    return { ...this.props, completed: [...this.props.completed], approved: [...this.props.approved] };
+    return { ...this.props, cast: [...this.props.cast], completed: [...this.props.completed], approved: [...this.props.approved] };
   }
 
   private touch() {

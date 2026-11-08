@@ -162,6 +162,8 @@ export const SceneSchema = z.object({
   visualPrompt: z.string().min(1),
   /** Camera / motion hint, used for Ken Burns or Veo prompts. */
   motion: MotionSchema.default("zoom-in"),
+  /** ids of the secondary cast members (CastMember.id) that appear in this scene, besides the main character. */
+  characters: z.array(z.string()).optional(),
   /** Moving-video mode: false = no picture for this scene (the video AI makes it from the character); unset = the video's default. */
   picture: z.boolean().optional(),
   /** true = left out of the final video (e.g. its video isn't made); its clip is never made. Unset = in the video. */
@@ -186,6 +188,24 @@ export const CharacterSchema = z.object({
   skipped: z.boolean().optional(),
 });
 export type Character = z.infer<typeof CharacterSchema>;
+
+/**
+ * A secondary recurring character (e.g. a talking rabbit, a lion cub) that should stay on-model across the
+ * scenes it appears in. Each gets its own reference image (cast/<id>.png), like the main character's sheet.
+ */
+export const CastMemberSchema = z.object({
+  /** Stable slug used in Scene.characters and the reference-image filename (e.g. "rabbit", "lion-cub"). */
+  id: z.string().min(1).max(60).regex(/^[a-z0-9][a-z0-9-]*$/, "cast id must be a lowercase slug"),
+  name: z.string().min(1),
+  /** Detailed English appearance description reused wherever this character appears. */
+  description: z.string().min(1),
+});
+export type CastMember = z.infer<typeof CastMemberSchema>;
+export const CastSchema = z.array(CastMemberSchema).max(8);
+export type Cast = z.infer<typeof CastSchema>;
+/** JSON output shape of the `cast` text prompt. */
+export const CastPlanSchema = z.object({ cast: CastSchema });
+export type CastPlan = z.infer<typeof CastPlanSchema>;
 
 /** Stand-in used in the prompts when the Character step is skipped. */
 export const NO_CHARACTER: Character = {

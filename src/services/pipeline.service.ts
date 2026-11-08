@@ -88,6 +88,9 @@ export function mediaPaths(dir: string) {
   return {
     dir,
     characterImage: path.join(dir, "character.png"),
+    /** A secondary cast member's reference image (cast/<id>.png), kept consistent across scenes. */
+    castImage: (castId: string) => path.join(dir, "cast", `${castId}.png`),
+    castDir: path.join(dir, "cast"),
     /** Sample pictures from the parent (e.g. a food or a house) that the scenes should show: samples/01.png… */
     samplesDir: path.join(dir, "samples"),
     sample: (j: number) => path.join(dir, "samples", `${String(j + 1).padStart(2, "0")}.png`),
@@ -137,8 +140,7 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   const at = (s: StepName) => STEP_NAMES.indexOf(s) >= STEP_NAMES.indexOf(from);
   const files: string[] = [];
   const perScene: ((i: number) => string)[] = [];
-  if (at("character")) files.push(p.characterImage, p.thumbnail), perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);
-  if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio, p.scenePiece);
+  if (at("character")) files.push(p.characterImage, p.thumbnail), perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);  if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio, p.scenePiece);
   // Pictures and Veo videos don't depend on the audio: a new song only re-times (re-renders) the clips.
   if (at("clips")) perScene.push(p.sceneClip);
   if (from === "clips") perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);
@@ -153,6 +155,8 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
     if (Number.isInteger(i) && i >= 0) files.push(...perScene.map((f) => f(i)));
   }
   await Promise.all(files.map((f) => rm(f, { force: true })));
+  // The secondary cast's reference images belong to the character step: a character redo regenerates them.
+  if (at("character")) await rm(p.castDir, { recursive: true, force: true });
 }
 
 /** Delete rendered clips and the final video only (keeps pictures, song and Veo videos). */
@@ -469,6 +473,36 @@ export class PipelineService {
         if (!character.skipped && !(await fileExists(p.characterImage))) {
           const ri = await prompt("character", "character_image", "character_image", { character_name: character.name, character_description: character.description });
           await writeFileAtomic(p.characterImage, await provider.image(ri.text, { model: ri.model, aspectRatio: "1:1", label: "character image", ctx: ctx() }));
+        }
+        // Secondary cast (talking animals, the sun, …): find them once from the story, then draw a reference
+        // sheet for each so they stay on-model across scenes. Skipped when the main character is skipped.
+        if (!character.skipped && project.cast.length === 0) {
+          try {
+            const cr = await prompt("character", "cast", "character", { poem_json: JSON.stringify(project.scenes ?? project.poem, null, 2) });
+            const { cast } = await provider.text("cast", cr.text, { model: cr.model, ctx: ctx() });
+            // Drop any that collide with the main character or each other by id.
+            const seen = new Set<string>();
+            const unique = cast.filter((c) => !seen.has(c.id) && seen.add(c.id) !== undefined);
+            project.setCast(unique);
+            await save();
+            if (unique.length) log.step("character", `cast: ${unique.map((c) => c.name).join(", ")}`);
+          } catch (err) {
+            // The cast is an enhancement: never let it block the main character step.
+            log.warn(`cast not planned: ${(err as Error).message}; continuing with just the main character`);
+          }
+        }
+        checkCancel();
+        for (const member of project.cast) {
+          if (await fileExists(p.castImage(member.id))) continue;
+          try {
+            const ci = await prompt("character", "cast_image", "character_image", { character_name: member.name, character_description: member.description });
+            await ensureDir(p.castDir);
+            await writeFileAtomic(p.castImage(member.id), await provider.image(ci.text, { model: ci.model, aspectRatio: "1:1", label: `cast image: ${member.name}`, ctx: ctx() }));
+            log.step("character", `cast image ready: ${member.name}`);
+          } catch (err) {
+            if (err instanceof PipelineCancelled) throw err;
+            log.warn(`cast image for ${member.name} not made: ${(err as Error).message}`);
+          }
         }
         log.step("character", `${character.name}: ${character.description}`);
       });

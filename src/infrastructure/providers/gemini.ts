@@ -6,7 +6,7 @@ import { z } from "zod";
 import { pcmToWav, GEMINI_TTS_FORMAT } from "../media/wav.js";
 import { ChannelDetailsSchema } from "../../domain/channel/channel.model.js";
 import { PlanTextSchema } from "../../domain/plan/plan.model.js";
-import { CharacterSchema, minResolution, PoemSchema, PublishInfoSchema, ScenePlanSchema, StanzaSchema, type VideoResolution } from "../../domain/project/project.model.js";
+import { CharacterSchema, CastPlanSchema, minResolution, PoemSchema, PublishInfoSchema, ScenePlanSchema, StanzaSchema, type VideoResolution } from "../../domain/project/project.model.js";
 import { log } from "../../util/log.js";
 import { InferenceShVideo, inferenceShWorksWithoutPicture, isInferenceShModel } from "./inference-sh.js";
 import { isTrebloModel, TREBLO_MODELS, TrebloMusic } from "./treblo.js";
@@ -14,7 +14,7 @@ import { isBillingStop, isTransientError, sleep, withRetry } from "../../util/re
 import { type AvailableModel, type GenContext, type Provider, type SongResult, type TextKind, type TextOutputs } from "../../domain/ports/generator.port.js";
 
 
-const SCHEMAS: { [K in TextKind]: z.ZodType<TextOutputs[K]> } = { poem: PoemSchema, scenes: ScenePlanSchema, character: CharacterSchema, stanza: StanzaSchema, publish: PublishInfoSchema, channel: ChannelDetailsSchema, plan: PlanTextSchema };
+const SCHEMAS: { [K in TextKind]: z.ZodType<TextOutputs[K]> } = { poem: PoemSchema, scenes: ScenePlanSchema, character: CharacterSchema, cast: CastPlanSchema, stanza: StanzaSchema, publish: PublishInfoSchema, channel: ChannelDetailsSchema, plan: PlanTextSchema };
 
 type InlinePart = { inlineData?: { data?: string; mimeType?: string }; text?: string };
 

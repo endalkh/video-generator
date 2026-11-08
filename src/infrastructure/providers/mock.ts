@@ -48,6 +48,7 @@ export class MockProvider implements Provider {
         })),
       }),
       character: () => ({ name: input.language === "am" ? "ቡቡ" : "Bubu", description: input.characterHint ?? "a round, friendly pink creature with big dark eyes" }),
+      cast: () => ({ cast: [] }),
       publish: () => ({
         title: `${poem?.title ?? input.topic} | Kids Song`,
         description: `A happy song about ${input.topic}.\n\n${(poem?.stanzas ?? []).map((s) => s.lines.join("\n")).join("\n\n")}\n\nSubscribe for more! #kids #songs #learning`,

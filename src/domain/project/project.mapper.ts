@@ -2,6 +2,7 @@ import { Prisma, type Project as ProjectRow } from "../../generated/prisma/clien
 import { Project, type ProjectProps } from "./project.entity.js";
 import {
   CharacterSchema,
+  CastSchema,
   PoemSchema,
   PublishInfoSchema,
   ProjectInputSchema,
@@ -30,6 +31,7 @@ export interface ProjectDto {
   poem: ProjectProps["poem"];
   scenes: ProjectProps["scenes"];
   character: ProjectProps["character"];
+  cast: ProjectProps["cast"];
   song: { file: string; duration: number; source: "ai" | "music_voice" | "upload" } | null;
   publish: ProjectProps["publish"];
   createdAt: string;
@@ -66,6 +68,7 @@ export const ProjectMapper = {
       poem: nullable(PoemSchema, row.poem),
       scenes: nullable(ScenePlanSchema, row.scenes),
       character: nullable(CharacterSchema, row.character),
+      cast: row.cast == null ? [] : CastSchema.parse(row.cast),
       song: nullable(SongTimelineSchema, row.song),
       publish: nullable(PublishInfoSchema, row.publish),
       createdAt: row.createdAt,
@@ -90,6 +93,7 @@ export const ProjectMapper = {
       poem: j(p.poem),
       scenes: j(p.scenes),
       character: j(p.character),
+      cast: p.cast.length ? (p.cast as Prisma.InputJsonValue) : Prisma.DbNull,
       song: j(p.song),
       publish: j(p.publish),
       createdAt: p.createdAt,
@@ -113,6 +117,7 @@ export const ProjectMapper = {
       poem: p.poem,
       scenes: p.scenes,
       character: p.character,
+      cast: p.cast,
       song: p.song ? { file: p.song.file, duration: p.song.duration, source: p.song.source ?? "ai" } : null,
       publish: p.publish,
       createdAt: p.createdAt.toISOString(),

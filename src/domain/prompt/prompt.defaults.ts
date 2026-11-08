@@ -150,6 +150,7 @@ How the place looks:
 {{local_look}}
 "visualPrompt" = a vivid ENGLISH shot description (name the homes, food and clothes it shows the way described above, e.g. "a round gojo house with a thatched roof", never just "a house"): where exactly we are in that setting, ONE clear, lively action the main character is doing with her hands and body (e.g. sweeping the yard, running up the hill, hugging a baby goat, carrying a basket of fruit), her facial expression, and what the animals do. Bubbles, butterflies, sparkles, petals and other floating or flying things are rare: put them in a shot only when its words are about them (e.g. washing with soap, a song about butterflies); most videos have none. Prefer medium shots where the character is clearly visible and plenty of the setting around her shows too; use a close-up only for a big feeling; vary the shots. Do not describe the main character's appearance (it is added separately); no text in the image.
 "motion" = one of zoom-in, zoom-out, pan-left, pan-right, static.
+"characters" = OPTIONAL list of short lowercase slug ids of the recurring supporting characters (talking animals, the sun, etc.) that appear in THIS shot, matching the ids you would give them (e.g. "rabbit", "lion-cub", "sun"); omit it or use an empty list for shots with only the main character.
 Art style: {{style}}.
 {{safety}}
 
@@ -225,6 +226,32 @@ Style: {{style}}. No text. {{safety}}`,
     previousTemplates: [`Character model sheet for a 3D animated kids' movie: {{character_name}}, {{character_description}}.
 Full body, front view, friendly expressive pose, big expressive eyes, soft studio lighting, plain light background.
 Style: {{style}}. No text. {{safety}}`],
+  },
+  {
+    key: "cast",
+    title: "Supporting cast",
+    description: "Finds the recurring supporting characters (talking animals, the sun, etc.) in the story, so each can be drawn once and kept consistent. {{poem_json}} is the scene plan. Must return JSON {cast:[{id,name,description}]} (empty if there are none besides the main character).",
+    vars: ["poem_json"],
+    template: `Read this kids' story (the scenes below) for a cartoon about: {{topic}}.
+List the recurring NAMED supporting characters that appear in more than one moment and should look the same every time — e.g. a talking rabbit, a funny monkey, a lost lion cub, a friendly elephant, a talking sun. Do NOT include the main character{{#if has_character_hint}} ({{character_hint}}){{/if}}, and do NOT include one-off background crowds, plants or scenery.
+Return at most 6, most important first. For each:
+"id" = a short lowercase slug, letters/numbers/hyphens only (e.g. "rabbit", "lion-cub", "sun").
+"name" = a short, friendly name{{#if am}} in Amharic (Ge'ez script){{/if}}.
+"description" = a precise ENGLISH visual description (species/body, size, colours, clothing or accessories, distinctive features) so an illustrator can redraw them identically every time. Describe only the character, not the art style or the background.
+If there are no such recurring supporting characters, return an empty list.
+Style context: {{style}}.
+{{safety}}
+
+{{poem_json}}`,
+  },
+  {
+    key: "cast_image",
+    title: "Supporting character reference image",
+    description: "Image prompt for a supporting cast member's reference sheet, so it stays consistent across scenes. Same idea as the main character sheet.",
+    vars: ["character_name", "character_description"],
+    template: `Character model sheet for a 3D animated kids' movie: {{character_name}}, {{character_description}}.
+Full body, front view, friendly expressive pose, big expressive eyes, soft studio lighting, plain light background.
+Style: {{style}}. No text. {{safety}}`,
   },
   {
     key: "scene_image",

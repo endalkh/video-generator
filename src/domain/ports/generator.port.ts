@@ -1,6 +1,6 @@
 import type { ChannelDetails } from "../channel/channel.model.js";
 import type { PlanText } from "../plan/plan.model.js";
-import type { Character, Poem, ProjectInput, PublishInfo, Scene, ScenePlan, Stanza, VideoResolution } from "../project/project.model.js";
+import type { CastPlan, Character, Poem, ProjectInput, PublishInfo, Scene, ScenePlan, Stanza, VideoResolution } from "../project/project.model.js";
 
 /** A time window within the song where a scene's lyrics are sung. */
 export interface SongSlot {
@@ -20,6 +20,8 @@ export interface TextOutputs {
   poem: Poem;
   scenes: ScenePlan;
   character: Character;
+  /** Character step: the secondary recurring cast (talking animals, etc.) derived from the story. */
+  cast: CastPlan;
   /** Channel page: YouTube channel name, handle, description, keywords. */
   channel: ChannelDetails;
   /** Final video page: YouTube title, description, tags and thumbnail words. */
