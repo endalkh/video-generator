@@ -1882,7 +1882,8 @@ function storyboardPanel(p, idle, act) {
   const scenes = (p.scenes?.scenes ?? []).filter((sc) => !sc.leftOut && drawsPicture(p, sc));
   const has = (sc) => p.media.scenes.find((x) => x.index === sc.index)?.image;
   const missing = scenes.filter((sc) => !has(sc) && !p.media.scenes.find((x) => x.index === sc.index)?.video);
-  const all = scenes.length > 0 && scenes.every(has);
+  // Scenes with the picture turned off don't need one (the storyboard shows the character for them).
+  const all = (p.scenes?.scenes ?? []).some((sc) => !sc.leftOut) && scenes.every(has);
   return h("div", { class: "space-y-2 rounded-xl bg-sky-50 p-3" },
     h("p", { class: "text-sm text-sky-900", text: "🖼 Storyboard: see each scene's picture with its audio before any video is made. Fix a picture with 🖼 Fix picture (no video is made), then watch the whole film as pictures + audio. When it looks right, continue to the clips — the videos are made from these pictures." }),
     all && p.media.storyboard ? h("video", { controls: true, preload: "metadata", class: "max-h-[70vh] w-full rounded-xl bg-black", src: mediaUrl(id, p.media.storyboard, p.updatedAt), "aria-label": "Storyboard: every scene's picture with its audio" }) : null,

@@ -692,7 +692,9 @@ export class ProjectService {
     const scenes = (project.scenes?.scenes ?? []).filter((s) => !s.leftOut);
     const media = this.media(id);
     const missing: number[] = [];
-    for (const s of scenes) if (!(await fileExists(media.sceneImage(s.index)))) missing.push(s.index + 1);
+    // A scene with its picture turned off (the video AI makes it from the character) shows the character sheet.
+    const pictureOf = async (s: (typeof scenes)[number]) => (await fileExists(media.sceneImage(s.index))) ? media.sceneImage(s.index) : !scenePicture(project.input, s) && (await fileExists(media.characterImage)) ? media.characterImage : null;
+    for (const s of scenes) if (!(await pictureOf(s))) missing.push(s.index + 1);
     if (missing.length) throw new ConflictError(`Scene${missing.length === 1 ? "" : "s"} ${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no picture yet: draw the scene pictures first`);
     const fmt = formatFor(project.input.aspectRatio, "720p");
     const work = await mkdtemp(path.join(os.tmpdir(), "storyboard-"));
@@ -704,11 +706,11 @@ export class ProjectService {
         // The scene's own piece of the soundtrack (its voices + tail, or its slot of the song), timed like its clip.
         const piece = await ensureScenePiece(media, project, s.index);
         if (piece) {
-          await stillToClip({ duration: await probeDuration(piece), image: media.sceneImage(s.index), out: silent, motion: s.motion, fmt });
+          await stillToClip({ duration: await probeDuration(piece), image: (await pictureOf(s))!, out: silent, motion: s.motion, fmt });
           await muxVideoWithAudio({ video: silent, audio: piece, out });
         } else {
           // The sound is made inside each video clip (no separate audio): show the picture for a few silent seconds.
-          await stillToClip({ duration: 5, image: media.sceneImage(s.index), out, motion: s.motion, fmt });
+          await stillToClip({ duration: 5, image: (await pictureOf(s))!, out, motion: s.motion, fmt });
         }
         clips.push(out);
       }
