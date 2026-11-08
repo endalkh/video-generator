@@ -56,7 +56,7 @@ export function capabilityOf(modelId: string): ModelCapability | undefined {
   if (id === LIPSYNC_OFF) return "lipsync";
   if (id.startsWith("inference.sh/")) {
     if (/^inference\.sh\/(falai\/pixverse-lipsync|infsh\/latentsync-1-6)$/.test(id)) return "lipsync";
-    return /\/seedance|^inference\.sh\/(klingai\/(avatar(-pro)?|video-v3)|alibaba\/wan-2-7-i2v|bfl\/flux-3-video|minimax\/h3|falai\/minimax-h3-max|google\/gemini-omni-flash|xai\/grok-imagine-video-1-5|pruna\/p-video|pixverse\/v6)$/.test(id) ? "video" : undefined;
+    return /\/seedance|^inference\.sh\/(klingai\/(avatar(-pro)?|video-v3)|bytedance\/omnihuman-1-5|alibaba\/wan-2-7-i2v|bfl\/flux-3-video|minimax\/h3|falai\/minimax-h3-max|google\/gemini-omni-flash|xai\/grok-imagine-video-1-5|pruna\/p-video|pixverse\/v6)$/.test(id) ? "video" : undefined;
   }
   if (id.startsWith("treblo/")) return "music";
   // OpenAI text/image models (openai/gpt-4o, openai/gpt-image-1): dispatched to OpenAI by the provider.

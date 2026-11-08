@@ -226,6 +226,14 @@ describe("inference.sh Seedance video", () => {
     expect(capabilityOf("inference.sh/xai/grok-imagine-video")).toBeUndefined();
   });
 
+  it("OmniHuman 1.5 drives the largest face in the scene picture with the scene audio", () => {
+    const audio = Buffer.from("mp3");
+    const r = InferenceShVideo.input("hop", { ...base, model: "inference.sh/bytedance/omnihuman-1-5", audio });
+    expect(r).toEqual({ app: "bytedance/omnihuman-1-5", input: { image: { bytes: still, contentType: "image/png" }, audio: { bytes: audio, contentType: "audio/mpeg" }, mask_index: 0 } });
+    expect(isAudioDrivenModel("inference.sh/bytedance/omnihuman-1-5")).toBe(true);
+    expect(() => InferenceShVideo.input("hop", { ...base, model: "inference.sh/bytedance/omnihuman-1-5" })).toThrow(/audio/);
+  });
+
   it("Seedance 2.0 Fast is capped at 720p and gets no output_format", () => {
     const fast = InferenceShVideo.input("hop", { ...base, model: "inference.sh/bytedance/seedance-2-0-fast", resolution: "4k" });
     expect(fast.app).toBe("bytedance/seedance-2-0-fast");

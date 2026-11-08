@@ -28,6 +28,7 @@ export const INFERENCE_SH_VIDEO_APPS = [
   { id: "klingai/video-v3", app: "klingai/video-v3", kind: "kling-v3", displayName: "Kling V3 — animates the scene picture, real 4K, clip as long as the scene (inference.sh)" },
   { id: "klingai/avatar", app: "klingai/avatar", kind: "avatar", mode: "std", displayName: "Kling Avatar · standard — sings/speaks the scene's audio (inference.sh)" },
   { id: "klingai/avatar-pro", app: "klingai/avatar", kind: "avatar", mode: "pro", displayName: "Kling Avatar · pro — more natural movement (inference.sh)" },
+  { id: "bytedance/omnihuman-1-5", app: "bytedance/omnihuman-1-5", kind: "omnihuman", displayName: "OmniHuman 1.5 — the largest face in the scene picture speaks/sings the scene's audio, lip-synced (inference.sh)" },
   { id: "bytedance/seedance-2-0-fast", app: "bytedance/seedance-2-0-fast", kind: "seedance", maxResolution: "720p", displayName: "Seedance 2.0 Fast — cheaper and quicker, up to 720p (inference.sh)" },
   { id: "alibaba/wan-2-7-i2v", app: "alibaba/wan-2-7-i2v", kind: "wan", displayName: "Wan 2.7 — animates the scene picture, up to 1080p, 2-15 s (inference.sh)" },
   { id: "bfl/flux-3-video", app: "bfl/flux-3-video", kind: "flux", displayName: "FLUX 3 Video — animates the scene picture with sound, up to 1080p, 5-20 s (inference.sh)" },
@@ -55,7 +56,7 @@ export function inferenceShWorksWithoutPicture(model: string): boolean {
 const sceneSeconds = (durationSec: number | undefined, min: number, max: number) => Math.min(max, Math.max(min, Math.ceil(durationSec ?? CLIP_SECONDS)));
 
 /** Models that animate to the scene's audio (they need the audio step to be done). */
-export const isAudioDrivenModel = (model: string) => INFERENCE_SH_VIDEO_APPS.some((a) => a.kind === "avatar" && INFERENCE_SH_PREFIX + a.id === model);
+export const isAudioDrivenModel = (model: string) => INFERENCE_SH_VIDEO_APPS.some((a) => (a.kind === "avatar" || a.kind === "omnihuman") && INFERENCE_SH_PREFIX + a.id === model);
 
 /** Clip length; the same 8 s as Veo, so the clips step fits/loops it to each scene like a Veo clip. */
 const CLIP_SECONDS = 8;
@@ -166,6 +167,11 @@ export class InferenceShVideo {
           duration: Math.min(15, Math.max(3, Math.ceil(opts.durationSec ?? CLIP_SECONDS))),
         },
       };
+    }
+    if (def.kind === "omnihuman") {
+      if (!opts.audio) throw new Error(`${def.displayName} animates to each scene's audio, but this scene has none (make the audio first)`);
+      // The largest face/body in the scene picture is driven by the audio (mask_index 0).
+      return { app, input: { image: file(still), audio: { bytes: opts.audio, contentType: "audio/mpeg" } satisfies PendingFile, mask_index: 0 } };
     }
     if (def.kind === "avatar") {
       if (!opts.audio) throw new Error(`${def.displayName} animates to each scene's audio, but this scene has none (make the audio first; "the character speaks" mode has no separate audio)`);
