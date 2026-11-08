@@ -59,6 +59,8 @@ services:
       VIDEO_CONCURRENCY: ${VIDEO_CONCURRENCY:-}
       # Gemini Omni audio references are allowlisted by Google: set to 1 once the account has access.
       OMNI_AUDIO_REFERENCE: ${OMNI_AUDIO_REFERENCE:-}
+      # Runway Dev (Wan 3.0 for song videos).
+      RUNWAYML_API_SECRET: ${RUNWAYML_API_SECRET:-}
       HOST: 0.0.0.0
       PORT: 5178
       MEDIA_ROOT: /app/output

@@ -46,6 +46,7 @@ export class ModelSettingsService {
   /** Models the provider offers, grouped by what they can do. */
   async availableModels(providerName = "gemini"): Promise<ModelOptionsDto> {
     const byCapability: Record<ModelCapability, AvailableModel[]> = { text: [], image: [], tts: [], music: [], video: [], lipsync: [{ id: "none", displayName: "Off — no lip-sync pass" }] };
+    byCapability.video.push({ id: "same", displayName: "Same as Scene animation" });
     let warning: string | null = null;
     try {
       for (const m of await this.providers(providerName).listModels()) {

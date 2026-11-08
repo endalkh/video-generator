@@ -1,3 +1,4 @@
+import { isRunwayModel, RUNWAY_MAX_CONCURRENCY } from "../infrastructure/providers/runway.js";
 import { readdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { GenContext, Provider } from "../domain/ports/generator.port.js";
@@ -15,7 +16,7 @@ import { ensureDir, fileExists, writeFileAtomic } from "../util/fs.js";
 import { log } from "../util/log.js";
 import type { ModelSettingsService } from "./model-settings.service.js";
 import type { PromptService } from "./prompt.service.js";
-import { LIPSYNC_OFF, type ModelTask } from "../domain/model-setting/model-setting.entity.js";
+import { LIPSYNC_OFF, SAME_AS_SCENE_VIDEO, type ModelTask } from "../domain/model-setting/model-setting.entity.js";
 
 export type PipelineEvent =
   | { type: "step-start"; step: StepName }
@@ -255,7 +256,7 @@ export async function ensureScenePiece(p: MediaPaths, project: Project, i: numbe
  */
 export function videoConcurrency(model: string, env = process.env.VIDEO_CONCURRENCY, setting?: number): number {
   // Some models' services take only so many tasks at once (OmniHuman: 1): never ask for more.
-  const cap = inferenceShMaxConcurrency(model) ?? 10;
+  const cap = isRunwayModel(model) ? RUNWAY_MAX_CONCURRENCY : inferenceShMaxConcurrency(model) ?? 10;
   if (setting && setting >= 1) return Math.min(setting, cap);
   const n = Number.parseInt(env ?? "", 10);
   if (Number.isInteger(n) && n >= 1) return Math.min(n, cap);
@@ -416,6 +417,10 @@ export class PipelineService {
       // One prompt snapshot per run: edits made in the UI mid-run apply to the next run.
       // Same for models: the Settings page choices at the moment the run starts.
       const models = await this.modelSettings.snapshot();
+      // Song videos (the song is made separately) can use their own video model, which sings that song (Wan 3.0).
+      const songVideo = (input.audioMode === "song" || input.audioMode === "music_voice") && !soundInVideo(input);
+      const videoTask: ModelTask = songVideo && models.song_video && models.song_video !== SAME_AS_SCENE_VIDEO ? "song_video" : "scene_video";
+      const videoModel = models[videoTask];
       // Lyria 3 Clip (and the offline mock) always make a fixed length; Lyria 3 Pro / 3.5 follow the prompt.
       const fixedSongLength = provider.songLengthSec ?? (/^lyria-3(\.\d+)?-clip/.test(models.song) ? 30 : undefined);
       // Longest song one request makes: Treblo v3 up to 4:30, Lyria ~3 min.
@@ -586,7 +591,7 @@ export class PipelineService {
         const report = (message: string) => emit({ type: "progress", step: name, done, total: list.length, message });
         report("starting");
         // Video clips: as many at once as the video model's service allows (see videoConcurrency).
-        const limit = name === "clips" && input.videoMode === "veo" ? videoConcurrency(models.scene_video, process.env.VIDEO_CONCURRENCY, input.videoConcurrency) : concurrency;
+        const limit = name === "clips" && input.videoMode === "veo" ? videoConcurrency(videoModel, process.env.VIDEO_CONCURRENCY, input.videoConcurrency) : concurrency;
         await mapLimit(list, limit, async (s) => {
           checkCancel();
           const made = !(await fileExists(file(s.index)));
@@ -826,13 +831,13 @@ export class PipelineService {
       await step("clips", allExist(kept.map((s) => p.sceneClip(s.index))), async () => {
         // Pictures are off, but the video model can only animate a picture: say so before paying for anything.
         // (Character skipped on Veo: a scene with no picture is made from its words alone, which any Veo model can do.)
-        if (useVeo && provider.name === "gemini" && needsScenePicture(models.scene_video) && !(character.skipped && !isInferenceShModel(models.scene_video))) {
+        if (useVeo && provider.name === "gemini" && needsScenePicture(videoModel) && !(character.skipped && !isInferenceShModel(videoModel))) {
           const missing: number[] = [];
           for (const s of kept) {
             if (!scenePicture(input, s) && !(await fileExists(p.sceneVideo(s.index))) && !(await fileExists(p.sceneImage(s.index)))) missing.push(s.index + 1);
           }
           if (missing.length) {
-            throw new Error(`Scene${missing.length === 1 ? "" : "s"} ${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no picture, but ${models.scene_video} can only animate a scene picture (it can't make a scene from the character alone). On the Models page pick Veo 3.1 Fast or Veo 3.1 for Scene animation (or Seedance, Wan 2.7, MiniMax H3, Gemini Omni Flash or Grok on inference.sh), or turn the picture back on for ${missing.length === 1 ? "that scene" : "those scenes"} on the Scenes page. Nothing was made or paid for.`);
+            throw new Error(`Scene${missing.length === 1 ? "" : "s"} ${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no picture, but ${videoModel} can only animate a scene picture (it can't make a scene from the character alone). On the Models page pick Veo 3.1 Fast or Veo 3.1 for Scene animation (or Seedance, Wan 2.7, MiniMax H3, Gemini Omni Flash or Grok on inference.sh), or turn the picture back on for ${missing.length === 1 ? "that scene" : "those scenes"} on the Scenes page. Nothing was made or paid for.`);
           }
         }
         // Character step skipped: no sheet to keep the look; each scene is made from its description.
@@ -921,7 +926,7 @@ export class PipelineService {
             throw new Error(`Scene ${i + 1} has no video yet: upload it (📤 Upload video) or click "Make the clips" to generate it`);
           }
           if (useVeo && !(await fileExists(p.sceneVideo(i)))) {
-            const r = await prompt("clips", "scene_video", "scene_video", vars, i);
+            const r = await prompt("clips", "scene_video", videoTask, vars, i);
             try {
               const taskFile = p.sceneVideoTask(i);
               const saved = await readFile(taskFile, "utf8").then((t) => JSON.parse(t) as { taskId?: string; model?: string }).catch(() => null);
@@ -930,7 +935,7 @@ export class PipelineService {
               // The scene's length on screen (unknown when the character speaks inside the clip: there's no separate audio).
               const durationSec = t.duration ?? (t.audio && (await fileExists(t.audio)) ? (await probeDuration(t.audio)) + SCENE_TAIL_SEC : inVideo === "dialogue" ? spokenSeconds(s) : undefined);
               const mp4 = await provider.video!(r.text, {
-                model: r.model, character: reference, cast: present.map((c) => c.image), samples, audio: piece ? await readFile(piece) : undefined, durationSec, still: scenePicture(input, s) && (await fileExists(p.sceneImage(i))) ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
+                model: r.model, character: reference, cast: present.map((c) => c.image), samples, audio: piece ? await readFile(piece) : undefined, singAudio: songVideo, durationSec, still: scenePicture(input, s) && (await fileExists(p.sceneImage(i))) ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
                 resumeTaskId: saved?.model === r.model ? saved.taskId : undefined,
                 onTaskStarted: (taskId) => writeFileAtomic(taskFile, JSON.stringify({ taskId, model: r.model, startedAt: new Date().toISOString() })),
               });
@@ -950,7 +955,7 @@ export class PipelineService {
           // Lip-sync pass: the speaking face follows this scene's own audio (its voices + tail). The video as the
           // video model made it is kept (video-raw.mp4), so new audio is synced again from it, never from a synced copy.
           const lip = models.lip_sync;
-          if (useVeo && !inVideo && lip && lip !== LIPSYNC_OFF && !isAudioDrivenModel(models.scene_video) && (await fileExists(p.sceneVideo(i))) && !(await fileExists(p.sceneLipSync(i)))) {
+          if (useVeo && !inVideo && lip && lip !== LIPSYNC_OFF && !isAudioDrivenModel(videoModel) && !(songVideo && videoTask === "song_video") && (await fileExists(p.sceneVideo(i))) && !(await fileExists(p.sceneLipSync(i)))) {
             const piece = await ensureScenePiece(p, project, i);
             if (piece) {
               if (typeof provider.lipSync !== "function") throw new Error(`Provider "${provider.name}" can't lip-sync; set Lip-sync to "none" on the Models page`);

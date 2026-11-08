@@ -289,7 +289,7 @@ describe("ModelSettingsService", () => {
   it("lists, updates, resets and groups available models", async () => {
     c = await makeTestContainer();
     const list = await c.modelSettingsService.list();
-    expect(list.map((s) => s.task)).toEqual(["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "lip_sync", "channel_text", "channel_image", "plan_text"]);
+    expect(list.map((s) => s.task)).toEqual(["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "song_video", "lip_sync", "channel_text", "channel_image", "plan_text"]);
     expect((await c.modelSettingsService.update("poem", "gemini-3.1-pro-preview")).isDefault).toBe(false);
     await expect(c.modelSettingsService.update("poem", "lyria-3.5")).rejects.toBeInstanceOf(ValidationError);
     expect((await c.modelSettingsService.reset("poem")).model).toBe("gemini-3.8-flash");

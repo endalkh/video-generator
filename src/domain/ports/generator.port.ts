@@ -92,6 +92,8 @@ export interface Provider {
       resolution?: VideoResolution;
       /** The scene's own audio (MP3), for models that animate to given audio (Kling Avatar). */
       audio?: Buffer;
+      /** Song video: the character sings `audio` (Wan 3.0 takes it as reference audio). */
+      singAudio?: boolean;
       /** How long the scene is on screen (seconds), for models that can make a clip that long (Kling V3). */
       durationSec?: number;
       /** Remote task started earlier for this clip (providers that support it finish/download it instead of re-generating). */

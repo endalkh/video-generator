@@ -482,3 +482,26 @@ describe("scene transitions", () => {
     expect((await probeStreams(m.final)).includes("audio")).toBe(true);
   }, 120_000);
 });
+
+describe("separate video models for songs and movies", () => {
+  it("a song video uses Scene animation for songs (and asks it to sing); a dialogue film keeps Scene animation", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    await c.modelSettingsService.update("scene_video", "gemini-omni-1.2-flash");
+    await c.modelSettingsService.update("song_video", "runway/wan3");
+    const ps = c.projectService;
+    const run = async (audioMode: "song" | "dialogue") => {
+      const { id } = await ps.create({ topic: "a butterfly in the meadow", sceneCount: 2, audioMode, videoMode: "veo", reviewMode: "manual" }, "mock");
+      for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+      await ps.drawScenePictures(id);
+      await ps.idle();
+      const before = mock.prompts.length;
+      await ps.makeVideoFromScratch(id);
+      await ps.idle();
+      expect((await ps.get(id)).status).toBe("done");
+      return mock.prompts.slice(before).filter((x) => x.kind === "video").map((x) => x.model);
+    };
+    expect(await run("song")).toEqual(["runway/wan3", "runway/wan3"]);
+    expect(await run("dialogue")).toEqual(["gemini-omni-1.2-flash", "gemini-omni-1.2-flash"]);
+  }, 180_000);
+});

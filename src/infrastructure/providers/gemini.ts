@@ -1,3 +1,4 @@
+import { isRunwayModel, RUNWAY_MODELS, RunwayVideo } from "./runway.js";
 import { readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -106,6 +107,12 @@ export class GeminiProvider implements Provider {
     return (this.inferenceSh ??= new InferenceShVideo());
   }
 
+  /** Video models named "runway/…" (Wan 3.0) run on Runway Dev (needs RUNWAYML_API_SECRET). */
+  private runway?: RunwayVideo;
+  private runwayVideo(): RunwayVideo {
+    return (this.runway ??= new RunwayVideo());
+  }
+
   /** Song models named "treblo/…" run on Treblo (Sonauto) instead of Google (needs TREBLO_API_KEY). */
   private trebloClient?: TrebloMusic;
   private treblo(): TrebloMusic {
@@ -158,6 +165,7 @@ export class GeminiProvider implements Provider {
     for (const o of OMNI_MODELS) if (!have.has(o.id)) models.push(o);
     if (process.env.INFERENCE_API_KEY) models.push(...this.inferenceShVideo().listModels());
     if (process.env.TREBLO_API_KEY?.trim()) models.push(...TREBLO_MODELS);
+    if (process.env.RUNWAYML_API_SECRET?.trim()) models.push(...RUNWAY_MODELS);
     if (process.env.OPENAI_API_KEY?.trim()) models.push(...(await this.openai().listModels().catch(() => [...OPENAI_MODELS])));
     this.modelsCache = { at: Date.now(), models };
     return models;
@@ -254,9 +262,10 @@ export class GeminiProvider implements Provider {
     return this.inferenceShVideo().lipSync(opts);
   }
 
-  async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; cast?: Buffer[]; samples?: Buffer[]; audio?: Buffer; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
+  async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; cast?: Buffer[]; samples?: Buffer[]; audio?: Buffer; singAudio?: boolean; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
     const { label } = opts;
     if (isInferenceShModel(opts.model)) return this.inferenceShVideo().video(prompt, { ...opts, mime: sniffImageMime });
+    if (isRunwayModel(opts.model)) return this.runwayVideo().video(prompt, opts);
     if (isOmniModel(opts.model)) return this.omniVideo(prompt, opts);
     const img = (b: Buffer) => ({ imageBytes: b.toString("base64"), mimeType: sniffImageMime(b) });
     // With a character sheet on a model that supports it: character + scene picture as "asset" references keep
