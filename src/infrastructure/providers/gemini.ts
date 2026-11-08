@@ -329,28 +329,21 @@ export class GeminiProvider implements Provider {
    * first-frame picture when one is given (the scene picture, itself drawn from the character sheet), else
    * makes the scene from the prompt alone. The clip comes back as base64 video in a "model_output" step.
    *
-   * When the scene's audio (its slice of the song / voice) is provided, it's sent as an audio reference and the
-   * prompt asks Omni to lip-sync the character's mouth to that exact track and sing/say those exact words. Omni's
-   * Interactions API accepts audio input, but a guaranteed lip-sync-to-audio mode isn't documented, so this is
-   * best-effort: at minimum the mouth matches the words. (The pipeline still overlays the authored song at the
-   * final mux, so the heard audio is always the real song.)
+   * Omni doesn't accept audio input ("Audio input modality is not enabled for this model"), so the scene's audio
+   * is never sent; in dialogue/song modes the final video lays the real soundtrack over the clip anyway.
    */
-  private async omniVideo(prompt: string, opts: { model: string; still?: Buffer; character?: Buffer; aspectRatio: string; label: string; durationSec?: number; audio?: Buffer }): Promise<Buffer> {
+  private async omniVideo(prompt: string, opts: { model: string; still?: Buffer; character?: Buffer; aspectRatio: string; label: string; durationSec?: number }): Promise<Buffer> {
     const { label } = opts;
     const model = opts.model.replace(/^free\//, "");
     // Omni makes the scene from the words, optionally starting from a first-frame picture. It takes no
     // separate character "reference" like Veo, so animate the scene picture (drawn from the character sheet).
     const first = opts.still ?? opts.character;
     const seconds = Math.min(15, Math.max(4, Math.ceil(opts.durationSec ?? 8)));
-    const lipSync = opts.audio
-      ? " An audio track of the character's voice for this scene is provided: make the character sing/say exactly those words, with her lip movements and timing matched to that audio track (lip-sync), not an invented voice."
-      : "";
-    const fullPrompt = `${prompt}\n\nMake a ${seconds}-second ${opts.aspectRatio} video clip with gentle, child-friendly motion.${lipSync}`;
+    const fullPrompt = `${prompt}\n\nMake a ${seconds}-second ${opts.aspectRatio} video clip with lively, expressive, child-friendly motion.`;
     const imagePart = first ? [{ type: "image" as const, data: first.toString("base64"), mime_type: sniffImageMime(first) }] : [];
-    const audioPart = opts.audio ? [{ type: "audio" as const, data: opts.audio.toString("base64"), mime_type: "audio/mpeg" as const }] : [];
     const textPart = { type: "text" as const, text: fullPrompt };
-    // A bare string is fine when there's only a text part; otherwise send the content blocks (image/audio/text).
-    const payload = first || opts.audio ? [...imagePart, ...audioPart, textPart] : fullPrompt;
+    // A bare string is fine when there's only a text part; otherwise send the content blocks (image + text).
+    const payload = first ? [...imagePart, textPart] : fullPrompt;
     return withRetry(
       async () => {
         const interaction = await this.ai.interactions.create({ model, input: payload, response_modalities: ["video", "audio"] });
