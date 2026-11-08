@@ -781,16 +781,22 @@ function stepPage(p, step, keepVideo, videoKey) {
       : p.song
       ? h("div", { class: "space-y-2" }, h("audio", { controls: true, class: "w-full", src: mediaUrl(id, p.song.file, p.updatedAt) }),
           h("p", { class: "text-sm text-stone-500", text: `${{ upload: "Your recording", music_voice: "Rhyme over music", ai: "Song" }[p.song.source ?? "ai"]} · ${p.song.duration.toFixed(1)} seconds` }),
-          h("a", { class: "btn-soft", href: mediaUrl(id, p.song.file, p.updatedAt), download: "" }, "⬇ Download audio"))
+          h("a", { class: "btn-soft", href: mediaUrl(id, p.song.file, p.updatedAt), download: "" }, "⬇ Download audio"),
+          done ? storyboardPanel(p, idle, act) : null,
+          done ? h("ol", { class: "grid gap-3 sm:grid-cols-2" }, (p.scenes?.scenes ?? []).map((sc) => h("li", { class: "rounded-xl border border-orange-100 p-3" },
+            h("p", { class: "mb-2 whitespace-pre-line text-sm", lang, text: `${sc.index + 1}. ${sc.text}` }), scenePictureCell(p, sc, idle, act)))) : null)
       : h("div", { class: "space-y-3" },
         // Rhyme over music / narration: the voice model says each verse; the song model only makes the music.
         p.input.audioMode === "music_voice" ? h("p", { class: "rounded-xl bg-sky-50 p-3 text-sm text-sky-900", text: "Rhyme over music: the voice AI (Models → Narration) says each verse, and the song model only makes the instrumental music under it. To have the song model sing the words, choose Audio = Song in the Audio settings below." }) : null,
         p.media.music ? h("div", {}, h("p", { class: "label", text: "Music" }), h("audio", { controls: true, preload: "none", class: "w-full", src: mediaUrl(id, p.media.music, p.updatedAt), "aria-label": "Background music" })) : null,
+        done ? storyboardPanel(p, idle, act) : null,
         h("ol", { class: "space-y-3" }, (p.scenes?.scenes ?? []).map((sc) => {
           const a = p.media.scenes.find((m) => m.index === sc.index)?.audio;
-          return h("li", { class: "rounded-xl border border-orange-100 p-3" },
-            h("p", { class: "mb-2 whitespace-pre-line text-sm", lang, text: `${sc.index + 1}. ${sc.text}` }),
-            a ? h("audio", { controls: true, preload: "none", class: "w-full", src: mediaUrl(id, a, p.updatedAt), "aria-label": `Scene ${sc.index + 1} narration` }) : h("p", { class: "text-sm text-stone-500", text: done ? "missing" : "not made yet" }));
+          return h("li", { class: "flex flex-col gap-3 rounded-xl border border-orange-100 p-3 sm:flex-row" },
+            done ? scenePictureCell(p, sc, idle, act) : null,
+            h("div", { class: "min-w-0 flex-1" },
+              h("p", { class: "mb-2 whitespace-pre-line text-sm", lang, text: `${sc.index + 1}. ${sc.text}` }),
+              a ? h("audio", { controls: true, preload: "none", class: "w-full", src: mediaUrl(id, a, p.updatedAt), "aria-label": `Scene ${sc.index + 1} audio` }) : h("p", { class: "text-sm text-stone-500", text: done ? "missing" : "not made yet" })));
         })));
   } else if (step === "clips" && p.scenes && (done || making || p.media.scenes.some((m) => m.image || m.clip))) {
     body = h("div", { class: "grid gap-4 sm:grid-cols-2" }, p.scenes.scenes.map((sc) => {
@@ -811,11 +817,7 @@ function stepPage(p, step, keepVideo, videoKey) {
         ? h("a", { href: mediaUrl(id, m.image, p.updatedAt), target: "_blank", rel: "noopener", class: "block px-3 pt-2 text-xs text-stone-500" },
             h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: `Scene ${sc.index + 1} picture: ${sc.visualPrompt}`, class: "h-24 rounded-lg border border-orange-100 object-cover" }), "Picture the video is made from")
         : null;
-      // Storyboard (picture, no clip yet): play the scene's audio with its picture, to check them together before the video.
-      const sound = m?.image && !(m.preview || m.clip) && (m.piece || m.audio)
-        ? h("audio", { controls: true, preload: "none", class: "w-full px-3 pt-2", src: mediaUrl(id, m.piece || m.audio, p.updatedAt), "aria-label": `Scene ${sc.index + 1} audio` })
-        : null;
-      return h("figure", { class: `overflow-hidden rounded-xl border border-orange-100 ${sc.leftOut ? "opacity-60" : ""}` }, media, pictureThumb, sound,
+      return h("figure", { class: `overflow-hidden rounded-xl border border-orange-100 ${sc.leftOut ? "opacity-60" : ""}` }, media, pictureThumb,
         sc.leftOut ? h("p", { class: "bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-600", text: "⏭ Left out of the video" }) : null,
         h("figcaption", { class: "flex items-start gap-2 p-3 text-sm" },
           h("span", { class: "flex-1 whitespace-pre-line", lang, text: `${sc.index + 1}. ${sc.text}` }),
@@ -831,39 +833,11 @@ function stepPage(p, step, keepVideo, videoKey) {
             if (!confirm(`Remake scene ${sc.index + 1} (new picture and clip)?${cost}`)) return SKIP;
             await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/redo`);
           }) }, "↻ Remake") : null,
-          // Fix the picture before any video is made: edit its description and draw only the picture again.
-          idle && p.completed.includes("audio") && drawsPicture(p, sc) ? h("button", { type: "button", class: "btn-soft shrink-0 px-3 py-1 text-xs", title: "Change what this scene's picture shows and draw only the picture again. No video is made; this scene's old video and clip are removed.", onclick: act(async () => {
-            const desc = prompt(`Scene ${sc.index + 1} picture — what should it show? (English; the characters' looks are added automatically)`, sc.visualPrompt);
-            if (desc === null || !desc.trim()) return SKIP;
-            if (m?.video && !confirm(`Scene ${sc.index + 1} already has a video. Redrawing the picture removes it (a new video is paid when you make the clips). Continue?`)) return SKIP;
-            await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/picture/redraw`, { visualPrompt: desc.trim() });
-          }) }, "🖼 Fix picture") : null,
           p.completed.includes("audio") && p.input.audioMode !== "character" ? scenePieceButton(p, sc, m) : null,
           idle && p.input.videoMode === "veo" ? sceneVideoUpload(p, sc, act) : null),
         idle ? h("div", { class: "px-3 pb-3" }, scenePictureToggle(p, sc, act)) : null);
     }));
     if (idle && p.completed.includes("audio")) extra = [visualsSwitch(p, act)];
-    // Storyboard: pictures drawn, videos not made yet.
-    const storyboard = p.input.videoMode === "veo" && !done && p.scenes.scenes.some((sc) => { const x = p.media.scenes.find((y) => y.index === sc.index); return x?.image && !x.clip && !x.video; });
-    if (idle && storyboard) extra.unshift(h("p", { class: "w-full rounded-xl bg-sky-50 p-3 text-sm text-sky-900", text: "🖼 Storyboard: watch the whole film as pictures with their audio (▶ Watch the storyboard), or check each scene below. Use 🖼 Fix picture to change one (no video is made). When they all look right, make the clips — the videos are made from these pictures." }));
-    // The whole film as pictures + audio, before any video: made locally, free.
-    const allPictures = p.scenes.scenes.filter((sc) => !sc.leftOut).every((sc) => p.media.scenes.find((x) => x.index === sc.index)?.image);
-    if (p.completed.includes("audio") && allPictures) {
-      const player = p.media.storyboard
-        ? h("video", { controls: true, preload: "metadata", class: "max-h-[70vh] w-full rounded-xl bg-black", src: mediaUrl(id, p.media.storyboard, p.updatedAt), "aria-label": "Storyboard: every scene's picture with its audio" })
-        : null;
-      extra.unshift(h("div", { class: "w-full space-y-2" }, player,
-        idle ? h("button", { type: "button", class: "btn", title: "Join every scene's picture with its audio into one video, to watch the whole film before any video is made. Made on this computer: nothing is paid for.", onclick: act(async () => {
-          await post(`/api/projects/${enc(id)}/storyboard`);
-        }) }, p.media.storyboard ? "↻ Remake the storyboard" : "▶ Watch the storyboard (pictures + audio, free)") : null));
-    }
-    // Draw the pictures first (no videos), check and fix them, then make the clips from them.
-    const noPicture = p.scenes.scenes.filter((sc) => !sc.leftOut && drawsPicture(p, sc) && !p.media.scenes.find((x) => x.index === sc.index)?.image && !p.media.scenes.find((x) => x.index === sc.index)?.video);
-    if (idle && p.completed.includes("audio") && noPicture.length) {
-      extra.unshift(h("button", { type: "button", class: "btn", title: "Draw the scene pictures only. No videos are made, so you can check and fix each picture (🖼 Fix picture) before paying for videos.", onclick: act(async () => {
-        await post(`/api/projects/${enc(id)}/scenes/pictures/draw`);
-      }) }, `🖼 Draw the ${noPicture.length} scene picture${noPicture.length === 1 ? "" : "s"} first (no videos)`));
-    }
     // Videos uploaded by hand (or made earlier): approve them as they are and go on, without generating anything.
     const kept = p.scenes.scenes.filter((sc) => !sc.leftOut);
     const hasVideo = (sc) => p.media.scenes.find((m) => m.index === sc.index)?.video;
@@ -1877,6 +1851,45 @@ function samplesEditor(p) {
     h("p", { class: "text-xs text-stone-500", text: SAMPLES_HELP }),
     list, picker.el, redrawRow,
     h("div", { class: "flex flex-wrap items-center gap-3" }, save, status));
+}
+
+/**
+ * Audio step: the scene pictures and the storyboard (every picture with its audio), so the whole film can be
+ * checked and fixed before any video is made. Drawing pictures costs images only; the storyboard is free.
+ */
+function storyboardPanel(p, idle, act) {
+  const id = p.id;
+  const scenes = (p.scenes?.scenes ?? []).filter((sc) => !sc.leftOut && drawsPicture(p, sc));
+  const has = (sc) => p.media.scenes.find((x) => x.index === sc.index)?.image;
+  const missing = scenes.filter((sc) => !has(sc) && !p.media.scenes.find((x) => x.index === sc.index)?.video);
+  const all = scenes.length > 0 && scenes.every(has);
+  return h("div", { class: "space-y-2 rounded-xl bg-sky-50 p-3" },
+    h("p", { class: "text-sm text-sky-900", text: "🖼 Storyboard: see each scene's picture with its audio before any video is made. Fix a picture with 🖼 Fix picture (no video is made), then watch the whole film as pictures + audio. When it looks right, continue to the clips — the videos are made from these pictures." }),
+    all && p.media.storyboard ? h("video", { controls: true, preload: "metadata", class: "max-h-[70vh] w-full rounded-xl bg-black", src: mediaUrl(id, p.media.storyboard, p.updatedAt), "aria-label": "Storyboard: every scene's picture with its audio" }) : null,
+    h("div", { class: "flex flex-wrap gap-2" },
+      idle && missing.length ? h("button", { type: "button", class: "btn", title: "Draw the scene pictures only. No videos are made.", onclick: act(async () => {
+        await post(`/api/projects/${enc(id)}/scenes/pictures/draw`);
+      }) }, `🖼 Draw the ${missing.length} scene picture${missing.length === 1 ? "" : "s"} (no videos)`) : null,
+      idle && all ? h("button", { type: "button", class: "btn", title: "Join every scene's picture with its audio into one video. Made on this computer: nothing is paid for.", onclick: act(async () => {
+        await post(`/api/projects/${enc(id)}/storyboard`);
+      }) }, p.media.storyboard ? "↻ Remake the storyboard" : "▶ Watch the storyboard (pictures + audio, free)") : null));
+}
+
+/** Audio step: one scene's picture (or a placeholder) with its 🖼 Fix picture button. */
+function scenePictureCell(p, sc, idle, act) {
+  const id = p.id;
+  if (!drawsPicture(p, sc)) return h("p", { class: "w-full text-xs text-stone-500 sm:w-48", text: "No picture: the video AI makes this scene from the character." });
+  const m = p.media.scenes.find((x) => x.index === sc.index);
+  return h("div", { class: "w-full shrink-0 space-y-1 sm:w-48" },
+    m?.image
+      ? h("a", { href: mediaUrl(id, m.image, p.updatedAt), target: "_blank", rel: "noopener" }, h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: `Scene ${sc.index + 1} picture: ${sc.visualPrompt}`, class: "aspect-video w-full rounded-lg border border-orange-100 object-cover" }))
+      : h("div", { class: "grid aspect-video w-full place-items-center rounded-lg bg-stone-100 text-xs text-stone-500", text: p.running ? "drawing…" : "no picture yet" }),
+    idle ? h("button", { type: "button", class: "btn-soft w-full px-3 py-1 text-xs", title: "Change what this scene's picture shows and draw only the picture again. No video is made; this scene's old video and clip are removed.", onclick: act(async () => {
+      const desc = prompt(`Scene ${sc.index + 1} picture — what should it show? (English; the characters' looks are added automatically)`, sc.visualPrompt);
+      if (desc === null || !desc.trim()) return SKIP;
+      if (m?.video && !confirm(`Scene ${sc.index + 1} already has a video. Redrawing the picture removes it (a new video is paid when you make the clips). Continue?`)) return SKIP;
+      await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/picture/redraw`, { visualPrompt: desc.trim() });
+    }) }, m?.image ? "🖼 Fix picture" : "🖼 Draw picture") : null);
 }
 
 /** Whether a scene gets a picture (same rule as the server's scenePicture): always for stills; on Veo unless turned off. */
