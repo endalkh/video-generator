@@ -355,3 +355,20 @@ describe("storyboard video", () => {
     expect((await ps.get(id)).media.storyboard).toBeNull();
   }, 90_000);
 });
+
+describe("preview keeps the checked picture", () => {
+  it("makes the scene's video from its existing picture (no new picture) and never names a studio", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "goats on the hill", sceneCount: 2, audioMode: "narration", videoMode: "veo", reviewMode: "manual", style: "3D kids' movie, Pixar-like, bright" }, "mock");
+    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+    await ps.drawScenePictures(id);
+    await ps.idle();
+    const images = mock.prompts.filter((x) => x.kind === "image").length;
+    await ps.previewScene(id, 0);
+    expect(mock.prompts.filter((x) => x.kind === "image").length).toBe(images); // picture reused, not redrawn
+    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(1);
+    expect(mock.prompts.some((x) => /pixar/i.test(x.prompt))).toBe(false);
+  }, 60_000);
+});

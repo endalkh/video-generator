@@ -1947,7 +1947,7 @@ function channelBriefFields(prefix, input = {}) {
     name: h("input", { id: `${prefix}-name`, class: "field", maxlength: 100, value: input.name ?? "", placeholder: "Leave empty and the AI suggests one" }),
     language: h("select", { id: `${prefix}-language`, class: "field" }, [["en", "English"], ["am", "አማርኛ (Amharic)"], ["both", "Both — አማርኛ + English"]].map(([v, t]) => h("option", { value: v, text: t, selected: v === (input.language ?? "en") }))),
     ageRange: h("input", { id: `${prefix}-age`, class: "field", value: input.ageRange ?? "all ages" }),
-    style: h("input", { id: `${prefix}-style`, class: "field", value: input.style ?? "colorful 3D animated kids' movie style, Pixar-like, bright even lighting, crisp detailed backgrounds, expressive characters" }),
+    style: h("input", { id: `${prefix}-style`, class: "field", value: input.style ?? "colorful 3D animated kids' movie style, feature-film quality, bright even lighting, crisp detailed backgrounds, expressive characters" }),
     mainCharacter: h("input", { id: `${prefix}-character`, class: "field", maxlength: 300, value: input.mainCharacter ?? "", placeholder: "e.g. Milcah (ሚልካ), a cheerful, curious little Ethiopian girl" }),
     videoMinutes: h("input", { id: `${prefix}-minutes`, type: "number", min: 0.5, max: 10, step: 0.5, class: "field", value: input.videoMinutes ?? "", placeholder: "e.g. 5" }),
     audioMode: h("select", { id: `${prefix}-audio`, class: "field" }, [["", "Not set (song; rhyme over music for Amharic)"], ...AUDIO_MODES].map(([v, t]) => h("option", { value: v, text: t, selected: v === (input.audioMode ?? "") }))),

@@ -22,7 +22,7 @@ export const ChannelInputSchema = z.object({
   brief: optionalText(2000),
   language: ChannelLanguageSchema.default("en"),
   ageRange: z.string().transform(tidy).default("all ages"),
-  style: z.string().transform(tidy).default("colorful 3D animated kids' movie style, Pixar-like, bright even lighting, crisp detailed backgrounds, expressive characters"),
+  style: z.string().transform(tidy).default("colorful 3D animated kids' movie style, feature-film quality, bright even lighting, crisp detailed backgrounds, expressive characters"),
   /** Channel default for new videos and plans: the recurring main character. */
   mainCharacter: optionalText(300),
   /** Channel default for new videos and plans: video length in minutes (½–10). */

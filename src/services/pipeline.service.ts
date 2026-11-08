@@ -144,7 +144,7 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   const perScene: ((i: number) => string)[] = [];
   if (at("character")) files.push(p.characterImage, p.thumbnail), perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);  if (at("audio")) files.push(p.song("mp3"), p.song("wav"), p.music("mp3"), p.music("wav")), perScene.push(p.sceneAudio, p.scenePiece);
   // Pictures and Veo videos don't depend on the audio: a new song only re-times (re-renders) the clips.
-  if (at("clips")) perScene.push(p.sceneClip);
+  if (at("clips")) perScene.push(p.sceneClip, p.scenePreview);
   if (from === "clips") perScene.push(p.sceneImage, p.sceneVideo, p.sceneVideoTask);
   if (at("final")) files.push(p.final, p.srt);
   if (at("audio")) {
@@ -168,7 +168,7 @@ export async function wipeRenders(p: MediaPaths): Promise<void> {
   const files = [p.final, p.srt];
   for (const d of dirs) {
     const i = Number(d) - 1;
-    if (Number.isInteger(i) && i >= 0) files.push(p.sceneClip(i));
+    if (Number.isInteger(i) && i >= 0) files.push(p.sceneClip(i), p.scenePreview(i));
   }
   await Promise.all(files.map((f) => rm(f, { force: true })));
 }
@@ -190,14 +190,28 @@ export async function wipeSceneVideos(p: MediaPaths): Promise<void> {
   const files = [p.final, p.srt];
   for (const d of dirs) {
     const i = Number(d) - 1;
-    if (Number.isInteger(i) && i >= 0) files.push(p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i));
+    if (Number.isInteger(i) && i >= 0) files.push(p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.scenePreview(i));
   }
   await Promise.all(files.map((f) => rm(f, { force: true })));
 }
 
 /** Delete one scene's picture, video and clip (plus the final video) so only that scene is made again. */
 export async function wipeScene(p: MediaPaths, i: number): Promise<void> {
-  await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.final, p.srt, p.storyboard].map((f) => rm(f, { force: true })));
+  await Promise.all([p.sceneImage(i), p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.scenePreview(i), p.final, p.srt, p.storyboard].map((f) => rm(f, { force: true })));
+}
+
+/** Delete one scene's video and clip but keep its picture (e.g. a preview made from the picture you checked). */
+/**
+ * Google (and OpenAI) refuse prompts that name a third-party studio ("Pixar-like"), so a style written that way
+ * (older default) is reworded to "feature-film quality" before anything is sent.
+ */
+export function withoutStudioNames<T extends { text: string }>(r: T): T {
+  const text = r.text.replace(/\(?\b(?:Pixar|Disney|DreamWorks|Illumination)(?:[- ](?:like|style|quality))?\b\)?/gi, "feature-film quality");
+  return text === r.text ? r : { ...r, text };
+}
+
+export async function wipeSceneVideo(p: MediaPaths, i: number): Promise<void> {
+  await Promise.all([p.sceneVideo(i), p.sceneVideoTask(i), p.sceneClip(i), p.scenePreview(i), p.final, p.srt].map((f) => rm(f, { force: true })));
 }
 
 /**
@@ -406,7 +420,7 @@ export class PipelineService {
         vars: Record<string, string | number | undefined> = {},
         sceneIndex?: number,
       ): Promise<RenderedPrompt & { model: string }> => {
-        const r = prompts.render(key, vars);
+        const r = withoutStudioNames(prompts.render(key, vars));
         const model = models[task];
         await this.generations.add({ projectId: project.id, step, sceneIndex: sceneIndex ?? null, promptKey: r.key, promptVersion: r.version, prompt: r.text, provider: provider.name, model });
         log.debug(`[${step}] prompt ${key} v${r.version} → ${model}:\n${r.text}`);
@@ -892,7 +906,9 @@ export class PipelineService {
             } catch (err) {
               if (err instanceof PipelineCancelled) throw err;
               // No fallback to pictures: surface the error so it can be fixed and retried.
-              const hint = (err as { status?: number }).status === 429
+              const hint = /third-party content/i.test((err as Error).message)
+                ? ` — Google blocks videos that look like a famous film, character or studio. Change this scene's picture (🖼 Fix picture on the Audio step) so its characters look less like well-known ones (e.g. a lion cub that looks like a famous film lion), or give that character a more original look on the Character page, then try again.`
+                : (err as { status?: number }).status === 429
                 ? ` — the request limit for ${r.model} on your account was reached. Finished clips are kept: wait a few minutes (or until tomorrow for a daily limit), then click "Make the clips" on the Clips page. A cheaper Veo model (fast or lite, on the Models page) has higher limits.`
                 : "";
               throw new Error(`Scene ${i + 1} video (${r.model}) failed: ${(err as Error).message}${hint}`);
