@@ -75,9 +75,11 @@ const PROVIDERS = [
     links: [["https://inference.sh", "Dashboard, API keys and prices (Settings → API Keys)"]] },
   { id: "treblo", name: "Treblo (formerly Sonauto)", env: "TREBLO_API_KEY", what: "Full songs with vocals (treblo/v3)",
     links: [["https://sonauto.ai/developers/account", "API key and credits"], ["https://sonauto.ai/developers/pricing", "Pricing"], ["https://sonauto.ai/developers/docs", "API docs"], ["https://sonauto.ai/api-terms", "API terms (attribution)"], ["https://status.treblo.com", "Status"]] },
+  { id: "openai", name: "OpenAI", env: "OPENAI_API_KEY", what: "Text and images for some tasks (openai/gpt-4o, openai/gpt-image-1)",
+    links: [["https://platform.openai.com/api-keys", "API keys"], ["https://platform.openai.com/usage", "Usage"], ["https://openai.com/api/pricing", "Pricing"], ["https://status.openai.com", "Status"]] },
 ];
 /** Which provider runs a model id (as chosen on the Models page). */
-const providerOf = (model) => PROVIDERS.find((p) => p.id === (/^inference\.sh\//.test(model) ? "inference" : /^treblo\//.test(model) ? "treblo" : "google"));
+const providerOf = (model) => PROVIDERS.find((p) => p.id === (/^inference\.sh\//.test(model) ? "inference" : /^treblo\//.test(model) ? "treblo" : /^openai\//.test(model) ? "openai" : "google"));
 
 /** The provider list with links (Models page). */
 function providersCard() {

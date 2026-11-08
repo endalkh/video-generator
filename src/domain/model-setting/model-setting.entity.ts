@@ -53,6 +53,8 @@ export function capabilityOf(modelId: string): ModelCapability | undefined {
     return /\/seedance|^inference\.sh\/(klingai\/(avatar(-pro)?|video-v3)|alibaba\/wan-2-7-i2v|bfl\/flux-3-video|minimax\/h3|falai\/minimax-h3-max|google\/gemini-omni-flash|xai\/grok-imagine-video-1-5|pruna\/p-video|pixverse\/v6)$/.test(id) ? "video" : undefined;
   }
   if (id.startsWith("treblo/")) return "music";
+  // OpenAI text/image models (openai/gpt-4o, openai/gpt-image-1): dispatched to OpenAI by the provider.
+  if (id.startsWith("openai/")) return /image/.test(id) ? "image" : "text";
   // Gemini Omni Flash is a video model on the Gemini API (driven via the Interactions API). Must be checked
   // before the generic "omni is unsupported" exclusion and the gemini→text fallback below.
   if (/^gemini-omni/.test(id)) return "video";
@@ -92,7 +94,7 @@ export class ModelSetting {
 
   change(model: string): void {
     const id = model.trim().replace(/^models\//, "");
-    if (!/^(inference\.sh\/[a-zA-Z0-9][a-zA-Z0-9._-]*\/|free\/|treblo\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{1,120}$/.test(id)) throw new ValidationError(`"${model}" is not a valid model id`);
+    if (!/^(inference\.sh\/[a-zA-Z0-9][a-zA-Z0-9._-]*\/|free\/|treblo\/|openai\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{1,120}$/.test(id)) throw new ValidationError(`"${model}" is not a valid model id`);
     const cap = capabilityOf(id);
     if (cap && cap !== this.definition.capability) {
       throw new ValidationError(`"${id}" looks like a ${cap} model, but "${this.definition.title}" needs a ${this.definition.capability} model`);

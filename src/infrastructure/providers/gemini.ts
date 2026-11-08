@@ -10,6 +10,7 @@ import { CharacterSchema, CastPlanSchema, minResolution, PoemSchema, PublishInfo
 import { log } from "../../util/log.js";
 import { InferenceShVideo, inferenceShWorksWithoutPicture, isInferenceShModel } from "./inference-sh.js";
 import { isTrebloModel, TREBLO_MODELS, TrebloMusic } from "./treblo.js";
+import { isOpenAiModel, OPENAI_MODELS, OpenAiClient } from "./openai.js";
 import { isBillingStop, isTransientError, sleep, withRetry } from "../../util/retry.js";
 import { type AvailableModel, type GenContext, type Provider, type SongResult, type TextKind, type TextOutputs } from "../../domain/ports/generator.port.js";
 
@@ -111,6 +112,12 @@ export class GeminiProvider implements Provider {
     return (this.trebloClient ??= new TrebloMusic());
   }
 
+  /** Text/image models named "openai/…" run on OpenAI instead of Google (needs OPENAI_API_KEY). */
+  private openaiClient?: OpenAiClient;
+  private openai(): OpenAiClient {
+    return (this.openaiClient ??= new OpenAiClient());
+  }
+
   /**
    * Which key a model runs on: "free/<model>" = the free-tier key (GEMINI_TEXT_API_KEY), anything else = the paid
    * GEMINI_API_KEY. Returns the client and the real model id.
@@ -151,12 +158,24 @@ export class GeminiProvider implements Provider {
     for (const o of OMNI_MODELS) if (!have.has(o.id)) models.push(o);
     if (process.env.INFERENCE_API_KEY) models.push(...this.inferenceShVideo().listModels());
     if (process.env.TREBLO_API_KEY?.trim()) models.push(...TREBLO_MODELS);
+    if (process.env.OPENAI_API_KEY?.trim()) models.push(...(await this.openai().listModels().catch(() => [...OPENAI_MODELS])));
     this.modelsCache = { at: Date.now(), models };
     return models;
   }
 
   async text<K extends TextKind>(kind: K, prompt: string, opts: { model: string; ctx: GenContext; images?: Buffer[] }): Promise<TextOutputs[K]> {
     const schema = SCHEMAS[kind];
+    if (isOpenAiModel(opts.model)) {
+      const raw = await this.openai().text(opts.model, prompt, {
+        label: kind,
+        images: opts.images,
+        jsonSchema: z.toJSONSchema(schema, { io: "input" }) as Record<string, unknown>,
+        schemaName: kind,
+      });
+      const parsed = schema.safeParse(raw);
+      if (!parsed.success) throw new Error(`${kind}: OpenAI output failed validation: ${parsed.error.message}`);
+      return parsed.data;
+    }
     const contents = opts.images?.length
       ? [{ role: "user", parts: [...opts.images.map((b) => ({ inlineData: { data: b.toString("base64"), mimeType: sniffImageMime(b) } })), { text: prompt }] }]
       : prompt;
@@ -179,6 +198,7 @@ export class GeminiProvider implements Provider {
   }
 
   async image(prompt: string, opts: { model: string; aspectRatio: string; references?: Buffer[]; label: string; size?: "1K" | "2K" | "4K" }): Promise<Buffer> {
+    if (isOpenAiModel(opts.model)) return this.openai().image(opts.model, prompt, { label: opts.label, aspectRatio: opts.aspectRatio, references: opts.references });
     const imageSize = opts.size && supportsImageSize(opts.model) ? { imageSize: opts.size } : {};
     return withRetry(
       async () => {

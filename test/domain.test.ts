@@ -176,6 +176,10 @@ describe("ModelSetting entity", () => {
     expect([capabilityOf("inference.sh/bytedance/seedance-2-5"), capabilityOf("inference.sh/klingai/avatar-pro"), capabilityOf("inference.sh/klingai/video-v3"), capabilityOf("inference.sh/google/veo-3-1")]).toEqual(["video", "video", "video", undefined]);
     expect([capabilityOf("lyria-3.5"), capabilityOf("gemini-3.8-flash-tts"), capabilityOf("gemini-3-pro-image"), capabilityOf("text-embedding-004")]).toEqual(["music", "tts", "image", undefined]);
     expect([capabilityOf("gemini-omni-1.1-flash"), capabilityOf("free/gemini-omni-1.1-flash")]).toEqual(["video", "video"]); // Omni Flash is a video model (Interactions API)
+    // OpenAI models: text vs image by id; selectable for their matching tasks.
+    expect([capabilityOf("openai/gpt-4o"), capabilityOf("openai/gpt-image-1")]).toEqual(["text", "image"]);
+    ModelSetting.default("scene_image").change("openai/gpt-image-1"); // image task accepts an openai image model
+    expect(() => ModelSetting.default("scenes").change("openai/gpt-image-1")).toThrow(/needs a text model/);
     // "free/<model>": the same model on the free-tier key.
     s.change("free/gemini-3.8-flash");
     expect(s.model).toBe("free/gemini-3.8-flash");
