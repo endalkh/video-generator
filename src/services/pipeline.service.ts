@@ -725,6 +725,18 @@ export class PipelineService {
         await step("audio", allExist(scenes.map((s) => p.sceneAudio(s.index))), async () => {
           project.setSong(null);
           const mainVoice = input.voice ?? defaultVoice(input.singer, input.audioMode);
+          // Every speaker in the script needs a voice: scenes may have been re-planned after the cast was made
+          // (e.g. "mother-lion" vs "lion-mother"), so add any speaker missing from the cast before voicing.
+          const missing = new Set<string>();
+          for (const s of scenes) for (const dl of s.dialogue ?? []) {
+            if (dl.speaker !== SPEAKER_MAIN && dl.speaker !== SPEAKER_NARRATOR && !project.cast.some((c) => c.id === dl.speaker)) missing.add(dl.speaker);
+          }
+          if (missing.size) {
+            const added = [...missing].map((id) => ({ id, name: id.replace(/-/g, " "), description: `A friendly ${id.replace(/-/g, " ")}, a lovable animated children's character.` }));
+            project.setCast(assignCastVoices([...project.cast, ...added], mainVoice));
+            await save();
+            log.warn(`dialogue: gave a voice to speaker(s) missing from the cast: ${[...missing].join(", ")}`);
+          }
           await perScene("audio", p.sceneAudio, "voiced", async (s) => {
             // Each line is spoken in its speaker's own voice, then the lines are stitched into the scene's audio.
             const lines = s.dialogue?.length ? s.dialogue : [{ speaker: SPEAKER_NARRATOR, line: s.text }];
@@ -733,7 +745,8 @@ export class PipelineService {
               for (const [j, dl] of lines.entries()) {
                 checkCancel();
                 const lineVoice = speakerVoice(dl.speaker, project.cast, mainVoice);
-                const r = await prompt("audio", "scene_speech", "narration", { scene_number: s.index + 1, scene_text: dl.line }, s.index);
+                // Only the line itself goes to the speech model: any instruction text gets read out loud.
+                const r = await prompt("audio", "dialogue_line", "narration", { scene_number: s.index + 1, scene_text: dl.line }, s.index);
                 const part = path.join(p.sceneDir(s.index), `line-${String(j + 1).padStart(2, "0")}.wav`);
                 await writeFileAtomic(part, await provider.speech(r.text, { model: r.model, voice: lineVoice, label: `scene ${s.index + 1} line ${j + 1} (${dl.speaker})`, ctx: ctx({ scene: s }) }));
                 parts.push(part);

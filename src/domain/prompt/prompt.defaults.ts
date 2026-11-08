@@ -376,6 +376,13 @@ Cheerful, warm and bouncy, ~100 BPM, simple and steady so a voice can chant a rh
 Instrumental only: no vocals, no singing, no humming, no spoken words. Even volume, no big drops or solos, so it loops well.`],
   },
   {
+    key: "dialogue_line",
+    title: "Dialogue line (TTS)",
+    description: "Dialogue story: the exact text sent to the speech model for ONE spoken line. Keep it to just {{scene_text}} — speech models read any instructions here out loud. Each character's voice is chosen on the Character page.",
+    vars: ["scene_number", "scene_text"],
+    template: `{{scene_text}}`,
+  },
+  {
     key: "scene_speech",
     title: "Narration / TTS",
     description: "Text-to-speech instruction per scene: narration, voice over music (chanted like a nursery rhyme over the music), or song mode when the provider has no music model. {{voice_style}} is the chosen singer/voice.",
