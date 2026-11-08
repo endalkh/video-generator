@@ -49,6 +49,28 @@ describe("dialogue mode (Stage A)", () => {
     expect(sc.dialogue).toEqual([{ speaker: "main", line: "Hi!" }, { speaker: "rabbit", line: "Hello!" }]);
     expect(SceneSchema.parse({ index: 1, text: "x", visualPrompt: "y" }).dialogue).toBeUndefined();
   });
+  it("assigns distinct voices and resolves a speaker's voice (Stage B)", async () => {
+    const { assignCastVoices, speakerVoice, NARRATOR_VOICE } = await import("../src/domain/project/project.model.js");
+    const cast = [{ id: "rabbit", name: "R", description: "d" }, { id: "lion", name: "L", description: "d" }];
+    const voiced = assignCastVoices(cast, "Leda");
+    const voices = voiced.map((c) => c.voice);
+    expect(new Set(voices).size).toBe(2); // distinct
+    expect(voices).not.toContain("Leda"); // avoids the main voice
+    expect(voiced.find((c) => c.id === "rabbit")!.voice).toBeTruthy();
+    expect(speakerVoice("main", voiced, "Leda")).toBe("Leda");
+    expect(speakerVoice("narrator", voiced, "Leda")).toBe(NARRATOR_VOICE);
+    expect(speakerVoice("rabbit", voiced, "Leda")).toBe(voiced.find((c) => c.id === "rabbit")!.voice);
+    expect(speakerVoice("unknown-id", voiced, "Leda")).toBe(NARRATOR_VOICE); // fallback
+    // A chosen voice is kept, not overwritten.
+    expect(assignCastVoices([{ id: "sun", name: "S", description: "d", voice: "Kore" }], "Leda")[0]!.voice).toBe("Kore");
+  });
+  it("updates a cast member's voice (and clears it on empty)", () => {
+    const p = Project.create({ id: "cast-voice", input, provider: "mock" });
+    p.setCast([{ id: "rabbit", name: "Tutu", description: "a rabbit" }]);
+    expect(p.updateCastMember("rabbit", { voice: "Puck" }).voice).toBe("Puck");
+    expect(p.updateCastMember("rabbit", { voice: "" }).voice).toBeUndefined();
+    expect(() => p.updateCastMember("rabbit", { voice: "NotARealVoice" })).toThrow();
+  });
 });
 
 describe("ProjectInput", () => {

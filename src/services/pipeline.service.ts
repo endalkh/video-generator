@@ -4,7 +4,7 @@ import type { GenContext, Provider } from "../domain/ports/generator.port.js";
 import { MAX_SONG_PART_SEC, mmss, singableSeconds, songParts, songTimeline } from "../domain/ports/generator.port.js";
 import { isTrebloModel, TREBLO_MAX_SONG_SEC } from "../infrastructure/providers/treblo.js";
 import type { Project } from "../domain/project/project.entity.js";
-import { defaultVoice, minResolution, scenePicture, soundInVideo, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
+import { assignCastVoices, defaultVoice, minResolution, scenePicture, soundInVideo, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
@@ -497,7 +497,9 @@ export class PipelineService {
             const { cast } = await provider.text("cast", cr.text, { model: cr.model, ctx: ctx() });
             // Drop any that collide with the main character or each other by id.
             const seen = new Set<string>();
-            const unique = cast.filter((c) => !seen.has(c.id) && seen.add(c.id) !== undefined);
+            let unique = cast.filter((c) => !seen.has(c.id) && seen.add(c.id) !== undefined);
+            // Dialogue mode: give each cast member a distinct speaking voice (editable later on the Character page).
+            if (input.audioMode === "dialogue") unique = assignCastVoices(unique, input.voice ?? defaultVoice(input.singer, input.audioMode));
             project.setCast(unique);
             await save();
             if (unique.length) log.step("character", `cast: ${unique.map((c) => c.name).join(", ")}`);

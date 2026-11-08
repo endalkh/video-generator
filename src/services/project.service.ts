@@ -23,7 +23,7 @@ export interface ProjectDetailsDto extends ProjectDto {
   media: {
     characterImage: string | null;
     /** Secondary cast reference images (id → relative path), for the Character page. */
-    cast: { id: string; name: string; description: string; image: string | null }[];
+    cast: { id: string; name: string; description: string; voice: string | null; image: string | null }[];
     /** Sample pictures (e.g. a food or a house) the scenes show. */
     samples: string[];
     final: string | null;
@@ -105,7 +105,7 @@ export class ProjectService {
       lastEvent: job?.events.at(-1) ?? this.lastEvents.get(id) ?? null,
       media: {
         characterImage: await rel(p.characterImage),
-        cast: await Promise.all(project.cast.map(async (c) => ({ id: c.id, name: c.name, description: c.description, image: await rel(p.castImage(c.id)) }))),
+        cast: await Promise.all(project.cast.map(async (c) => ({ id: c.id, name: c.name, description: c.description, voice: c.voice ?? null, image: await rel(p.castImage(c.id)) }))),
         samples: await Promise.all((await sampleFiles(p)).map(async (f) => (await rel(f))!)),
         final: await rel(p.final),
         subtitles: await rel(p.srt),
@@ -623,14 +623,18 @@ export class ProjectService {
     return ProjectMapper.toDto(project);
   }
 
-  /** Edit a cast member's name/look, then redraw its reference image. Scenes already made keep the old look until redone. */
-  async editCastMember(id: string, castId: string, patch: { name?: string; description?: string }, opts: { provider?: string } = {}): Promise<ProjectDto> {
+  /** Edit a cast member's name/look/voice. Redraws its reference image only when the name or look changed. */
+  async editCastMember(id: string, castId: string, patch: { name?: string; description?: string; voice?: string }, opts: { provider?: string } = {}): Promise<ProjectDto> {
     const project = await this.loadIdle(id);
+    const before = project.cast.find((c) => c.id === castId);
+    const look = before ? patch.name?.trim() !== undefined && patch.name.trim() !== before.name || (patch.description?.trim() !== undefined && patch.description.trim() !== before.description) : false;
     const member = project.updateCastMember(castId, patch);
-    const provider = this.providers(opts.provider ?? project.provider);
-    const media = this.media(id);
-    await ensureDir(media.castDir);
-    await writeFileAtomic(media.castImage(member.id), await this.pipeline.drawCastImage(project, member, provider));
+    if (look) {
+      const provider = this.providers(opts.provider ?? project.provider);
+      const media = this.media(id);
+      await ensureDir(media.castDir);
+      await writeFileAtomic(media.castImage(member.id), await this.pipeline.drawCastImage(project, member, provider));
+    }
     await this.projects.save(project);
     return ProjectMapper.toDto(project);
   }

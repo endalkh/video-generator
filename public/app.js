@@ -1406,17 +1406,23 @@ function castSection(p, act, editable) {
       const name = h("input", { class: "field", lang, value: c.name, "aria-label": `${c.id} name` });
       const desc = h("textarea", { class: "field", rows: 3, value: c.description, "aria-label": `${c.id} look` });
       const status = h("span", { role: "status", "aria-live": "polite", class: "text-xs" });
+      // Dialogue mode: this character's speaking voice (editable). "" = auto.
+      const dialogue = p.input.audioMode === "dialogue";
+      const voiceSel = dialogue ? h("select", { class: "field text-sm", "aria-label": `${c.id} voice` },
+        [["", "Voice: auto"], ...Object.entries(TTS_VOICES).map(([v, d]) => [v, `${v} — ${d}`])].map(([v, t]) => h("option", { value: v, text: t, selected: v === (c.voice ?? "") }))) : null;
       const save = h("button", { type: "button", class: "btn-soft px-3 py-1 text-xs", onclick: act(async () => {
-        if (name.value.trim() === c.name && desc.value.trim() === c.description) { status.textContent = "Nothing changed."; return SKIP; }
-        if (!confirm(`Save and redraw ${c.name}'s picture?`)) return SKIP;
-        await post(`/api/projects/${enc(id)}/cast/${enc(c.id)}`, { name: name.value.trim(), description: desc.value.trim() }, "PUT");
-      }) }, "🎨 Save & redraw");
+        const nameChanged = name.value.trim() !== c.name, lookChanged = desc.value.trim() !== c.description;
+        const voiceChanged = dialogue && (voiceSel.value || "") !== (c.voice ?? "");
+        if (!nameChanged && !lookChanged && !voiceChanged) { status.textContent = "Nothing changed."; return SKIP; }
+        if ((nameChanged || lookChanged) && !confirm(`Save and redraw ${c.name}'s picture?`)) return SKIP;
+        await post(`/api/projects/${enc(id)}/cast/${enc(c.id)}`, { name: name.value.trim(), description: desc.value.trim(), ...(dialogue ? { voice: voiceSel.value } : {}) }, "PUT");
+      }) }, "💾 Save");
       const redraw = h("button", { type: "button", class: "btn-soft px-3 py-1 text-xs", onclick: act(async () => {
         if (!confirm(`Draw a new picture for ${c.name}?`)) return SKIP;
         await post(`/api/projects/${enc(id)}/cast/${enc(c.id)}/redraw`);
       }) }, "↻ Redraw");
       return h("li", { class: "flex gap-3 rounded-xl border border-orange-100 p-3" }, img,
-        h("div", { class: "flex-1 space-y-1" }, name, desc, h("div", { class: "flex items-center gap-2" }, save, redraw, status)));
+        h("div", { class: "flex-1 space-y-1" }, name, desc, voiceSel, h("div", { class: "flex items-center gap-2" }, save, redraw, status)));
     })));
 }
 

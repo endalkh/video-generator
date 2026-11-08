@@ -68,6 +68,37 @@ export function defaultVoice(singer: Singer, audioMode: AudioMode): TtsVoice {
   return bySinger[singer];
 }
 
+/** The narrator's voice in dialogue mode (a calm, clear storyteller). */
+export const NARRATOR_VOICE: TtsVoice = "Charon";
+/** A varied pool of distinct voices to give dialogue cast members, so each character sounds different. */
+export const DIALOGUE_VOICE_POOL: readonly TtsVoice[] = ["Puck", "Fenrir", "Leda", "Aoede", "Laomedeia", "Enceladus", "Gacrux", "Sadachbia", "Umbriel", "Despina"];
+
+/**
+ * Give each cast member without a chosen voice a distinct one from the pool, avoiding the main character's and
+ * the narrator's voices and any voice already taken. Returns a new cast list (does not mutate the input).
+ */
+export function assignCastVoices(cast: readonly CastMember[], mainVoice: TtsVoice): CastMember[] {
+  const taken = new Set<TtsVoice>([mainVoice, NARRATOR_VOICE, ...cast.map((c) => c.voice).filter((v): v is TtsVoice => Boolean(v))]);
+  const free = DIALOGUE_VOICE_POOL.filter((v) => !taken.has(v));
+  let i = 0;
+  return cast.map((c) => {
+    if (c.voice) return { ...c };
+    const voice = free[i++] ?? DIALOGUE_VOICE_POOL[(i - 1) % DIALOGUE_VOICE_POOL.length]!;
+    return { ...c, voice };
+  });
+}
+
+/**
+ * Which TTS voice speaks a dialogue line, by speaker id: "main" = the project's chosen voice, "narrator" = the
+ * narrator voice, otherwise the matching cast member's voice (or a fallback). Used by the audio step (Stage C).
+ */
+export function speakerVoice(speaker: string, cast: readonly CastMember[], mainVoice: TtsVoice): TtsVoice {
+  if (speaker === SPEAKER_MAIN) return mainVoice;
+  if (speaker === SPEAKER_NARRATOR) return NARRATOR_VOICE;
+  const member = cast.find((c) => c.id === speaker);
+  return member?.voice ?? NARRATOR_VOICE;
+}
+
 export function autoSceneCount(lengthSeconds: number, audioMode: AudioMode): number {
   return Math.min(MAX_SCENES, Math.max(2, Math.round(lengthSeconds / SECONDS_PER_SCENE[audioMode])));
 }
@@ -218,6 +249,8 @@ export const CastMemberSchema = z.object({
   name: z.string().min(1),
   /** Detailed English appearance description reused wherever this character appears. */
   description: z.string().min(1),
+  /** Dialogue mode: the TTS voice this character speaks with. Empty = auto-assigned a distinct voice. */
+  voice: z.enum(Object.keys(TTS_VOICES) as [TtsVoice, ...TtsVoice[]]).optional(),
 });
 export type CastMember = z.infer<typeof CastMemberSchema>;
 export const CastSchema = z.array(CastMemberSchema).max(8);

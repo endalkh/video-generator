@@ -2,6 +2,7 @@ import { ConflictError, ValidationError } from "../errors.js";
 import {
   ProjectInputSchema,
   STEP_NAMES,
+  CastMemberSchema,
   type Character,
   type CastMember,
   type Poem,
@@ -562,12 +563,16 @@ export class Project {
     this.touch();
   }
 
-  /** Update one cast member's name/description (by id). Throws if there is no such member. */
-  updateCastMember(id: string, patch: { name?: string; description?: string }): CastMember {
+  /** Update one cast member's name/description/voice (by id). Throws if there is no such member. */
+  updateCastMember(id: string, patch: { name?: string; description?: string; voice?: string }): CastMember {
     const member = this.props.cast.find((c) => c.id === id);
     if (!member) throw new ValidationError(`No cast member "${id}"`);
     if (patch.name?.trim()) member.name = patch.name.trim();
     if (patch.description?.trim()) member.description = patch.description.trim();
+    if (patch.voice !== undefined) {
+      const v = patch.voice.trim();
+      member.voice = v ? (CastMemberSchema.shape.voice.parse(v) as CastMember["voice"]) : undefined;
+    }
     this.touch();
     return { ...member };
   }

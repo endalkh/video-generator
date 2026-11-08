@@ -91,7 +91,7 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
     .post("/api/projects/:id/scenes/:index/preview", async ({ params }) => projects.previewScene(params.id!, Number(params.index) - 1))
     .put("/api/projects/:id/cast/:castId", async ({ params, body }) => {
       const b = await body();
-      return projects.editCastMember(params.id!, params.castId!, { name: str(b.name), description: str(b.description) }, { provider: str(b.provider) });
+      return projects.editCastMember(params.id!, params.castId!, { name: str(b.name), description: str(b.description), voice: typeof b.voice === "string" ? b.voice : undefined }, { provider: str(b.provider) });
     })
     .post("/api/projects/:id/cast/:castId/redraw", async ({ params, body }) => {
       const b = await body();
