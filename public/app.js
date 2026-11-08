@@ -328,7 +328,7 @@ async function showNewVideo() {
     h("div", { class: "grid gap-4 sm:grid-cols-2 lg:grid-cols-3" },
       field("f-language", "Language", select("f-language", "language", [["en", "English"], ["am", "አማርኛ (Amharic)"]], lang)),
       field("f-audio", "Audio", select("f-audio", "audioMode", AUDIO_MODES, d.audioMode ?? (lang === "am" ? "music_voice" : "song"))),
-      h("div", { class: "flex items-start gap-2 self-end pb-2" },
+      h("div", { id: "f-videoaudio-row", class: "flex items-start gap-2 self-end pb-2" },
         h("input", { id: "f-videoaudio", name: "videoAudio", type: "checkbox", value: "on", checked: lang === "en", class: "mt-1 size-4 accent-coral", "aria-describedby": "f-videoaudio-hint" }),
         h("label", { for: "f-videoaudio", class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip the audio AI: the video AI makes the voice / song" }),
           h("span", { id: "f-videoaudio-hint", class: "block text-xs text-stone-500", text: "The character sings (Song) or speaks (other choices) in each video clip. On by default for English; for Amharic the audio AI is clearer." }))),
@@ -405,6 +405,9 @@ async function showNewVideo() {
   const updateLengthPlan = () => {
     const seconds = lengthSecondsOf($("#f-length").value);
     const chosen = $("#f-audio").value;
+    const still = $("#f-video").value === "still";
+    // Animated pictures use no video model, so "the video AI makes the voice" can't apply: force it off.
+    if (still) $("#f-videoaudio").checked = false;
     const skipAudio = $("#f-videoaudio").checked;
     // Skipping the audio AI: a song is sung in the clips, everything else is spoken there ("the character speaks").
     const mode = skipAudio && chosen !== "song" ? "character" : chosen;
@@ -423,7 +426,13 @@ async function showNewVideo() {
           : mode === "music_voice"
           ? "The rhyme is chanted clearly by the voice AI over instrumental music from the music AI (one music piece, looped). Amharic words come out clear, because the voice AI speaks Amharic while the music AI can't sing it well."
           : "The story is written to be read aloud in about this time; the exact length depends on the voice.");
+    // Singer only matters for a sung song or when the character sings/speaks in the clips; narration & rhyme-over-music use the voice picker.
+    $("#f-singer").closest("div").hidden = mode === "narration" || mode === "music_voice";
+    // Voice picker is for spoken modes (narration, rhyme over music) — not for a song or the character speaking.
     $("#f-voice").closest("div").hidden = mode === "song" || mode === "character";
+    // Animated pictures use no video model: the "video AI makes the voice", "no scene pictures" and "videos at once" options don't apply.
+    $("#f-videoaudio-row").hidden = still;
+    $("#f-conc").closest("div").hidden = still;
     $("#f-music-row").hidden = !(skipAudio || mode === "character");
     const noPictures = $("#f-nopictures").checked;
     if (mode === "character" || skipAudio || noPictures) $("#f-video").value = "veo";
