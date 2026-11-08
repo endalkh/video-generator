@@ -99,6 +99,30 @@ export function speakerVoice(speaker: string, cast: readonly CastMember[], mainV
   return member?.voice ?? NARRATOR_VOICE;
 }
 
+/**
+ * Dialogue mode: make the cast match the script. Adds a member for every speaker or on-screen character the
+ * scenes use that the cast lacks (name/look derived from its id), drops members the script no longer uses, and
+ * gives every member a distinct voice (chosen voices are kept). Returns a new list.
+ */
+export function syncCastToScript(cast: readonly CastMember[], scenes: readonly Pick<Scene, "dialogue" | "characters">[], mainVoice: TtsVoice): { cast: CastMember[]; added: string[]; removed: string[] } {
+  const used = new Set<string>();
+  for (const s of scenes) {
+    for (const dl of s.dialogue ?? []) if (dl.speaker !== SPEAKER_MAIN && dl.speaker !== SPEAKER_NARRATOR) used.add(dl.speaker);
+    for (const id of s.characters ?? []) used.add(id);
+  }
+  const kept = cast.filter((c) => used.has(c.id));
+  const removed = cast.filter((c) => !used.has(c.id)).map((c) => c.id);
+  const added: string[] = [];
+  for (const id of used) {
+    if (kept.some((c) => c.id === id)) continue;
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) continue; // not a valid cast id: it falls back to the narrator voice
+    const words = id.replace(/-/g, " ");
+    kept.push({ id, name: words.replace(/\b\w/g, (ch) => ch.toUpperCase()), description: `A friendly ${words}, a lovable animated children's character.` });
+    added.push(id);
+  }
+  return { cast: assignCastVoices(kept, mainVoice), added, removed };
+}
+
 export function autoSceneCount(lengthSeconds: number, audioMode: AudioMode): number {
   return Math.min(MAX_SCENES, Math.max(2, Math.round(lengthSeconds / SECONDS_PER_SCENE[audioMode])));
 }

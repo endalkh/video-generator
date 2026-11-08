@@ -195,7 +195,7 @@ Art style: {{style}}.
     key: "scenes_dialogue",
     title: "Scene plan — dialogue story",
     description: "Dialogue mode: splits the story into scenes, and for each scene gives the spoken lines with their speaker. Must return JSON {scenes:[{index,text,visualPrompt,motion,characters,dialogue:[{speaker,line}]}]}. speaker is \"main\" (the main character), \"narrator\", or a cast id.",
-    vars: ["poem_json", "stanza_count"],
+    vars: ["poem_json", "stanza_count", "shot_seconds"],
     template: `Write {{stanza_count}} short DIALOGUE scenes for a 3D kids' animated movie, based on the STORY below. The story below is a plain summary — do NOT read it out word for word. Instead, write what the characters actually SAY OUT LOUD to each other.
 For each shot: "index" (0-based).
 "dialogue" = the spoken lines in this shot, in order, each as {"speaker","line"}:
@@ -205,7 +205,7 @@ For each shot: "index" (0-based).
    BAD (narration pretending to be a line): "ትንሹ አንበሳ እያለቀሰ ተገኘ" ("the little lion was found crying") — never put third-person narration in a character's mouth.
  - The narrator (use sparingly, 0–1 short lines per shot) may set the scene in third person; every other speaker talks in first/second person.
  - Give the supporting characters real speaking turns — a back-and-forth, not only the main character.
- - 1–3 short lines per shot; keep each brief so the shot is about {{video_seconds}} seconds when read aloud.
+ - 1–3 short lines per shot; keep them brief so each shot is about {{shot_seconds}} seconds when spoken (the whole video is about {{video_seconds}} seconds).
 "text" = all this shot's lines joined with newlines (the words only, no speaker names), in {{language_name}}.
 "characters" = the slug ids of the supporting characters that appear in this shot (besides the main character); empty if none.
 {{#if has_samples}}The attached sample pictures show things to include; describe them exactly in "visualPrompt".{{/if}}By default shots are OUTDOORS in a bright, friendly setting unless the story clearly calls for another place; keep it sunny, gentle and never scary.

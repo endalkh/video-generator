@@ -4,7 +4,7 @@ import type { GenContext, Provider } from "../domain/ports/generator.port.js";
 import { MAX_SONG_PART_SEC, mmss, singableSeconds, songParts, songTimeline } from "../domain/ports/generator.port.js";
 import { isTrebloModel, TREBLO_MAX_SONG_SEC } from "../infrastructure/providers/treblo.js";
 import type { Project } from "../domain/project/project.entity.js";
-import { assignCastVoices, defaultVoice, minResolution, scenePicture, soundInVideo, speakerVoice, SPEAKER_MAIN, SPEAKER_NARRATOR, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
+import { assignCastVoices, defaultVoice, minResolution, scenePicture, soundInVideo, speakerVoice, SPEAKER_MAIN, SPEAKER_NARRATOR, STEP_NAMES, syncCastToScript, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
@@ -464,7 +464,9 @@ export class PipelineService {
         }
         // Dialogue mode: plan scenes with per-speaker lines; otherwise the normal scene plan.
         const sceneKey = input.audioMode === "dialogue" ? "scenes_dialogue" : "scenes";
-        const r = await prompt("scenes", sceneKey, "scenes", { poem_json: JSON.stringify(poem, null, 2), stanza_count: poem.stanzas.length });
+        // Dialogue: each shot's share of the video, so the lines are written to fill it.
+        const shotSeconds = Math.max(3, Math.round((input.lengthSeconds ?? poem.stanzas.length * 5) / poem.stanzas.length));
+        const r = await prompt("scenes", sceneKey, "scenes", { poem_json: JSON.stringify(poem, null, 2), stanza_count: poem.stanzas.length, shot_seconds: shotSeconds });
         const plan = await provider.text("scenes", r.text, { model: r.model, images: samples.length ? samples : undefined, ctx: ctx() });
         // If the model gave dialogue but left text empty/short, fill text from the lines so the rest of the pipeline works.
         for (const sc of plan.scenes) {
@@ -498,29 +500,25 @@ export class PipelineService {
             // Drop any that collide with the main character or each other by id.
             const seen = new Set<string>();
             let unique = cast.filter((c) => !seen.has(c.id) && seen.add(c.id) !== undefined);
-            // Dialogue mode: the script is authoritative. Make sure EVERY speaker id the scenes use has a cast
-            // member (so it gets a distinct voice and reference art), adding any the cast prompt missed, and give
-            // each a distinct speaking voice (editable later on the Character page).
-            if (input.audioMode === "dialogue") {
-              const spoken = new Set<string>();
-              for (const s of scenes) for (const dl of s.dialogue ?? []) {
-                if (dl.speaker !== SPEAKER_MAIN && dl.speaker !== SPEAKER_NARRATOR) spoken.add(dl.speaker);
-              }
-              for (const id of spoken) {
-                if (unique.some((c) => c.id === id)) continue;
-                // A speaker the cast prompt didn't describe: add it with a name/description derived from its id.
-                const name = id.replace(/-/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
-                unique.push({ id, name, description: `A friendly ${id.replace(/-/g, " ")}, a lovable animated children's character.` });
-                log.warn(`dialogue: speaker "${id}" wasn't in the cast list; added it so it gets its own voice`);
-              }
-              unique = assignCastVoices(unique, input.voice ?? defaultVoice(input.singer, input.audioMode));
-            }
+            // Dialogue mode: distinct speaking voices (the cast is matched to the script just below).
+            if (input.audioMode === "dialogue") unique = assignCastVoices(unique, input.voice ?? defaultVoice(input.singer, input.audioMode));
             project.setCast(unique);
             await save();
             if (unique.length) log.step("character", `cast: ${unique.map((c) => c.name).join(", ")}`);
           } catch (err) {
             // The cast is an enhancement: never let it block the main character step.
             log.warn(`cast not planned: ${(err as Error).message}; continuing with just the main character`);
+          }
+        }
+        // Dialogue mode: the cast must match the current script (scenes may have been re-planned since the cast
+        // was made): every speaker/on-screen character gets a member and a voice; unused ones are dropped.
+        if (!character.skipped && input.audioMode === "dialogue") {
+          const synced = syncCastToScript(project.cast, scenes, input.voice ?? defaultVoice(input.singer, input.audioMode));
+          if (synced.added.length || synced.removed.length) {
+            project.setCast(synced.cast);
+            await save();
+            await Promise.all(synced.removed.map((id) => rm(p.castImage(id), { force: true })));
+            log.step("character", `cast matched to the script${synced.added.length ? `, added ${synced.added.join(", ")}` : ""}${synced.removed.length ? `, removed ${synced.removed.join(", ")}` : ""}`);
           }
         }
         checkCancel();
@@ -726,16 +724,12 @@ export class PipelineService {
           project.setSong(null);
           const mainVoice = input.voice ?? defaultVoice(input.singer, input.audioMode);
           // Every speaker in the script needs a voice: scenes may have been re-planned after the cast was made
-          // (e.g. "mother-lion" vs "lion-mother"), so add any speaker missing from the cast before voicing.
-          const missing = new Set<string>();
-          for (const s of scenes) for (const dl of s.dialogue ?? []) {
-            if (dl.speaker !== SPEAKER_MAIN && dl.speaker !== SPEAKER_NARRATOR && !project.cast.some((c) => c.id === dl.speaker)) missing.add(dl.speaker);
-          }
-          if (missing.size) {
-            const added = [...missing].map((id) => ({ id, name: id.replace(/-/g, " "), description: `A friendly ${id.replace(/-/g, " ")}, a lovable animated children's character.` }));
-            project.setCast(assignCastVoices([...project.cast, ...added], mainVoice));
+          // (e.g. "mother-lion" vs "lion-mother"), so match the cast to the script before voicing.
+          const synced = syncCastToScript(project.cast, scenes, mainVoice);
+          if (synced.added.length || synced.removed.length) {
+            project.setCast(synced.cast);
             await save();
-            log.warn(`dialogue: gave a voice to speaker(s) missing from the cast: ${[...missing].join(", ")}`);
+            log.warn(`dialogue: matched the cast to the script (added ${synced.added.join(", ") || "none"}, removed ${synced.removed.join(", ") || "none"})`);
           }
           await perScene("audio", p.sceneAudio, "voiced", async (s) => {
             // Each line is spoken in its speaker's own voice, then the lines are stitched into the scene's audio.

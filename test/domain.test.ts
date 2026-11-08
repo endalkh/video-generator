@@ -64,6 +64,20 @@ describe("dialogue mode (Stage A)", () => {
     // A chosen voice is kept, not overwritten.
     expect(assignCastVoices([{ id: "sun", name: "S", description: "d", voice: "Kore" }], "Leda")[0]!.voice).toBe("Kore");
   });
+  it("matches the cast to the script: adds missing speakers, drops unused ones, skips bad ids", async () => {
+    const { syncCastToScript } = await import("../src/domain/project/project.model.js");
+    const cast = [{ id: "lion-mother", name: "M", description: "d", voice: "Kore" as const }, { id: "lion-cub", name: "C", description: "d" }];
+    const scenes = [
+      { dialogue: [{ speaker: "main", line: "Hi" }, { speaker: "lion-cub", line: "Lost!" }], characters: ["lion-cub"] },
+      { dialogue: [{ speaker: "mother-lion", line: "My child!" }, { speaker: "narrator", line: "..." }, { speaker: "Bad Id", line: "x" }], characters: ["parrot"] },
+    ];
+    const r = syncCastToScript(cast, scenes, "Leda");
+    expect(r.cast.map((c) => c.id).sort()).toEqual(["lion-cub", "mother-lion", "parrot"]);
+    expect(r.added.sort()).toEqual(["mother-lion", "parrot"]);
+    expect(r.removed).toEqual(["lion-mother"]);
+    expect(r.cast.every((c) => c.voice)).toBe(true);
+    expect(new Set(r.cast.map((c) => c.voice)).size).toBe(3); // distinct voices
+  });
   it("updates a cast member's voice (and clears it on empty)", () => {
     const p = Project.create({ id: "cast-voice", input, provider: "mock" });
     p.setCast([{ id: "rabbit", name: "Tutu", description: "a rabbit" }]);
