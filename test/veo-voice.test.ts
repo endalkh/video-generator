@@ -461,3 +461,24 @@ describe("dialogue spoken inside the video", () => {
     expect([p.status, p.media.final]).toEqual(["done", "final.mp4"]);
   }, 120_000);
 });
+
+describe("scene transitions", () => {
+  it("dissolves moving-video scenes into each other (the final is shorter by the overlaps)", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "goats on the hill", sceneCount: 3, audioMode: "narration", videoMode: "veo", reviewMode: "manual" }, "mock");
+    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+    await ps.drawScenePictures(id);
+    await ps.idle();
+    await ps.makeVideoFromScratch(id);
+    await ps.idle();
+    const m = media(id);
+    let clips = 0;
+    for (const i of [0, 1, 2]) clips += await probeDuration(m.sceneClip(i));
+    const final = await probeDuration(m.final);
+    expect(final).toBeGreaterThan(clips - 2 * 0.4 - 0.25);
+    expect(final).toBeLessThan(clips - 2 * 0.4 + 0.25);
+    expect((await probeStreams(m.final)).includes("audio")).toBe(true);
+  }, 120_000);
+});

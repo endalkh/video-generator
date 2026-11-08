@@ -169,6 +169,9 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   if (at("character")) await rm(p.castDir, { recursive: true, force: true });
 }
 
+/** Seconds of cross-dissolve between moving-video scenes in the final video. */
+export const SCENE_TRANSITION_SEC = 0.4;
+
 /** Delete rendered clips and the final video only (keeps pictures, song and Veo videos). */
 export async function wipeRenders(p: MediaPaths): Promise<void> {
   const dirs = await readdir(path.join(p.dir, "scenes")).catch(() => [] as string[]);
@@ -983,7 +986,11 @@ export class PipelineService {
 
       await step("final", allExist([p.final]), async () => {
         const clips = kept.map((s) => p.sceneClip(s.index));
-        const durations = await Promise.all(clips.map(probeDuration));
+        // Scenes with their own sound (dialogue, narration, voices in the clips) dissolve into each other; one song
+        // across the scenes keeps hard cuts so the pictures stay on its beat.
+        const transition = timeline || input.videoMode !== "veo" ? 0 : SCENE_TRANSITION_SEC;
+        // Each dissolve overlaps two scenes: the subtitles move up with them.
+        const durations = (await Promise.all(clips.map(probeDuration))).map((d, i, all) => (i < all.length - 1 ? d - transition : d));
         // The .srt is always written (handy for uploading to YouTube); it's only put in the video when asked for.
         await writeFileAtomic(p.srt, buildSrt(kept.map((s, i) => ({ text: s.text, duration: durations[i]! }))));
         const tmp = `${p.final}.part.mp4`;
@@ -996,7 +1003,7 @@ export class PipelineService {
           log.step("final", `${scenes.length - kept.length} scene(s) left out: joining the other ${kept.length} scenes and their parts of the audio`);
         }
         try {
-          await abortable(concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: keptSong ?? (timeline ? path.join(p.dir, timeline.file) : undefined), bed }), signal);
+          await abortable(concatClips({ clips, out: tmp, workDir: p.dir, srt: input.subtitles ? p.srt : undefined, language: input.language, audio: keptSong ?? (timeline ? path.join(p.dir, timeline.file) : undefined), bed, transition }), signal);
         } finally {
           if (keptSong) await rm(keptSong, { force: true });
         }

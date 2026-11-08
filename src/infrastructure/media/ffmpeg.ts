@@ -307,7 +307,7 @@ export function buildSrt(entries: { text: string; duration: number }[]): string 
 }
 
 /** Concatenate uniform clips into the final MP4, optionally embedding soft subtitles (mov_text). */
-export async function concatClips(opts: { clips: string[]; out: string; workDir: string; srt?: string; language?: string; audio?: string; /** Music mixed softly under the clips' own sound. */ bed?: string }): Promise<void> {
+export async function concatClips(opts: { clips: string[]; out: string; workDir: string; srt?: string; language?: string; audio?: string; /** Music mixed softly under the clips' own sound. */ bed?: string; /** Seconds of cross-dissolve between scenes (picture and sound); only with the clips' own sound (no continuous song). */ transition?: number }): Promise<void> {
   if (opts.bed && !opts.audio) {
     // Join first, then lay the looped music under the clips' own sound (keeping video and subtitles as they are).
     const joined = path.join(opts.workDir, "joined.part.mp4");
@@ -321,6 +321,37 @@ export async function concatClips(opts: { clips: string[]; out: string; workDir:
       "-movflags", "+faststart", opts.out,
     ]);
     await rm(joined, { force: true });
+    return;
+  }
+  const d = opts.transition ?? 0;
+  if (d > 0 && !opts.audio && opts.clips.length > 1) {
+    // Cross-dissolve: each scene melts into the next (xfade), and its sound overlaps the next scene's (acrossfade),
+    // so the film flows instead of jumping. Every transition makes the video `d` seconds shorter.
+    const durs = await Promise.all(opts.clips.map(probeDuration));
+    const n = opts.clips.length;
+    const parts: string[] = [];
+    let v = "[0:v]";
+    let a = "[0:a]";
+    let at = durs[0]!;
+    for (let k = 1; k < n; k++) {
+      const off = Math.max(0, at - d);
+      const vOut = k === n - 1 ? "[v]" : `[v${k}]`;
+      const aOut = k === n - 1 ? "[a]" : `[a${k}]`;
+      parts.push(`${v}[${k}:v]xfade=transition=fade:duration=${d.toFixed(3)}:offset=${off.toFixed(3)}${vOut}`);
+      parts.push(`${a}[${k}:a]acrossfade=d=${d.toFixed(3)}:c1=tri:c2=tri${aOut}`);
+      v = vOut;
+      a = aOut;
+      at = off + durs[k]!;
+    }
+    const args = [...opts.clips.flatMap((c) => ["-i", c])];
+    if (opts.srt) args.push("-i", opts.srt);
+    args.push("-filter_complex", parts.join(";"), "-map", "[v]", "-map", "[a]");
+    if (opts.srt) {
+      args.push("-map", `${n}:s`, "-c:s", "mov_text");
+      if (opts.language) args.push("-metadata:s:s:0", `language=${opts.language === "am" ? "amh" : "eng"}`);
+    }
+    args.push(...ENCODE_ARGS, "-movflags", "+faststart", opts.out);
+    await runFfmpeg(args);
     return;
   }
   const list = path.join(opts.workDir, "concat.txt");
