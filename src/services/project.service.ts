@@ -7,7 +7,7 @@ import type { GenerationDto } from "../domain/generation/generation.model.js";
 import type { Provider } from "../domain/ports/generator.port.js";
 import { KEEP_LATER_STEPS, Project } from "../domain/project/project.entity.js";
 import { ProjectMapper, type ProjectDto, type ProjectSummaryDto } from "../domain/project/project.mapper.js";
-import { CharacterSchema, MAX_VIDEO_SECONDS, PoemSchema, ProjectInputSchema, ScenePlanSchema, soundInVideo, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
+import { CharacterSchema, MAX_VIDEO_SECONDS, PoemSchema, ProjectInputSchema, ScenePlanSchema, scenePicture, soundInVideo, STEP_NAMES, type StepName } from "../domain/project/project.model.js";
 import type { GenerationRepository, ProjectRepository } from "../repositories/repositories.js";
 import { audioToWav, concatClips, formatFor, imageToPng, muxVideoWithAudio, probeDuration, probeStreams, runFfmpeg, stillToClip } from "../infrastructure/media/ffmpeg.js";
 import { songTimeline } from "../domain/ports/generator.port.js";
@@ -132,7 +132,7 @@ export class ProjectService {
   }
 
   /** Start (or resume) in the background; progress is published to subscribers. Returns a promise that settles when the run finishes. */
-  async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean; keepLater?: boolean; onlyScene?: number; picturesOnly?: boolean } = {}): Promise<void> {
+  async start(id: string, opts: { provider?: string; from?: string; until?: StepName; noNewVideos?: boolean; keepLater?: boolean; onlyScene?: number; picturesOnly?: boolean; noReview?: boolean } = {}): Promise<void> {
     if (this.jobs.has(id)) throw new ConflictError(`Project "${id}" is already running`);
     const project = await this.load(id);
     if (opts.from !== undefined && !STEP_NAMES.includes(opts.from as StepName)) throw new ValidationError(`Unknown step "${opts.from}"`);
@@ -146,7 +146,7 @@ export class ProjectService {
     };
     job.done = this.pipeline
       // "final" ends the run anyway, so it never needs an explicit stop.
-      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, noNewVideos: opts.noNewVideos, keepLater: opts.keepLater, onlyScene: opts.onlyScene, picturesOnly: opts.picturesOnly, signal: job.controller.signal, onEvent })
+      .run(project, { provider, from: opts.from as StepName | undefined, until: opts.until === "final" ? undefined : opts.until, noNewVideos: opts.noNewVideos, keepLater: opts.keepLater, onlyScene: opts.onlyScene, picturesOnly: opts.picturesOnly, noReview: opts.noReview, signal: job.controller.signal, onEvent })
       .then(
         () => undefined,
         (err) => {
@@ -719,6 +719,27 @@ export class ProjectService {
       await rm(work, { recursive: true, force: true });
     }
     return { storyboard: path.relative(media.dir, media.storyboard) };
+  }
+
+  /**
+   * Make the whole video from scratch from the storyboard: every scene's old video, clip and preview (and the final
+   * video) are deleted, then a new video is made for every scene from its current picture and audio, and the final
+   * video is put together. The words, audio and pictures are kept. Paid: one video per scene. Runs in the background.
+   */
+  async makeVideoFromScratch(id: string): Promise<void> {
+    const project = await this.loadIdle(id);
+    if (!project.isStepDone("audio")) throw new ConflictError("Make the audio first, then the video");
+    const media = this.media(id);
+    const missing: number[] = [];
+    for (const s of project.scenes?.scenes ?? []) {
+      if (!s.leftOut && scenePicture(project.input, s) && !(await fileExists(media.sceneImage(s.index)))) missing.push(s.index + 1);
+    }
+    if (missing.length) throw new ConflictError(`Scene${missing.length === 1 ? "" : "s"} ${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no picture yet: draw the scene pictures first (Audio step), so you can check them before paying for videos`);
+    project.redoFrom("clips");
+    if (project.status === "done") project.pause(null);
+    await wipeSceneVideos(media);
+    await this.projects.save(project);
+    await this.start(id, { noReview: true });
   }
 
   /** Make one scene's picture and clip again, keeping the others. */

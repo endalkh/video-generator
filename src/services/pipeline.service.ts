@@ -294,6 +294,8 @@ export interface RunOptions {
   onlyScene?: number;
   /** Clips step only: draw the missing scene pictures and stop — no videos, no clips — so they can be checked and fixed first. */
   picturesOnly?: boolean;
+  /** Go straight on to the final video: the clips don't stop for review (they were asked for on purpose). */
+  noReview?: boolean;
   concurrency?: number;
   signal?: AbortSignal;
   onEvent?: (e: PipelineEvent) => void;
@@ -437,6 +439,7 @@ export class PipelineService {
           if (onTheWay && project.needsReview(name)) project.approveInRun(name); // so a later Continue doesn't stop here either
           // "Approve these videos": the clips are approved even when they were already put together.
           if (name === "clips" && opts.noNewVideos && project.needsReview(name)) project.approveInRun(name);
+          if (name === "clips" && opts.noReview && project.needsReview(name)) project.approveInRun(name);
           return project.needsReview(name);
         };
         if (project.isStepDone(name) && (await outputsOk())) {

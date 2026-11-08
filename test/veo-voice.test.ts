@@ -372,3 +372,25 @@ describe("preview keeps the checked picture", () => {
     expect(mock.prompts.some((x) => /pixar/i.test(x.prompt))).toBe(false);
   }, 60_000);
 });
+
+describe("make the video from scratch", () => {
+  it("replaces every scene video with a new one from the current pictures and finishes the final video", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "goats on the hill", sceneCount: 2, audioMode: "narration", videoMode: "veo", reviewMode: "manual" }, "mock");
+    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+    await expect(ps.makeVideoFromScratch(id)).rejects.toThrow(/no picture/);
+    await ps.drawScenePictures(id);
+    await ps.idle();
+    await ps.previewScene(id, 0); // an old video for scene 1
+    const images = mock.prompts.filter((x) => x.kind === "image").length;
+    await ps.makeVideoFromScratch(id);
+    await ps.idle();
+    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(3); // 1 old + 2 new
+    expect(mock.prompts.filter((x) => x.kind === "image").length).toBe(images); // pictures kept
+    const p = await ps.get(id);
+    expect([p.status, p.media.final]).toEqual(["done", "final.mp4"]);
+    expect(p.media.scenes[0]!.preview).toBeNull(); // the old preview went with the old video
+  }, 90_000);
+});

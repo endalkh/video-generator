@@ -804,14 +804,14 @@ function stepPage(p, step, keepVideo, videoKey) {
       // Prefer a lip-sync preview (clip + its audio slice) when it's been made; else the finished clip; else the Veo
       // animation it's made from (kept when the audio changes, re-timed later); else the picture.
       const media = m?.preview ? h("div", { class: "relative" },
-            h("video", { controls: true, preload: "metadata", class: "aspect-video w-full bg-black", src: mediaUrl(id, m.preview, p.updatedAt), "aria-label": `Scene ${sc.index + 1} preview with audio` }),
+            h("video", { controls: true, preload: "metadata", class: `${shapeClass(p)} w-full bg-black`, src: mediaUrl(id, m.preview, p.updatedAt), "aria-label": `Scene ${sc.index + 1} preview with audio` }),
             h("span", { class: "absolute top-2 left-2 rounded-full bg-emerald-600/80 px-2 py-0.5 text-xs text-white", text: "🔊 Preview · this scene's clip with its audio (check lip-sync)" }))
-        : m?.clip ? h("video", { controls: true, preload: "metadata", class: "aspect-video w-full bg-black", src: mediaUrl(id, m.clip, p.updatedAt), "aria-label": `Scene ${sc.index + 1} clip` })
+        : m?.clip ? h("video", { controls: true, preload: "metadata", class: `${shapeClass(p)} w-full bg-black`, src: mediaUrl(id, m.clip, p.updatedAt), "aria-label": `Scene ${sc.index + 1} clip` })
         : m?.video ? h("div", { class: "relative" },
-            h("video", { controls: true, muted: true, loop: true, preload: "metadata", class: "aspect-video w-full bg-black", src: mediaUrl(id, m.video, p.updatedAt), "aria-label": `Scene ${sc.index + 1} Veo animation` }),
+            h("video", { controls: true, muted: true, loop: true, preload: "metadata", class: `${shapeClass(p)} w-full bg-black`, src: mediaUrl(id, m.video, p.updatedAt), "aria-label": `Scene ${sc.index + 1} Veo animation` }),
             h("span", { class: "absolute top-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-xs text-white", text: "🎞️ Veo animation · timed to the audio when the clips are made" }))
-        : m?.image ? h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: sc.visualPrompt, class: "aspect-video w-full object-cover" })
-        : h("div", { class: "grid aspect-video place-items-center bg-stone-100 text-sm text-stone-500", text: making ? "painting…" : "not made yet" });
+        : m?.image ? h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: sc.visualPrompt, class: `${shapeClass(p)} w-full object-contain bg-stone-50` })
+        : h("div", { class: `grid ${shapeClass(p)} place-items-center bg-stone-100 text-sm text-stone-500`, text: making ? "painting…" : "not made yet" });
       // The picture the video is made from, when a video/clip is shown above it.
       const pictureThumb = m?.image && (m.preview || m.clip || m.video)
         ? h("a", { href: mediaUrl(id, m.image, p.updatedAt), target: "_blank", rel: "noopener", class: "block px-3 pt-2 text-xs text-stone-500" },
@@ -1872,7 +1872,12 @@ function storyboardPanel(p, idle, act) {
       }) }, `🖼 Draw the ${missing.length} scene picture${missing.length === 1 ? "" : "s"} (no videos)`) : null,
       idle && all ? h("button", { type: "button", class: "btn", title: "Join every scene's picture with its audio into one video. Made on this computer: nothing is paid for.", onclick: act(async () => {
         await post(`/api/projects/${enc(id)}/storyboard`);
-      }) }, p.media.storyboard ? "↻ Remake the storyboard" : "▶ Watch the storyboard (pictures + audio, free)") : null));
+      }) }, p.media.storyboard ? "↻ Remake the storyboard" : "▶ Watch the storyboard (pictures + audio, free)") : null,
+      idle && all ? h("button", { type: "button", class: "btn", title: "Delete every old scene video and clip, make a new video for every scene from these pictures and audio, and put the final video together. Paid: one video per scene.", onclick: act(async () => {
+        const n = (p.scenes?.scenes ?? []).filter((sc) => !sc.leftOut).length;
+        if (!confirm(`Make the whole video from scratch? Every old scene video is deleted and ${n} new video${n === 1 ? " is" : "s are"} made (paid, ${p.input.aspectRatio}) from these pictures, then the final video. The words, audio and pictures are kept.`)) return SKIP;
+        await post(`/api/projects/${enc(id)}/video/from-scratch`);
+      }) }, "🎬 Make the video from scratch") : null));
 }
 
 /** Audio step: one scene's picture (or a placeholder) with its 🖼 Fix picture button. */
@@ -1882,14 +1887,19 @@ function scenePictureCell(p, sc, idle, act) {
   const m = p.media.scenes.find((x) => x.index === sc.index);
   return h("div", { class: "w-full shrink-0 space-y-1 sm:w-48" },
     m?.image
-      ? h("a", { href: mediaUrl(id, m.image, p.updatedAt), target: "_blank", rel: "noopener" }, h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: `Scene ${sc.index + 1} picture: ${sc.visualPrompt}`, class: "aspect-video w-full rounded-lg border border-orange-100 object-cover" }))
-      : h("div", { class: "grid aspect-video w-full place-items-center rounded-lg bg-stone-100 text-xs text-stone-500", text: p.running ? "drawing…" : "no picture yet" }),
+      ? h("a", { href: mediaUrl(id, m.image, p.updatedAt), target: "_blank", rel: "noopener" }, h("img", { src: mediaUrl(id, m.image, p.updatedAt), alt: `Scene ${sc.index + 1} picture: ${sc.visualPrompt}`, class: `${shapeClass(p)} w-full rounded-lg border border-orange-100 object-contain bg-stone-50` }))
+      : h("div", { class: `grid ${shapeClass(p)} w-full place-items-center rounded-lg bg-stone-100 text-xs text-stone-500`, text: p.running ? "drawing…" : "no picture yet" }),
     idle ? h("button", { type: "button", class: "btn-soft w-full px-3 py-1 text-xs", title: "Change what this scene's picture shows and draw only the picture again. No video is made; this scene's old video and clip are removed.", onclick: act(async () => {
       const desc = prompt(`Scene ${sc.index + 1} picture — what should it show? (English; the characters' looks are added automatically)`, sc.visualPrompt);
       if (desc === null || !desc.trim()) return SKIP;
       if (m?.video && !confirm(`Scene ${sc.index + 1} already has a video. Redrawing the picture removes it (a new video is paid when you make the clips). Continue?`)) return SKIP;
       await post(`/api/projects/${enc(id)}/scenes/${sc.index + 1}/picture/redraw`, { visualPrompt: desc.trim() });
     }) }, m?.image ? "🖼 Fix picture" : "🖼 Draw picture") : null);
+}
+
+/** A box with the video's own shape, so a vertical (9:16) picture or clip isn't shown as landscape. */
+function shapeClass(p) {
+  return { "9:16": "aspect-[9/16] max-w-[18rem] mx-auto", "1:1": "aspect-square" }[p.input.aspectRatio] ?? "aspect-video";
 }
 
 /** Whether a scene gets a picture (same rule as the server's scenePicture): always for stills; on Veo unless turned off. */
