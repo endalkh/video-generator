@@ -229,7 +229,7 @@ export class GeminiProvider implements Provider {
     );
   }
 
-  async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; samples?: Buffer[]; audio?: Buffer; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
+  async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; cast?: Buffer[]; samples?: Buffer[]; audio?: Buffer; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
     const { label } = opts;
     if (isInferenceShModel(opts.model)) return this.inferenceShVideo().video(prompt, { ...opts, mime: sniffImageMime });
     if (isOmniModel(opts.model)) return this.omniVideo(prompt, opts);
@@ -259,9 +259,9 @@ export class GeminiProvider implements Provider {
           source: { prompt },
           config: {
             ...base,
-            // No scene picture: the character alone (plus the sample pictures, up to Veo's 3 references), and Veo
-            // makes the scene from the prompt. With a scene picture, it already shows the samples.
-            referenceImages: [opts.character, ...(opts.still ? [opts.still] : (opts.samples ?? []))].slice(0, VEO_MAX_REFERENCES).map((b) => ({ image: img(b), referenceType: VideoGenerationReferenceType.ASSET })),
+            // No scene picture: the character alone, then the present cast (kept on-model), then sample pictures,
+            // capped at Veo's 3 references (main character always first). Veo makes the scene from the prompt.
+            referenceImages: [opts.character, ...(opts.cast ?? []), ...(opts.still ? [opts.still] : (opts.samples ?? []))].slice(0, VEO_MAX_REFERENCES).map((b) => ({ image: img(b), referenceType: VideoGenerationReferenceType.ASSET })),
           },
         }
       : textOnly ? { model: opts.model, source: { prompt }, config: base }

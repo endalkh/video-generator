@@ -82,6 +82,8 @@ export interface Provider {
       ctx: GenContext;
       /** Character sheet, so the character stays consistent. */
       character?: Buffer;
+      /** Secondary cast reference images present in this scene (kept on-model), most-featured first; providers use as many as their reference limit allows. */
+      cast?: Buffer[];
       /** The video's sample pictures (e.g. a food or a house), for models that take extra reference pictures (Veo 3.1). */
       samples?: Buffer[];
       /** Wanted resolution; providers cap it at what the model can make. */

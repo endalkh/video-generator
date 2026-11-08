@@ -742,6 +742,10 @@ function stepPage(p, step, keepVideo, videoKey) {
       body = h("div", { class: "flex flex-col gap-4 sm:flex-row" }, img,
         h("div", {}, h("h4", { class: "text-lg font-bold", lang, text: p.character.name }), h("p", { class: "text-stone-600", text: p.character.description })));
     }
+    // Secondary cast (talking animals, the sun, …): each has its own reference art kept consistent across scenes.
+    if (p.media.cast && p.media.cast.length) {
+      body = h("div", { class: "space-y-4" }, body, castSection(p, act, editable));
+    }
   }
   if (step === "character" && idle && p.completed.includes("scenes")) after = characterUpload(p, act, done);
   // Audio: show (and play) whatever is made, also while it's only partly done, e.g. after a rate limit stopped it.
@@ -1370,9 +1374,41 @@ function sceneVideoUpload(p, sc, act) {
   return h("span", { class: "contents" }, btn, file);
 }
 
-/** Upload your own picture as the main character (instead of, or replacing, the designed one). */
-function characterUpload(p, act, done) {
+/** The secondary cast (talking animals, etc.) on the Character page: reference art, editable look, redraw. */
+function castSection(p, act, editable) {
   const id = p.id, lang = p.input.language;
+  return h("div", { class: "space-y-3" },
+    h("div", { class: "flex items-center gap-2" },
+      h("h4", { class: "text-lg font-bold", text: "Supporting cast" }),
+      h("span", { class: "chip px-2 py-0 text-xs", text: `${p.media.cast.length}` })),
+    h("p", { class: "text-xs text-stone-500", text: "Each recurring character is drawn once and reused so it stays the same across scenes. Editing a look redraws its picture; scenes already made keep the old look until you remake them." }),
+    h("ul", { class: "grid gap-3 sm:grid-cols-2" }, p.media.cast.map((c) => {
+      const img = c.image
+        ? h("img", { src: mediaUrl(id, c.image, p.updatedAt), alt: `Reference art for ${c.name}`, class: "size-28 shrink-0 rounded-xl border border-orange-100 object-cover" })
+        : h("div", { class: "grid size-28 shrink-0 place-items-center rounded-xl bg-stone-100 text-xs text-stone-500", text: "no picture" });
+      if (!editable) {
+        return h("li", { class: "flex gap-3 rounded-xl border border-orange-100 p-3" }, img,
+          h("div", {}, h("p", { class: "font-semibold", lang, text: c.name }), h("p", { class: "text-sm text-stone-600", text: c.description })));
+      }
+      const name = h("input", { class: "field", lang, value: c.name, "aria-label": `${c.id} name` });
+      const desc = h("textarea", { class: "field", rows: 3, value: c.description, "aria-label": `${c.id} look` });
+      const status = h("span", { role: "status", "aria-live": "polite", class: "text-xs" });
+      const save = h("button", { type: "button", class: "btn-soft px-3 py-1 text-xs", onclick: act(async () => {
+        if (name.value.trim() === c.name && desc.value.trim() === c.description) { status.textContent = "Nothing changed."; return SKIP; }
+        if (!confirm(`Save and redraw ${c.name}'s picture?`)) return SKIP;
+        await post(`/api/projects/${enc(id)}/cast/${enc(c.id)}`, { name: name.value.trim(), description: desc.value.trim() }, "PUT");
+      }) }, "🎨 Save & redraw");
+      const redraw = h("button", { type: "button", class: "btn-soft px-3 py-1 text-xs", onclick: act(async () => {
+        if (!confirm(`Draw a new picture for ${c.name}?`)) return SKIP;
+        await post(`/api/projects/${enc(id)}/cast/${enc(c.id)}/redraw`);
+      }) }, "↻ Redraw");
+      return h("li", { class: "flex gap-3 rounded-xl border border-orange-100 p-3" }, img,
+        h("div", { class: "flex-1 space-y-1" }, name, desc, h("div", { class: "flex items-center gap-2" }, save, redraw, status)));
+    })));
+}
+
+/** Upload your own picture as the main character (instead of, or replacing, the designed one). */
+function characterUpload(p, act, done) {  const id = p.id, lang = p.input.language;
   const file = h("input", { id: "up-file", type: "file", accept: "image/png,image/jpeg,image/webp", class: "field text-sm", "aria-describedby": "up-help" });
   const name = h("input", { id: "up-name", class: "field", lang, value: p.character?.name ?? "", placeholder: "e.g. Selam" });
   const desc = h("textarea", { id: "up-desc", class: "field text-sm", rows: 3, placeholder: "Leave empty and the AI looks at the picture and describes it." });

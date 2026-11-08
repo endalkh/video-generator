@@ -89,6 +89,14 @@ export function projectRoutes(router: Router, projects: ProjectService): void {
       return { id: params.id };
     }, 202)
     .post("/api/projects/:id/scenes/:index/preview", async ({ params }) => projects.previewScene(params.id!, Number(params.index) - 1))
+    .put("/api/projects/:id/cast/:castId", async ({ params, body }) => {
+      const b = await body();
+      return projects.editCastMember(params.id!, params.castId!, { name: str(b.name), description: str(b.description) }, { provider: str(b.provider) });
+    })
+    .post("/api/projects/:id/cast/:castId/redraw", async ({ params, body }) => {
+      const b = await body();
+      return projects.redrawCastMember(params.id!, params.castId!, { provider: str(b.provider) });
+    }, 202)
     .post("/api/projects/:id/clips/approve-videos", async ({ params, body }) => {
       const r = await projects.approveVideos(params.id!, { skipMissing: (await body()).skipMissing === true });
       return { id: params.id, ...r };

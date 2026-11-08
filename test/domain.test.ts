@@ -26,6 +26,14 @@ describe("cast (secondary characters)", () => {
     p.setCast([{ id: "rabbit", name: "Tutu", description: "a fluffy white rabbit" }]);
     expect(Project.restore(p.toProps()).cast).toEqual([{ id: "rabbit", name: "Tutu", description: "a fluffy white rabbit" }]);
   });
+  it("updates one cast member by id and rejects unknown ids", () => {
+    const p = Project.create({ id: "cast-edit", input, provider: "mock" });
+    p.setCast([{ id: "rabbit", name: "Tutu", description: "a fluffy white rabbit" }]);
+    const updated = p.updateCastMember("rabbit", { description: "a grey rabbit with long ears" });
+    expect(updated.description).toBe("a grey rabbit with long ears");
+    expect(p.cast[0]!.name).toBe("Tutu"); // unchanged
+    expect(() => p.updateCastMember("nope", { name: "X" })).toThrow(ValidationError);
+  });
 });
 
 describe("ProjectInput", () => {

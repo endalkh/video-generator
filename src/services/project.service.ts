@@ -22,6 +22,8 @@ export interface ProjectDetailsDto extends ProjectDto {
   lastEvent: PipelineEvent | null;
   media: {
     characterImage: string | null;
+    /** Secondary cast reference images (id → relative path), for the Character page. */
+    cast: { id: string; name: string; description: string; image: string | null }[];
     /** Sample pictures (e.g. a food or a house) the scenes show. */
     samples: string[];
     final: string | null;
@@ -103,6 +105,7 @@ export class ProjectService {
       lastEvent: job?.events.at(-1) ?? this.lastEvents.get(id) ?? null,
       media: {
         characterImage: await rel(p.characterImage),
+        cast: await Promise.all(project.cast.map(async (c) => ({ id: c.id, name: c.name, description: c.description, image: await rel(p.castImage(c.id)) }))),
         samples: await Promise.all((await sampleFiles(p)).map(async (f) => (await rel(f))!)),
         final: await rel(p.final),
         subtitles: await rel(p.srt),
@@ -616,6 +619,31 @@ export class ProjectService {
     project.setScenesLeftOut((raw.scenes as number[]).map((n) => n - 1), raw.leftOut);
     const media = this.media(id);
     await Promise.all([media.final, media.srt].map((f) => rm(f, { force: true })));
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Edit a cast member's name/look, then redraw its reference image. Scenes already made keep the old look until redone. */
+  async editCastMember(id: string, castId: string, patch: { name?: string; description?: string }, opts: { provider?: string } = {}): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    const member = project.updateCastMember(castId, patch);
+    const provider = this.providers(opts.provider ?? project.provider);
+    const media = this.media(id);
+    await ensureDir(media.castDir);
+    await writeFileAtomic(media.castImage(member.id), await this.pipeline.drawCastImage(project, member, provider));
+    await this.projects.save(project);
+    return ProjectMapper.toDto(project);
+  }
+
+  /** Redraw one cast member's reference image (same name/look). Scenes already made keep the old look until redone. */
+  async redrawCastMember(id: string, castId: string, opts: { provider?: string } = {}): Promise<ProjectDto> {
+    const project = await this.loadIdle(id);
+    const member = project.cast.find((c) => c.id === castId);
+    if (!member) throw new ValidationError(`No cast member "${castId}"`);
+    const provider = this.providers(opts.provider ?? project.provider);
+    const media = this.media(id);
+    await ensureDir(media.castDir);
+    await writeFileAtomic(media.castImage(member.id), await this.pipeline.drawCastImage(project, member, provider));
     await this.projects.save(project);
     return ProjectMapper.toDto(project);
   }

@@ -562,6 +562,16 @@ export class Project {
     this.touch();
   }
 
+  /** Update one cast member's name/description (by id). Throws if there is no such member. */
+  updateCastMember(id: string, patch: { name?: string; description?: string }): CastMember {
+    const member = this.props.cast.find((c) => c.id === id);
+    if (!member) throw new ValidationError(`No cast member "${id}"`);
+    if (patch.name?.trim()) member.name = patch.name.trim();
+    if (patch.description?.trim()) member.description = patch.description.trim();
+    this.touch();
+    return { ...member };
+  }
+
   /** YouTube upload info (generated or edited); clamped to YouTube's limits. */
   setPublish(info: PublishInfo | null): void {
     this.props.publish = info ? normalizePublishInfo(info) : null;

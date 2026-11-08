@@ -323,6 +323,14 @@ export class PipelineService {
     return provider.image(r.text, { model: models.character_image, aspectRatio: "1:1", references: [picture], label: "character image (from your picture)", ctx: { input: project.input, poem: project.poem ?? undefined } });
   }
 
+  /** Draw (or redraw) one secondary cast member's reference sheet (Character page). Returns the PNG bytes. */
+  async drawCastImage(project: Project, member: { id: string; name: string; description: string }, provider: Provider): Promise<Buffer> {
+    const [models, prompts] = await Promise.all([this.modelSettings.snapshot(), this.promptService.snapshotFor(project.input, { channel: project.channelId })]);
+    const r = prompts.render("cast_image", { character_name: member.name, character_description: member.description });
+    await this.generations.add({ projectId: project.id, step: "character", sceneIndex: null, promptKey: r.key, promptVersion: r.version, prompt: r.text, provider: provider.name, model: models.character_image });
+    return provider.image(r.text, { model: models.character_image, aspectRatio: "1:1", label: `cast image: ${member.name}`, ctx: { input: project.input, poem: project.poem ?? undefined } });
+  }
+
   /**
    * Write one stanza (= one scene's words) again, keeping the rest of the poem. `poem` may be an unsaved draft
    * from the editor. Returns the new lines; nothing is saved (the user checks them and saves the poem).
@@ -775,7 +783,7 @@ export class PipelineService {
               // The scene's length on screen (unknown when the character speaks inside the clip: there's no separate audio).
               const durationSec = t.duration ?? (t.audio && (await fileExists(t.audio)) ? (await probeDuration(t.audio)) + SCENE_TAIL_SEC : undefined);
               const mp4 = await provider.video!(r.text, {
-                model: r.model, character: reference, samples, audio: piece ? await readFile(piece) : undefined, durationSec, still: scenePicture(input, s) && (await fileExists(p.sceneImage(i))) ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
+                model: r.model, character: reference, cast: present.map((c) => c.image), samples, audio: piece ? await readFile(piece) : undefined, durationSec, still: scenePicture(input, s) && (await fileExists(p.sceneImage(i))) ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
                 resumeTaskId: saved?.model === r.model ? saved.taskId : undefined,
                 onTaskStarted: (taskId) => writeFileAtomic(taskFile, JSON.stringify({ taskId, model: r.model, startedAt: new Date().toISOString() })),
               });

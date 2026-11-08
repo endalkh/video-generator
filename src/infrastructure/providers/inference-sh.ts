@@ -61,6 +61,8 @@ export interface InferenceShVideoOptions {
   aspectRatio: string;
   label: string;
   character?: Buffer;
+  /** Secondary cast reference images present in this scene (kept on-model), most-featured first. */
+  cast?: Buffer[];
   mime: (b: Buffer) => string;
   /** The scene's own audio (needed by Kling Avatar). */
   audio?: Buffer;
@@ -216,7 +218,9 @@ export class InferenceShVideo {
    */
   private static fromCharacter(def: (typeof INFERENCE_SH_VIDEO_APPS)[number], prompt: string, opts: InferenceShVideoOptions, file: (b: Buffer) => PendingFile): { app: string; input: Record<string, unknown> } {
     if (!opts.character) throw new Error(`${opts.label}: no scene picture and no character picture to make the scene from`);
-    const ref = [file(opts.character)];
+    // Main character first, then the present cast (kept on-model), capped so we don't exceed model reference limits.
+    const refImages = [opts.character, ...(opts.cast ?? [])].slice(0, 3);
+    const ref = refImages.map(file);
     const wanted = opts.resolution ?? "720p";
     const look = "The main character must look exactly like the character in the reference image (same face, hair, clothes and colours). Make this scene:";
     switch (def.kind) {
