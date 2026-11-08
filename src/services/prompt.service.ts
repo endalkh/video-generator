@@ -189,6 +189,7 @@ export class PromptService {
         character_voice: inVideo === "speaks",
         video_sings: inVideo === "sings",
         video_sound: inVideo !== null,
+        dialogue: input.audioMode === "dialogue",
         has_audio_request: Boolean(input.audioRequest),
         veo: input.videoMode === "veo",
         has_character_hint: Boolean(input.characterHint?.trim()),

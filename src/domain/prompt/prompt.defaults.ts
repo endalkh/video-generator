@@ -11,7 +11,7 @@ import { NotFoundError } from "../errors.js";
  * has_reference when a picture of yours is attached (Channel page, character from your picture);
  * has_samples when the video has sample pictures (e.g. a food or a house) that the scenes should show.
  */
-export const PROMPT_FLAGS = ["am", "en", "song", "narration", "music_voice", "character_voice", "video_sings", "video_sound", "veo", "has_character_hint", "has_reference", "has_samples", "has_channel_name", "has_title", "has_audio_request"] as const;
+export const PROMPT_FLAGS = ["am", "en", "song", "narration", "music_voice", "character_voice", "video_sings", "video_sound", "veo", "dialogue", "has_character_hint", "has_reference", "has_samples", "has_channel_name", "has_title", "has_audio_request"] as const;
 
 /** Variables available to every prompt. */
 export const COMMON_VARS = ["topic", "language_name", "age_range", "style", "scene_count", "character_hint", "safety", "local_look", "syllables_per_line", "letters_per_line", "video_seconds", "singer", "voice_style", "audio_request", "cast_in_scene"] as const;
@@ -190,6 +190,29 @@ Art style: {{style}}.
 {{safety}}
 
 {{poem_json}}`],
+  },
+  {
+    key: "scenes_dialogue",
+    title: "Scene plan — dialogue story",
+    description: "Dialogue mode: splits the story into scenes, and for each scene gives the spoken lines with their speaker. Must return JSON {scenes:[{index,text,visualPrompt,motion,characters,dialogue:[{speaker,line}]}]}. speaker is \"main\" (the main character), \"narrator\", or a cast id.",
+    vars: ["poem_json", "stanza_count"],
+    template: `Turn this children's story into {{stanza_count}} animated film shots, one per stanza, in order, like a modern 3D kids' animated movie. This is a DIALOGUE story: characters talk to each other.
+For each shot: "index" (0-based).
+"dialogue" = the lines spoken in this shot, in order, each as {"speaker","line"}:
+ - "speaker" is "main" for the main character{{#if has_character_hint}} ({{character_hint}}){{/if}}, "narrator" for an unseen narrator, or the short lowercase slug id of a supporting character (e.g. "rabbit", "lion-cub", "sun"). Use the SAME ids consistently across all shots.
+ - "line" is what they say, in {{language_name}}, short and natural for young children. 1–3 lines per shot; keep each line brief so the shot stays about {{video_seconds}} seconds when read aloud.
+ - Give the supporting characters real speaking turns too — don't let only the main character talk.
+"text" = all this shot's lines joined with newlines (the same words as in "dialogue", speaker names NOT included), in the original language.
+"characters" = the slug ids of the supporting characters that appear in this shot (besides the main character); empty if none.
+{{#if has_samples}}The attached sample pictures show things to include; describe them exactly in "visualPrompt".{{/if}}By default shots are OUTDOORS in a bright, friendly setting unless the story clearly calls for another place; keep it sunny, gentle and never scary.
+How the place looks:
+{{local_look}}
+"visualPrompt" = a vivid ENGLISH shot description: where we are, what the characters are doing and their expressions (do NOT describe the main character's appearance; it is added separately), who is talking to whom. No text in the image.
+"motion" = one of zoom-in, zoom-out, pan-left, pan-right, static.
+Art style: {{style}}.
+{{safety}}
+
+{{poem_json}}`,
   },
   {
     key: "character",

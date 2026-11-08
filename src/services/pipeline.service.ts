@@ -462,9 +462,16 @@ export class PipelineService {
           log.step("scenes", "kept the scenes, put the new words in");
           return;
         }
-        const r = await prompt("scenes", "scenes", "scenes", { poem_json: JSON.stringify(poem, null, 2), stanza_count: poem.stanzas.length });
-        project.setScenes(await provider.text("scenes", r.text, { model: r.model, images: samples.length ? samples : undefined, ctx: ctx() }));
-        log.step("scenes", `${project.scenes!.scenes.length} scenes planned`);
+        // Dialogue mode: plan scenes with per-speaker lines; otherwise the normal scene plan.
+        const sceneKey = input.audioMode === "dialogue" ? "scenes_dialogue" : "scenes";
+        const r = await prompt("scenes", sceneKey, "scenes", { poem_json: JSON.stringify(poem, null, 2), stanza_count: poem.stanzas.length });
+        const plan = await provider.text("scenes", r.text, { model: r.model, images: samples.length ? samples : undefined, ctx: ctx() });
+        // If the model gave dialogue but left text empty/short, fill text from the lines so the rest of the pipeline works.
+        for (const sc of plan.scenes) {
+          if (sc.dialogue?.length && (!sc.text || !sc.text.trim())) sc.text = sc.dialogue.map((d) => d.line).join("\n");
+        }
+        project.setScenes(plan);
+        log.step("scenes", `${project.scenes!.scenes.length} scenes planned${input.audioMode === "dialogue" ? " (dialogue)" : ""}`);
       });
       const scenes = project.scenes!.scenes;
 

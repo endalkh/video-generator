@@ -161,7 +161,7 @@ export function songParts(scenes: Pick<Scene, "text">[], total: number, opts: { 
  * (the music model chooses the real tempo). A sung song is written denser for a lively pace; spoken
  * narration / rhyme-over-music is sparser so each word has room to be heard clearly.
  */
-export function kidsSyllablesPerSec(mode?: "song" | "narration" | "music_voice" | "character"): number {
+export function kidsSyllablesPerSec(mode?: "song" | "narration" | "music_voice" | "character" | "dialogue"): number {
   return mode === "song" ? 3.8 : 2.8;
 }
 /** Instrumental intro + happy ending around the verses (seconds). */

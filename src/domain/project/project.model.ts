@@ -7,8 +7,10 @@ export type Language = z.infer<typeof LanguageSchema>;
  * song = sung by the music model; narration = read by the speech model; music_voice = the speech model chants the
  * rhyme over instrumental music from the music model (clear words in languages the music model can't sing, e.g. Amharic);
  * character = the main character says each scene's words in the Veo clip itself (lip-sync), over soft background music. Needs Veo.
+ * dialogue = a spoken story where each line has its own speaker (the main character, a cast member, or a narrator),
+ *   each voiced by the speech model in that speaker's assigned voice; the lines are stitched into each scene's audio.
  */
-export const AudioModeSchema = z.enum(["song", "narration", "music_voice", "character"]);
+export const AudioModeSchema = z.enum(["song", "narration", "music_voice", "character", "dialogue"]);
 export type AudioMode = z.infer<typeof AudioModeSchema>;
 
 export const VideoModeSchema = z.enum(["still", "veo"]);
@@ -43,7 +45,7 @@ const tidy = (v: string) => v.replace(/\s+/g, " ").trim();
 export const MAX_VIDEO_SECONDS = 600;
 export const MAX_SCENES = 40;
 /** Auto scene count: about one picture every this many seconds. */
-export const SECONDS_PER_SCENE = { song: 10, narration: 12, music_voice: 12, character: 8 } as const;
+export const SECONDS_PER_SCENE = { song: 10, narration: 12, music_voice: 12, character: 8, dialogue: 12 } as const;
 
 /** Who sings or speaks. Songs describe the singer in the music prompt; speech also picks a matching voice. */
 export const SingerSchema = z.enum(["auto", "woman", "man", "girl", "boy", "kids"]);
@@ -78,6 +80,8 @@ export function autoSceneCount(lengthSeconds: number, audioMode: AudioMode): num
  */
 export function soundInVideo(input: { audioMode: AudioMode; videoAudio?: boolean }): "speaks" | "sings" | null {
   if (input.audioMode === "character") return "speaks";
+  // Dialogue is always made by the speech model (multi-voice, stitched per scene), never inside the clips.
+  if (input.audioMode === "dialogue") return null;
   if (!input.videoAudio) return null;
   return input.audioMode === "song" ? "sings" : "speaks";
 }
@@ -154,6 +158,19 @@ export type Stanza = z.infer<typeof StanzaSchema>;
 export const MotionSchema = z.enum(["zoom-in", "zoom-out", "pan-left", "pan-right", "static"]);
 export type Motion = z.infer<typeof MotionSchema>;
 
+/**
+ * One spoken line in a dialogue-story scene. `speaker` is "main" (the main character), "narrator", or a
+ * secondary cast member's id (CastMember.id). Each is voiced in that speaker's assigned voice (Stage B).
+ */
+export const DialogueLineSchema = z.object({
+  speaker: z.string().min(1).max(60),
+  line: z.string().min(1),
+});
+export type DialogueLine = z.infer<typeof DialogueLineSchema>;
+/** Reserved speaker ids (everything else is a cast member id). */
+export const SPEAKER_MAIN = "main";
+export const SPEAKER_NARRATOR = "narrator";
+
 export const SceneSchema = z.object({
   index: z.number().int().min(0),
   /** Text spoken or sung during this scene (in the project language). */
@@ -164,6 +181,8 @@ export const SceneSchema = z.object({
   motion: MotionSchema.default("zoom-in"),
   /** ids of the secondary cast members (CastMember.id) that appear in this scene, besides the main character. */
   characters: z.array(z.string()).optional(),
+  /** Dialogue mode: the scene's lines, each with its speaker ("main" / "narrator" / a cast id). `text` is these lines joined. */
+  dialogue: z.array(DialogueLineSchema).optional(),
   /** Moving-video mode: false = no picture for this scene (the video AI makes it from the character); unset = the video's default. */
   picture: z.boolean().optional(),
   /** true = left out of the final video (e.g. its video isn't made); its clip is never made. Unset = in the video. */

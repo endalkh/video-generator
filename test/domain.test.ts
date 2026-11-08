@@ -36,6 +36,21 @@ describe("cast (secondary characters)", () => {
   });
 });
 
+describe("dialogue mode (Stage A)", () => {
+  it("is a spoken mode: audio is never made inside the clips", async () => {
+    const { soundInVideo, pacingMode } = await import("../src/domain/project/project.model.js");
+    expect(soundInVideo({ audioMode: "dialogue" })).toBeNull();
+    // Even with videoAudio on, dialogue stays a separate multi-voice track (not in-video).
+    expect(soundInVideo({ audioMode: "dialogue", videoAudio: true })).toBeNull();
+    expect(pacingMode({ audioMode: "dialogue" })).toBe("dialogue");
+  });
+  it("lets a scene carry speaker-tagged lines", () => {
+    const sc = SceneSchema.parse({ index: 0, text: "Hi!\nHello!", visualPrompt: "a shot", dialogue: [{ speaker: "main", line: "Hi!" }, { speaker: "rabbit", line: "Hello!" }] });
+    expect(sc.dialogue).toEqual([{ speaker: "main", line: "Hi!" }, { speaker: "rabbit", line: "Hello!" }]);
+    expect(SceneSchema.parse({ index: 1, text: "x", visualPrompt: "y" }).dialogue).toBeUndefined();
+  });
+});
+
 describe("ProjectInput", () => {
   it("applies defaults", () => {
     expect(input).toMatchObject({ language: "en", audioMode: "song", videoMode: "veo", sceneCount: 4, aspectRatio: "16:9", reviewMode: "manual" });
