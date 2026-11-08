@@ -852,6 +852,24 @@ export class PipelineService {
           }
           return out;
         };
+        /** The scene's lines for a video model that says them itself: who says what, and how they sound. */
+        const dialogueScript = (s: Scene): string => {
+          const lines = s.dialogue ?? [];
+          if (!lines.length) return `"${s.text}"`;
+          return lines.map((l, n) => {
+            const who = l.speaker === SPEAKER_MAIN
+              ? `${character.name} (the little girl, the main character; a sweet, bright toddler's voice)`
+              : l.speaker === SPEAKER_NARRATOR
+                ? "A warm narrator (not seen)"
+                : (() => { const c = castById.get(l.speaker); return c ? `${c.name} (${c.description.split(/[.;]/)[0]!.trim()}; a voice that fits them)` : l.speaker; })();
+            return `${n + 1}. ${who} says: "${l.line}"`;
+          }).join("\n");
+        };
+        /** Roughly how long the lines take to say (when there's no separate audio to measure). */
+        const spokenSeconds = (s: Scene): number => {
+          const lines = s.dialogue?.length ? s.dialogue.map((l) => l.line) : [s.text];
+          return Math.min(15, Math.max(4, Math.ceil(lines.reduce((t, l) => t + [...l].length * 0.11 + 0.6, 1))));
+        };
         /** The prompt variables of a scene, and the cast members in it that have a reference image. */
         const sceneVars = async (s: Scene) => {
           const present = character.skipped ? [] : await sceneCast(s);
@@ -859,7 +877,7 @@ export class PipelineService {
           const castBlock = present.length
             ? `Also in this shot, each matching one of the attached reference images (in this order, after the main character): ${present.map((c) => `${c.member.name} (${c.member.description})`).join("; ")}. Keep each of them looking exactly like their reference image.\n`
             : "";
-          return { present, vars: { scene_number: s.index + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description, cast_in_scene: castBlock } };
+          return { present, vars: { scene_number: s.index + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description, cast_in_scene: castBlock, dialogue_script: dialogueScript(s) } };
         };
         /** Draw the scene's picture if it needs one and doesn't have it yet. Returns whether one was drawn. */
         const drawPicture = async (s: Scene): Promise<boolean> => {
@@ -907,7 +925,7 @@ export class PipelineService {
               const piece = await ensureScenePiece(p, project, i);
               const t = timing(i);
               // The scene's length on screen (unknown when the character speaks inside the clip: there's no separate audio).
-              const durationSec = t.duration ?? (t.audio && (await fileExists(t.audio)) ? (await probeDuration(t.audio)) + SCENE_TAIL_SEC : undefined);
+              const durationSec = t.duration ?? (t.audio && (await fileExists(t.audio)) ? (await probeDuration(t.audio)) + SCENE_TAIL_SEC : inVideo === "dialogue" ? spokenSeconds(s) : undefined);
               const mp4 = await provider.video!(r.text, {
                 model: r.model, character: reference, cast: present.map((c) => c.image), samples, audio: piece ? await readFile(piece) : undefined, durationSec, still: scenePicture(input, s) && (await fileExists(p.sceneImage(i))) ? await readFile(p.sceneImage(i)) : undefined, aspectRatio: input.aspectRatio, resolution, label: `scene ${i + 1} video`, ctx: ctx({ scene: s }),
                 resumeTaskId: saved?.model === r.model ? saved.taskId : undefined,

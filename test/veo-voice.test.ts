@@ -433,3 +433,31 @@ describe("lip-sync pass", () => {
     expect((await c.modelSettingsService.list()).find((s) => s.task === "lip_sync")!.model).toBe("none");
   });
 });
+
+describe("dialogue spoken inside the video", () => {
+  it("keeps the script, sends every line with its speaker to the video model, and keeps the clip's own sound", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "a lost lion cub in a forest", sceneCount: 2, audioMode: "dialogue", videoMode: "veo", reviewMode: "manual", backgroundMusic: false }, "mock");
+    for (const s of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, s); await ps.idle(); }
+    const before = (await ps.get(id)).scenes!.scenes.map((s) => s.text);
+    const r = await ps.changeSettings(id, { videoAudio: true });
+    expect(r.redoFrom).toBe("audio"); // the script stays
+    expect((await ps.get(id)).scenes!.scenes.map((s) => s.text)).toEqual(before);
+    await ps.generateStep(id, "audio");
+    await ps.idle();
+    await ps.drawScenePictures(id);
+    await ps.idle();
+    await ps.makeVideoFromScratch(id);
+    await ps.idle();
+    const videos = mock.prompts.filter((x) => x.kind === "video");
+    expect(videos).toHaveLength(2);
+    const p = await ps.get(id);
+    const first = p.scenes!.scenes[0]!;
+    expect(videos[0]!.prompt).toContain(first.dialogue?.[0]?.line ?? first.text);
+    expect(videos[0]!.prompt).toMatch(/TALK in this shot/);
+    expect(mock.prompts.some((x) => x.kind === "speech")).toBe(true); // only from the first (speech-model) audio
+    expect([p.status, p.media.final]).toEqual(["done", "final.mp4"]);
+  }, 120_000);
+});

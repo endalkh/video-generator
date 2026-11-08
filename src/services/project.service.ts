@@ -181,6 +181,8 @@ export class ProjectService {
     const from = project.changeSettings(patch as Record<string, unknown>, opts);
     if (from) {
       const media = this.media(id);
+      // The voice moves into (or out of) the video clips: the scene videos must be made again (pictures are kept).
+      if (soundInVideo(before) !== soundInVideo(project.input)) await wipeSceneVideos(media);
       if (from === "poem") {
         // New words and scenes, same character: keep the character picture, repaint the scenes.
         await wipeMediaFrom(media, "audio");

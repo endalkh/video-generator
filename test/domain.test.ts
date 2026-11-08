@@ -40,8 +40,9 @@ describe("dialogue mode (Stage A)", () => {
   it("is a spoken mode: audio is never made inside the clips", async () => {
     const { soundInVideo, pacingMode } = await import("../src/domain/project/project.model.js");
     expect(soundInVideo({ audioMode: "dialogue" })).toBeNull();
-    // Even with videoAudio on, dialogue stays a separate multi-voice track (not in-video).
-    expect(soundInVideo({ audioMode: "dialogue", videoAudio: true })).toBeNull();
+    // With videoAudio on, the video model says the lines itself; the pacing stays the dialogue one.
+    expect(soundInVideo({ audioMode: "dialogue", videoAudio: true })).toBe("dialogue");
+    expect(pacingMode({ audioMode: "dialogue", videoAudio: true })).toBe("dialogue");
     expect(pacingMode({ audioMode: "dialogue" })).toBe("dialogue");
   });
   it("lets a scene carry speaker-tagged lines", () => {

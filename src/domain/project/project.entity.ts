@@ -494,8 +494,12 @@ export class Project {
     const has = (keys: readonly string[]) => changed.some((k) => keys.includes(k));
     const onlyLength = changed.every((k) => ["lengthSeconds", "songSeconds", "voice", "singer"].includes(k));
     let from: StepName;
+    // Dialogue: who says the lines (the speech model, or the video model inside each clip) keeps the script;
+    // only the audio and the clips are made again.
+    const dialogueVoiceOnly = old.audioMode === "dialogue" && input.audioMode === "dialogue" && changed.every((k) => ["videoAudio", "backgroundMusic", "voice", "singer"].includes(k));
     // Sound inside the clips changes how long each stanza is (one ~8 s clip per scene): new words.
-    if (has(["topic", "language", "audioMode", "videoAudio", "lengthSeconds", "songSeconds", "sceneCount", "ageRange"])) {
+    if (dialogueVoiceOnly) from = "audio";
+    else if (has(["topic", "language", "audioMode", "videoAudio", "lengthSeconds", "songSeconds", "sceneCount", "ageRange"])) {
       from = opts.keepPoem && onlyLength && this.props.poem && this.isStepDone("scenes") ? "audio" : "poem";
     } else if (has(["style", "characterHint"])) from = "character";
     else if (has(["voice", "singer", "backgroundMusic"])) from = "audio";

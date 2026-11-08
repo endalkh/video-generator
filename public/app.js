@@ -409,9 +409,9 @@ async function showNewVideo() {
     const seconds = lengthSecondsOf($("#f-length").value);
     const chosen = $("#f-audio").value;
     const still = $("#f-video").value === "still";
-    // Dialogue is always a separate multi-voice track; animated pictures use no video model: both force "video AI makes the voice" off.
+    // Animated pictures use no video model: "video AI makes the voice" is off. Dialogue: the video AI may say the lines itself.
     const dialogue = chosen === "dialogue";
-    if (still || dialogue) $("#f-videoaudio").checked = false;
+    if (still) $("#f-videoaudio").checked = false;
     const skipAudio = $("#f-videoaudio").checked;
     // Skipping the audio AI: a song is sung in the clips, everything else is spoken there ("the character speaks").
     const mode = skipAudio && chosen !== "song" ? "character" : chosen;
@@ -437,8 +437,11 @@ async function showNewVideo() {
     // Voice picker is for spoken modes (narration, rhyme over music) — not for a song or the character speaking. For
     // dialogue each character has its own voice (set on the Character page), so the single voice picker is hidden too.
     $("#f-voice").closest("div").hidden = mode === "song" || mode === "character" || mode === "dialogue";
-    // Animated pictures use no video model; dialogue is a separate track: both hide "the video AI makes the voice".
-    $("#f-videoaudio-row").hidden = still || dialogue;
+    // Animated pictures use no video model: hide "the video AI makes the voice".
+    $("#f-videoaudio-row").hidden = still;
+    $("#f-videoaudio-hint").textContent = dialogue
+      ? "The video AI (e.g. Gemini Omni) says every line itself, in each character’s voice, with the mouths in sync. Off: the speech AI voices each line (clearer Amharic), then the video is made to it."
+      : "The character sings (Song) or speaks (other choices) in each video clip. On by default for English; for Amharic the audio AI is clearer.";
     $("#f-conc").closest("div").hidden = still;
     $("#f-music-row").hidden = !(skipAudio || mode === "character");
     const noPictures = $("#f-nopictures").checked;
@@ -1105,6 +1108,8 @@ function settingsPanel(p, group = "video") {
     if (!keys.length) return null;
     if (keys.every((k) => k === "videoConcurrency" || k === "scenePictures")) return "none";
     const has = (list) => keys.some((k) => list.includes(k));
+    // Dialogue: moving the voice into / out of the clips keeps the script (same rule as the server).
+    if (inp.audioMode === "dialogue" && els.audioMode.value === "dialogue" && keys.every((k) => ["videoAudio", "backgroundMusic", "voice", "singer"].includes(k))) return "audio";
     if (has(["topic", "language", "audioMode", "videoAudio", "lengthSeconds", "sceneCount", "ageRange"])) return lengthOnly() && keepBox.checked ? "audio" : "poem";
     if (has(["style", "characterHint"])) return "character";
     if (has(["singer", "voice", "backgroundMusic"])) return "audio";
@@ -1157,7 +1162,7 @@ function settingsPanel(p, group = "video") {
       f("singer", "Singer / voice", els.singer, SINGER_HINT), f("voice", "Exact voice (rhyme over music, narration)", els.voice)),
     h("div", { class: "flex items-start gap-2" }, els.videoAudio,
       h("label", { for: `${pre}-videoAudio`, class: "text-sm" }, h("span", { class: "font-semibold", text: "Skip the audio AI: the video AI makes the voice / song" }),
-        h("span", { class: "block text-xs text-stone-500", text: "The character sings (Song) or speaks (other choices) in each video clip. Changing this writes a new poem (one ~8-second stanza per clip)." }))),
+        h("span", { class: "block text-xs text-stone-500", text: inp.audioMode === "dialogue" ? "Dialogue: the video AI (e.g. Gemini Omni) says every line itself, with the mouths in sync. Changing this keeps the script; only the audio and the scene videos are made again (paid)." : "The character sings (Song) or speaks (other choices) in each video clip. Changing this writes a new poem (one ~8-second stanza per clip)." }))),
     h("div", { class: "flex items-start gap-2" }, els.backgroundMusic,
       h("label", { for: `${pre}-backgroundMusic`, class: "text-sm" }, h("span", { class: "font-semibold", text: "Background music under the voice / song made in the clips" }),
         h("span", { class: "block text-xs text-stone-500", text: "Soft instrumental music from the music AI (when the video AI makes the voice / song). Changing it remakes only the music; the video clips are kept." }))),

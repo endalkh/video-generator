@@ -133,16 +133,17 @@ export function autoSceneCount(lengthSeconds: number, audioMode: AudioMode): num
  * herself, lips in sync, and no audio model is used ("The character speaks" mode always works like this; with
  * `videoAudio` a song is sung in the clips and the other modes are spoken in the clips).
  */
-export function soundInVideo(input: { audioMode: AudioMode; videoAudio?: boolean }): "speaks" | "sings" | null {
+export function soundInVideo(input: { audioMode: AudioMode; videoAudio?: boolean }): "speaks" | "sings" | "dialogue" | null {
   if (input.audioMode === "character") return "speaks";
-  // Dialogue is always made by the speech model (multi-voice, stitched per scene), never inside the clips.
-  if (input.audioMode === "dialogue") return null;
+  // Dialogue: by default the speech model voices every line (stitched per scene); with videoAudio the video model
+  // (e.g. Gemini Omni) says the lines itself, in each character's voice, with the mouths in sync.
+  if (input.audioMode === "dialogue") return input.videoAudio ? "dialogue" : null;
   if (!input.videoAudio) return null;
   return input.audioMode === "song" ? "sings" : "speaks";
 }
 
 /** Scene pacing: sound made inside the clips means one ~8-second clip per scene, like "The character speaks". */
-export const pacingMode = (input: { audioMode: AudioMode; videoAudio?: boolean }): AudioMode => (soundInVideo(input) ? "character" : input.audioMode);
+export const pacingMode = (input: { audioMode: AudioMode; videoAudio?: boolean }): AudioMode => (soundInVideo(input) && input.audioMode !== "dialogue" ? "character" : input.audioMode);
 
 const ProjectInputObject = z.object({
   topic: z.string({ error: "write what the video is about" }).transform(tidy).pipe(z.string().min(3, "topic must be at least 3 characters")),
