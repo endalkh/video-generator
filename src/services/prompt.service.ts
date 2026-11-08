@@ -172,6 +172,8 @@ export class PromptService {
         singer: SINGER_TEXT[input.singer],
         voice_style: VOICE_STYLE[input.singer],
         audio_request: input.audioRequest ?? "",
+        // Per-scene block listing the secondary cast present in a shot; the pipeline fills it in per scene (empty by default).
+        cast_in_scene: "",
         // Song: 2 lines per stanza sung at a clear kids' pace within the song length.
         // Narration: 4 lines per stanza read slowly, with a short pause after each scene.
         syllables_per_line: syllablesPerLine(input, extra.songSeconds),

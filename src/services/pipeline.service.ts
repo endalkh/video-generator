@@ -727,14 +727,39 @@ export class PipelineService {
         }
         // Character step skipped: no sheet to keep the look; each scene is made from its description.
         const reference = character.skipped ? undefined : await readFile(p.characterImage);
+        // Cast reference images available on disk, by id (secondary characters that should stay on-model).
+        const castById = new Map(project.cast.map((c) => [c.id, c]));
+        const castImageCache = new Map<string, Buffer | null>();
+        const castImage = async (id: string): Promise<Buffer | null> => {
+          if (!castImageCache.has(id)) castImageCache.set(id, (await fileExists(p.castImage(id))) ? await readFile(p.castImage(id)) : null);
+          return castImageCache.get(id)!;
+        };
+        /** The cast members present in a scene that also have a reference image, in scene order. */
+        const sceneCast = async (s: Scene): Promise<{ member: typeof project.cast[number]; image: Buffer }[]> => {
+          const out: { member: typeof project.cast[number]; image: Buffer }[] = [];
+          for (const id of s.characters ?? []) {
+            const member = castById.get(id);
+            if (!member) continue;
+            const image = await castImage(id);
+            if (image) out.push({ member, image });
+          }
+          return out;
+        };
         await perScene("clips", p.sceneClip, "rendered", async (s, report) => {
           const i = s.index;
-          const vars = { scene_number: i + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description };
+          const present = character.skipped ? [] : await sceneCast(s);
+          // A reference-order note so the image model matches each extra reference to the named character.
+          const castBlock = present.length
+            ? `Also in this shot, each matching one of the attached reference images (in this order, after the main character): ${present.map((c) => `${c.member.name} (${c.member.description})`).join("; ")}. Keep each of them looking exactly like their reference image.\n`
+            : "";
+          const vars = { scene_number: i + 1, scene_text: s.text, visual_prompt: s.visualPrompt, character_name: character.name, character_description: character.description, cast_in_scene: castBlock };
           // An uploaded (or already made) Veo video doesn't need a picture: don't pay for one.
           // No scene pictures: the video model makes the scene from the character picture.
           if (scenePicture(input, s) && !(await fileExists(p.sceneImage(i))) && !(useVeo && (await fileExists(p.sceneVideo(i))))) {
             const r = await prompt("clips", "scene_image", "scene_image", vars, i);
-            await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references: [...(reference ? [reference] : []), ...samples], label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
+            // References: main character first, then the present cast (so they stay on-model), then the parent's samples.
+            const references = [...(reference ? [reference] : []), ...present.map((c) => c.image), ...samples];
+            await writeFileAtomic(p.sceneImage(i), await provider.image(r.text, { model: r.model, aspectRatio: input.aspectRatio, references, label: `scene ${i + 1} image`, size: pictureSize, ctx: ctx({ scene: s }) }));
           }
           checkCancel();
           if (useVeo && opts.noNewVideos && !(await fileExists(p.sceneVideo(i)))) {

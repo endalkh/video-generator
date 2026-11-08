@@ -29,6 +29,12 @@ describe("PromptService", () => {
     expect(set.render("scene_video", v).text).not.toMatch(/details: bubbles/);
     expect(set.render("scenes", { poem_json: "{}", stanza_count: 2 }).text).toContain("most videos have none");
 
+    // Stage 2: a scene's secondary cast is injected into the scene-image prompt; empty by default.
+    expect(set.render("scene_image", v).text).not.toMatch(/Also in this shot/);
+    const withCast = set.render("scene_image", { ...v, cast_in_scene: "Also in this shot, each matching one of the attached reference images (in this order, after the main character): Tutu (a fluffy white rabbit). Keep each of them looking exactly like their reference image.\n" }).text;
+    expect(withCast).toContain("Tutu (a fluffy white rabbit)");
+    expect(withCast).not.toMatch(/\{\{/);
+
     // A channel can describe a different look; other channels keep the shared one.
     const ch = (await c.channelService.create({ input: { name: "Space Kids" }, provider: "mock" })).id;
     await c.promptService.update("local_look", "Everything looks like a friendly moon base.", { channel: ch });

@@ -14,7 +14,7 @@ import { NotFoundError } from "../errors.js";
 export const PROMPT_FLAGS = ["am", "en", "song", "narration", "music_voice", "character_voice", "video_sings", "video_sound", "veo", "has_character_hint", "has_reference", "has_samples", "has_channel_name", "has_title", "has_audio_request"] as const;
 
 /** Variables available to every prompt. */
-export const COMMON_VARS = ["topic", "language_name", "age_range", "style", "scene_count", "character_hint", "safety", "local_look", "syllables_per_line", "letters_per_line", "video_seconds", "singer", "voice_style", "audio_request"] as const;
+export const COMMON_VARS = ["topic", "language_name", "age_range", "style", "scene_count", "character_hint", "safety", "local_look", "syllables_per_line", "letters_per_line", "video_seconds", "singer", "voice_style", "audio_request", "cast_in_scene"] as const;
 
 export interface PromptDefinition {
   key: string;
@@ -259,8 +259,8 @@ Style: {{style}}. No text. {{safety}}`,
     description: "Image prompt for each scene. The character sheet is attached as the first reference image; with has_samples, the video's sample pictures (e.g. a food or a house) are attached after it.",
     vars: ["scene_number", "scene_text", "visual_prompt", "character_name", "character_description"],
     template: `Still frame from a high-quality 3D animated kids' movie. {{visual_prompt}}
-The main character is the one in the reference image ({{character_name}}: {{character_description}}); keep her look exactly the same. Medium shot: she is clearly visible (about knees up) with plenty of the setting around her, caught in the middle of the action, with a clear, happy facial expression.
-{{#if has_samples}}The other attached pictures are samples from the parent. Wherever this shot shows what a sample shows (a food, a house, a place, an object, clothes…), draw it like in that sample, recognisable at a glance (shape, colours, materials, patterns), in the art style below: not a copy of the photo. The main character always stays the one from the character reference.
+The main character is the one in the FIRST reference image ({{character_name}}: {{character_description}}); keep her look exactly the same. Medium shot: she is clearly visible (about knees up) with plenty of the setting around her, caught in the middle of the action, with a clear, happy facial expression.
+{{cast_in_scene}}{{#if has_samples}}The other attached pictures are samples from the parent. Wherever this shot shows what a sample shows (a food, a house, a place, an object, clothes…), draw it like in that sample, recognisable at a glance (shape, colours, materials, patterns), in the art style below: not a copy of the photo. The main character always stays the one from the character reference.
 Setting: as described above; when nothing else is said, outdoors in a sunny, lush green countryside with soft grass, leafy trees, flowers and blue sky.{{else}}Setting: follow the setting described in the shot above. When the shot names no particular place, default to outdoors in a sunny, lush green countryside with soft grass, leafy trees, flowers and blue sky. If the shot clearly calls for its own outdoor place (e.g. an open savanna, a train on its tracks, the blue sky among clouds, a country road, a calm river), use that, kept bright, sunny and gentle.{{/if}}
 {{local_look}}
 Bright, even lighting, warm sunlight. Deep focus, like a wide-angle lens at f/16: the character, the middle ground and the far background are all equally sharp, crisp and richly detailed, with clear edges on distant trees, hills, buildings and clouds.
