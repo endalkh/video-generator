@@ -216,12 +216,17 @@ export class PromptService {
  * Longest line that can still be sung / read clearly in the time: song = 2 lines per stanza at a kids' pace;
  * narration and rhyme over music = 4 lines per stanza with a short pause after each scene.
  */
+/** Longest sung line: about 2–4 short words (≈ 2 bars at 130–140 BPM). */
+const SONG_MAX_SYLLABLES_PER_LINE = 8;
+
 function syllablesPerLine(input: ProjectInput, songSeconds?: number): number {
   // Sound inside the clips: 2 lines per ~8-second clip, like "The character speaks".
   const mode = pacingMode(input);
   const pace = kidsSyllablesPerSec(mode);
+  // Songs: short, singable lines at an upbeat tempo. A long song isn't filled with longer lines: the extra time is
+  // music (instrumental breaks, the chorus coming back), so a line stays a short phrase of a few words.
   return mode === "song"
-    ? Math.max(4, Math.floor(((songSeconds ?? input.songSeconds) - SONG_FRAME_SEC) * pace / (input.sceneCount * 2)))
+    ? Math.max(4, Math.min(SONG_MAX_SYLLABLES_PER_LINE, Math.floor(((songSeconds ?? input.songSeconds) - SONG_FRAME_SEC) * pace / (input.sceneCount * 2))))
     : Math.max(4, Math.min(14, Math.floor((videoSeconds(input) - input.sceneCount * SCENE_TAIL_SEC) * pace / (input.sceneCount * (mode === "character" ? 2 : 4)))));
 }
 

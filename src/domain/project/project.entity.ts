@@ -50,7 +50,7 @@ const stepIndex = (s: StepName) => STEP_NAMES.indexOf(s);
 
 /** Settings that can be changed after a video was started (Video settings panel). */
 /** Steps that can be made again while keeping everything the later steps made. */
-export const KEEP_LATER_STEPS = ["scenes", "character", "audio"] as const;
+export const KEEP_LATER_STEPS = ["poem", "scenes", "character", "audio"] as const;
 
 export const SETTING_KEYS = ["topic", "language", "audioMode", "videoAudio", "backgroundMusic", "lengthSeconds", "songSeconds", "sceneCount", "ageRange", "style", "characterHint", "voice", "singer", "aspectRatio", "resolution", "videoMode", "scenePictures", "videoConcurrency"] as const;
 
@@ -392,6 +392,18 @@ export class Project {
   regenerateKeepingLater(step: StepName): void {
     this.assertEditable();
     if (!(KEEP_LATER_STEPS as readonly string[]).includes(step)) throw new ValidationError(`"${step}" can't be made again on its own`);
+    if (step === "poem") {
+      // A new poem: the character (from the topic or your picture), the scene pictures and videos are kept, and the
+      // old scene plan and song stay until you make them again. The scenes and audio steps are marked to be redone
+      // (they follow the words), but nothing is deleted or regenerated until you ask for it.
+      this.props.poem = null;
+      const redo: StepName[] = ["poem", "scenes", "audio", "clips", "final"];
+      this.props.completed = this.props.completed.filter((s) => !redo.includes(s));
+      this.props.approved = this.props.approved.filter((s) => !redo.includes(s));
+      if (this.props.status === "done" || this.props.status === "review") this.props.status = "paused";
+      this.touch();
+      return;
+    }
     if (step === "scenes") this.props.scenes = null;
     if (step === "character") this.props.character = null;
     if (step === "audio") this.props.song = null;

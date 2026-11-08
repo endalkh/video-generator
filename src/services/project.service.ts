@@ -571,11 +571,12 @@ export class ProjectService {
   }
 
   /**
-   * Forget a step's output and delete its media. Scenes, character and audio are made again on their own: what the
-   * later steps made (character, song, pictures, videos) is kept, and only the clips and final video are put together
-   * again (returns true). A new poem with `keepVisuals` keeps the pictures and videos.
+   * Forget a step's output and make it again on its own. For the poem, scenes, character and audio, what the later
+   * steps made (character, song, pictures, videos) is kept until you redo those steps yourself; only the clips and
+   * the final video, put together at no AI cost, are made again (returns true).
    */
   private async makeFresh(project: Project, step: StepName, keepVisuals: boolean): Promise<boolean> {
+    void keepVisuals; // a new poem now always keeps the character, pictures and videos
     if ((KEEP_LATER_STEPS as readonly string[]).includes(step)) {
       project.regenerateKeepingLater(step);
       const media = this.media(project.id);

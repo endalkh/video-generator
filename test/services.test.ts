@@ -250,7 +250,7 @@ describe("one step at a time", () => {
     await ps.generateStep(id, "poem", { keepVisuals: true });
     await ps.idle();
     p = await ps.get(id);
-    expect([p.completed, p.scenes!.scenes.length]).toEqual([["poem"], 2]);
+    expect([[...p.completed].sort(), p.scenes!.scenes.length]).toEqual([["character", "poem"], 2]); // the character is kept
     p = await runToEnd(id);
     expect(p.status).toBe("done");
     expect(p.scenes!.scenes[0]!.text).toBe(p.poem!.stanzas[0]!.lines.join("\n"));

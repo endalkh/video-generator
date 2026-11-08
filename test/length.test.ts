@@ -67,8 +67,8 @@ describe("Amharic ግጥም", () => {
     expect(poem).toContain("ቤት (rhyme)");
     expect(poem).toContain("one complete sentence or thought");
     expect(poem).toContain("verbs agree with the subject");
-    // 30 s song, 4 scenes at the lively sung pace (3.8 syllables/sec): ~12 syllables per line = about 15 Ge'ez letters.
-    expect(poem).toContain("about 15 Ge'ez letters (fidel)");
+    // Sung lines stay short phrases (at most 8 syllables ≈ 10 Ge'ez letters), however long the song: extra time is music.
+    expect(poem).toContain("about 10 Ge'ez letters (fidel)");
     expect(poem).not.toContain("syllables.");
 
     await c.projectService.rewriteStanza(am.id, 0, { provider: "mock" });
