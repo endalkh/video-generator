@@ -4,7 +4,7 @@ import type { GenContext, Provider } from "../domain/ports/generator.port.js";
 import { MAX_SONG_PART_SEC, mmss, singableSeconds, songParts, songTimeline } from "../domain/ports/generator.port.js";
 import { isTrebloModel, TREBLO_MAX_SONG_SEC } from "../infrastructure/providers/treblo.js";
 import type { Project } from "../domain/project/project.entity.js";
-import { assignCastVoices, defaultVoice, minResolution, scenePicture, soundInVideo, speakerVoice, SPEAKER_NARRATOR, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
+import { assignCastVoices, defaultVoice, minResolution, scenePicture, soundInVideo, speakerVoice, SPEAKER_MAIN, SPEAKER_NARRATOR, STEP_NAMES, type Character, type Poem, type Scene, type StepName } from "../domain/project/project.model.js";
 import { ValidationError } from "../domain/errors.js";
 import type { PromptSet, RenderedPrompt } from "../domain/prompt/prompt.entity.js";
 import { isInferenceShModel } from "../infrastructure/providers/inference-sh.js";
@@ -498,8 +498,23 @@ export class PipelineService {
             // Drop any that collide with the main character or each other by id.
             const seen = new Set<string>();
             let unique = cast.filter((c) => !seen.has(c.id) && seen.add(c.id) !== undefined);
-            // Dialogue mode: give each cast member a distinct speaking voice (editable later on the Character page).
-            if (input.audioMode === "dialogue") unique = assignCastVoices(unique, input.voice ?? defaultVoice(input.singer, input.audioMode));
+            // Dialogue mode: the script is authoritative. Make sure EVERY speaker id the scenes use has a cast
+            // member (so it gets a distinct voice and reference art), adding any the cast prompt missed, and give
+            // each a distinct speaking voice (editable later on the Character page).
+            if (input.audioMode === "dialogue") {
+              const spoken = new Set<string>();
+              for (const s of scenes) for (const dl of s.dialogue ?? []) {
+                if (dl.speaker !== SPEAKER_MAIN && dl.speaker !== SPEAKER_NARRATOR) spoken.add(dl.speaker);
+              }
+              for (const id of spoken) {
+                if (unique.some((c) => c.id === id)) continue;
+                // A speaker the cast prompt didn't describe: add it with a name/description derived from its id.
+                const name = id.replace(/-/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
+                unique.push({ id, name, description: `A friendly ${id.replace(/-/g, " ")}, a lovable animated children's character.` });
+                log.warn(`dialogue: speaker "${id}" wasn't in the cast list; added it so it gets its own voice`);
+              }
+              unique = assignCastVoices(unique, input.voice ?? defaultVoice(input.singer, input.audioMode));
+            }
             project.setCast(unique);
             await save();
             if (unique.length) log.step("character", `cast: ${unique.map((c) => c.name).join(", ")}`);
