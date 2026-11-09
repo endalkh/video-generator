@@ -836,7 +836,10 @@ export class PipelineService {
       if (useVeo && typeof provider.video !== "function") throw new Error(`Provider "${provider.name}" can't generate video clips; choose Visuals = Animated pictures or another provider`);
       const timing = (i: number) => {
         const slot = timeline?.slots[i];
-        return slot ? { duration: slot.end - slot.start } : { audio: p.sceneAudio(i) };
+        // One song over all the clips: each clip ends on the video frame nearest its slot's end (not just its own
+        // length rounded down), so the joined clips stay exactly in step with the song to the last scene instead of
+        // drifting a few hundredths of a second per scene (≈0.3 s by the end, enough to put the mouths out of sync).
+        return slot ? { duration: (Math.round(slot.end * fmt.fps) - Math.round(slot.start * fmt.fps)) / fmt.fps } : { audio: p.sceneAudio(i) };
       };
 
       // Scenes left out of the video (e.g. no video was made for them): no clip, not in the final video.

@@ -484,6 +484,10 @@ describe("song video clips play with sound", () => {
     // Loudest point of each clip's sound: silence is -91 dB.
     const peak = (file: string) => Number(execFileSync("sh", ["-c", `ffmpeg -hide_banner -i "${file}" -vn -af volumedetect -f null - 2>&1 | sed -n "s/.*max_volume: \\([-0-9.]*\\) dB.*/\\1/p"`], { encoding: "utf8" }).trim());
     for (const i of [0, 1]) expect(peak(m.sceneClip(i))).toBeGreaterThan(-60);
+    // The joined clips stay in step with the song: no drift from rounding each clip down to whole frames.
+    const p = await ps.get(id);
+    const clipsTotal = (await probeDuration(m.sceneClip(0))) + (await probeDuration(m.sceneClip(1)));
+    expect(Math.abs(clipsTotal - p.song!.duration)).toBeLessThan(0.05);
     expect((await ps.get(id)).status).toBe("done");
   }, 120_000);
 });
