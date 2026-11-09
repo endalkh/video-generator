@@ -146,7 +146,9 @@ export class InferenceShVideo {
     const video: PendingFile = { bytes: opts.video, contentType: "video/mp4" };
     const audio: PendingFile = { bytes: opts.audio, contentType: "audio/mpeg" };
     const input = def.id === "klingai/lip-sync"
-      ? { video, audio, original_audio_volume: 0, sound_volume: 1, ...(opts.audioSec > opts.videoSec ? { sound_end_time: Math.floor(opts.videoSec * 1000) } : {}) }
+      // Always give the end point: left out, Kling uses the video's full length, which can be past the end of the audio
+      // ("The audio end timestamp must be less than or equal to the full video duration"). A little margin for rounding.
+      ? { video, audio, original_audio_volume: 0, sound_volume: 1, sound_end_time: Math.max(2000, Math.floor(Math.min(opts.audioSec, opts.videoSec) * 1000) - 100) }
       : { video, audio };
     return this.run(def.app, input, opts.label);
   }
