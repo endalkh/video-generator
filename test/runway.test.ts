@@ -70,3 +70,15 @@ describe("Runway Wan 3.0", () => {
     expect(typeof api.bodies[0]!.promptImage).toBe("string");
   });
 });
+
+describe("Runway prompt", () => {
+  it("sends only the shot, never the long description of the child (Runway's text check rejects it)", async () => {
+    const { singPrompt, shotOnly } = await import("../src/infrastructure/providers/runway.js");
+    const full = "A shot from a high-quality, feature-film quality 3D animated kids' movie, full of life and motion. All characters are original characters of this movie. At a train platform, Milcah steps into a colorful carriage.\nMilcah (A cheerful toddler girl with chubby cheeks, a pink dress and white ruffled ankle socks) looks exactly like the reference.\nEverything people have built looks Ethiopian.";
+    expect(shotOnly(full)).toBe("At a train platform, Milcah steps into a colorful carriage.");
+    const p = singPrompt(full);
+    expect(p).toContain("At a train platform, Milcah steps into a colorful carriage.");
+    expect(p).toContain("Audio 1");
+    expect(p).not.toMatch(/chubby|socks|dress|toddler|Ethiopian/);
+  });
+});

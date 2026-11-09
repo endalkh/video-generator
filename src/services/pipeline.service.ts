@@ -957,7 +957,9 @@ export class PipelineService {
             } catch (err) {
               if (err instanceof PipelineCancelled) throw err;
               // No fallback to pictures: surface the error so it can be fixed and retried.
-              const hint = /third-party content/i.test((err as Error).message)
+              const hint = /SAFETY\.(INPUT|OUTPUT)|did not pass moderation/i.test((err as Error).message)
+                ? ` — the video service's safety check rejected this scene. Change what this scene shows (its picture description on the Scenes page, or 🖼 Fix picture), then try again. A rejected request may still be charged, so it isn't retried automatically.`
+                : /third-party content/i.test((err as Error).message)
                 ? ` — Google blocks videos that look like a famous film, character or studio. Change this scene's picture (🖼 Fix picture on the Audio step) so its characters look less like well-known ones (e.g. a lion cub that looks like a famous film lion), or give that character a more original look on the Character page, then try again.`
                 : (err as { status?: number }).status === 429
                 ? ` — the request limit for ${r.model} on your account was reached. Finished clips are kept: wait a few minutes (or until tomorrow for a daily limit), then click "Make the clips" on the Clips page. A cheaper Veo model (fast or lite, on the Models page) has higher limits.`

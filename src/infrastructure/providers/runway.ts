@@ -77,7 +77,7 @@ export class RunwayVideo {
     if (!opts.audio || !opts.singAudio) {
       // No audio: the scene picture is the first frame, as with the other picture-animating models.
       const duration = Math.min(30, Math.max(2, Math.ceil(opts.durationSec ?? 5)));
-      return this.run({ model, promptImage: image, promptText: prompt.slice(0, 20_000), ratio: ratioFor(opts.aspectRatio, true), duration, audio: false }, opts);
+      return this.run({ model, promptImage: image, promptText: `${shotOnly(prompt)} Lively, gentle, child-friendly motion; keep the look of the picture.`, ratio: ratioFor(opts.aspectRatio, true), duration, audio: false }, opts);
     }
     // With audio: one clip per ≤15 s slice of it, joined back together.
     const work = await mkdtemp(path.join(os.tmpdir(), "wan3-"));
@@ -96,7 +96,7 @@ export class RunwayVideo {
           model,
           // Reference mode (the only one that takes audio): the picture keeps the look and the setting.
           promptImage: [{ uri: image }],
-          promptText: singPrompt(prompt).slice(0, 20_000),
+          promptText: singPrompt(prompt),
           ratio: ratioFor(opts.aspectRatio, false),
           duration: Math.min(WAN_MAX_AUDIO_SEC, Math.max(2, Math.ceil(sec))),
           audio: true,
@@ -170,9 +170,19 @@ export class RunwayVideo {
   }
 }
 
+/**
+ * Only the shot itself: what happens and where (the first paragraph of the scene prompt). Runway's text check rejects
+ * long prompts that describe a young child in detail (face, body, dress, socks…), and Wan doesn't need them: the
+ * picture already shows exactly how she looks. The long house/food/clothes guide is left out for the same reason.
+ */
+export function shotOnly(prompt: string): string {
+  const first = prompt.split(/\n/)[0]!.replace(/^A shot from a high-quality[^.]*\.\s*(All characters are original characters of this movie\.\s*)?/, "").trim();
+  return first.slice(0, 700);
+}
+
 /** Reference-mode prompt: name the inputs the way Wan expects ("Image 1", "Audio 1") and ask for the exact song. */
 export function singPrompt(prompt: string): string {
-  return `Image 1 shows this shot: keep the character's look and outfit and the setting exactly as in Image 1. The character sings the song in Audio 1, mouth moving exactly in sync with every sung word and syllable, following its timing and melody, smiling and moving to the beat. Audio: exactly the song from Audio 1 (the same voice, words, melody and instruments), no other music, no speech. No text, no captions.\n\n${prompt}`;
+  return `A cheerful 3D animated kids' cartoon. Image 1 shows this shot: keep the character's look and the setting exactly as in Image 1. ${shotOnly(prompt)} The character sings the song in Audio 1, mouth moving in sync with every sung word, following its timing and melody, smiling and moving gently to the beat. Audio: exactly the song from Audio 1 (the same voice, words, melody and instruments), no other music, no speech. No text, no captions.`;
 }
 
 /** Keyframe mode needs an auto_ ratio (the shape follows the picture); reference mode takes the pixel ratio. */
