@@ -49,6 +49,12 @@ export function inferenceShMaxConcurrency(model: string): number | undefined {
 /** The service behind an app was busy (too many tasks at once): the task can simply be sent again later. */
 export const isBusyError = (message: string) => /concurrency limit|please try later|too many (concurrent )?requests/i.test(message);
 
+/** Lip-sync apps: move the mouth in an existing video to an audio track (song videos). */
+export const INFERENCE_SH_LIPSYNC_APPS = [
+  { id: "klingai/lip-sync", app: "klingai/lip-sync", displayName: "Kling Lip Sync — cheapest (~$0.014/s): moves the mouth in the scene video to its part of the song (inference.sh)" },
+  { id: "pixverse/lip-sync", app: "pixverse/lip-sync", displayName: "PixVerse Lip Sync (~$0.04/s) (inference.sh)" },
+] as const;
+
 /** Can this inference.sh model make a scene without a scene picture? (Unknown models: assume not.) */
 export function inferenceShWorksWithoutPicture(model: string): boolean {
   const def = INFERENCE_SH_VIDEO_APPS.find((a) => INFERENCE_SH_PREFIX + a.id === model);
@@ -129,7 +135,20 @@ export class InferenceShVideo {
   }
 
   listModels(): AvailableModel[] {
-    return INFERENCE_SH_VIDEO_APPS.map((a) => ({ id: INFERENCE_SH_PREFIX + a.id, displayName: a.displayName }));
+    return [...INFERENCE_SH_VIDEO_APPS, ...INFERENCE_SH_LIPSYNC_APPS].map((a) => ({ id: INFERENCE_SH_PREFIX + a.id, displayName: a.displayName }));
+  }
+
+  /** Move the mouth in `video` to `audio` (the audio is cut to the video's length). */
+  async lipSync(opts: { model: string; video: Buffer; audio: Buffer; videoSec: number; audioSec: number; label: string }): Promise<Buffer> {
+    const id = opts.model.slice(INFERENCE_SH_PREFIX.length);
+    const def = INFERENCE_SH_LIPSYNC_APPS.find((a) => a.id === id);
+    if (!def) throw new Error(`Unknown lip-sync app "${id}" (known: ${INFERENCE_SH_LIPSYNC_APPS.map((a) => a.id).join(", ")})`);
+    const video: PendingFile = { bytes: opts.video, contentType: "video/mp4" };
+    const audio: PendingFile = { bytes: opts.audio, contentType: "audio/mpeg" };
+    const input = def.id === "klingai/lip-sync"
+      ? { video, audio, original_audio_volume: 0, sound_volume: 1, ...(opts.audioSec > opts.videoSec ? { sound_end_time: Math.floor(opts.videoSec * 1000) } : {}) }
+      : { video, audio };
+    return this.run(def.app, input, opts.label);
   }
 
   /**

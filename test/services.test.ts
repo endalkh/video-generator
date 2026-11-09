@@ -221,6 +221,7 @@ describe("one step at a time", () => {
 
   it("changes the poem and music while keeping the pictures and Veo videos", async () => {
     c = await makeTestContainer();
+    await c.modelSettingsService.update("song_lipsync", "none"); // this test is about keeping the paid videos untouched
     const ps = c.projectService;
     const { id } = await ps.create({ reviewMode: "auto", topic: "goats in the rain", sceneCount: 2, videoMode: "veo" }, "mock");
     await runToEnd(id);
@@ -289,7 +290,7 @@ describe("ModelSettingsService", () => {
   it("lists, updates, resets and groups available models", async () => {
     c = await makeTestContainer();
     const list = await c.modelSettingsService.list();
-    expect(list.map((s) => s.task)).toEqual(["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "song_video", "channel_text", "channel_image", "plan_text"]);
+    expect(list.map((s) => s.task)).toEqual(["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "song_video", "song_lipsync", "channel_text", "channel_image", "plan_text"]);
     expect((await c.modelSettingsService.update("poem", "gemini-3.1-pro-preview")).isDefault).toBe(false);
     await expect(c.modelSettingsService.update("poem", "lyria-3.5")).rejects.toBeInstanceOf(ValidationError);
     expect((await c.modelSettingsService.reset("poem")).model).toBe("gemini-3.8-flash");
@@ -407,7 +408,8 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
     expect([p.status, p.input.videoMode]).toEqual(["done", "veo"]);
     // Only scene_video prompts were added; poem, song and pictures were kept.
     const added = c.generations.items.map((g) => g.promptKey).slice(before.length);
-    expect(added).toEqual(["scene_video", "scene_video"]);
+    // Song videos: each new scene video is then lip-synced to its part of the song (cheap pass).
+    expect([...added].sort()).toEqual(["scene_video", "scene_video", "song_lipsync", "song_lipsync"]);
     await expect(c.projectService.changeVisuals(created.id, "hologram")).rejects.toBeInstanceOf(ValidationError);
   }, 60_000);
 

@@ -491,3 +491,32 @@ describe("song video clips play with sound", () => {
     expect((await ps.get(id)).status).toBe("done");
   }, 120_000);
 });
+
+describe("song lip-sync pass", () => {
+  it("lip-syncs each new song scene once, keeps the raw video, and syncs again after a new song (default: Kling Lip Sync)", async () => {
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    expect((await c.modelSettingsService.list()).find((x) => x.task === "song_lipsync")!.model).toBe("inference.sh/klingai/lip-sync");
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "a little train", sceneCount: 2, audioMode: "song", videoMode: "veo", reviewMode: "manual" }, "mock");
+    for (const st of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, st); await ps.idle(); }
+    await ps.drawScenePictures(id);
+    await ps.idle();
+    await ps.makeVideoFromScratch(id);
+    await ps.idle();
+    const syncs = () => mock.prompts.filter((x) => x.kind === "lipsync").length;
+    expect(syncs()).toBe(2);
+    const m = media(id);
+    for (const i of [0, 1]) expect(await fileExists(m.sceneVideoRaw(i))).toBe(true);
+    // New song: the paid videos stay, and are synced again to it.
+    await ps.regenerate(id, "audio");
+    await ps.idle();
+    await ps.approve(id, "audio");
+    await ps.start(id, { noReview: true });
+    await ps.idle();
+    expect(mock.prompts.filter((x) => x.kind === "video")).toHaveLength(2);
+    expect(syncs()).toBe(4);
+    // Song pictures are close-ups so the mouth is big enough to sync.
+    expect(mock.prompts.filter((x) => x.kind === "image").some((x) => x.prompt.includes("SINGING SHOT: a medium close-up"))).toBe(true);
+  }, 120_000);
+});

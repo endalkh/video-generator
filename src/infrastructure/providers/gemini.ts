@@ -257,6 +257,11 @@ export class GeminiProvider implements Provider {
     );
   }
 
+  async lipSync(opts: { model: string; video: Buffer; audio: Buffer; videoSec: number; audioSec: number; label: string }): Promise<Buffer> {
+    if (!isInferenceShModel(opts.model)) throw new Error(`Lip-sync model "${opts.model}" isn't supported: pick Kling Lip Sync on the Models page, or "none"`);
+    return this.inferenceShVideo().lipSync(opts);
+  }
+
   async video(prompt: string, opts: { model: string; still?: Buffer; aspectRatio: string; label: string; character?: Buffer; cast?: Buffer[]; samples?: Buffer[]; audio?: Buffer; singAudio?: boolean; durationSec?: number; resolution?: VideoResolution; resumeTaskId?: string; onTaskStarted?: (taskId: string) => Promise<void> | void }): Promise<Buffer> {
     const { label } = opts;
     if (isInferenceShModel(opts.model)) return this.inferenceShVideo().video(prompt, { ...opts, mime: sniffImageMime });

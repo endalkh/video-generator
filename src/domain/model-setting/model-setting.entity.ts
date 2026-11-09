@@ -1,7 +1,9 @@
 import { NotFoundError, ValidationError } from "../errors.js";
 
 /** Kind of model a task needs; used to filter the model list offered in the UI. */
-export type ModelCapability = "text" | "image" | "tts" | "music" | "video";
+export type ModelCapability = "text" | "image" | "tts" | "music" | "video" | "lipsync";
+/** Song lip-sync value meaning "no lip-sync pass". */
+export const LIPSYNC_OFF = "none";
 
 /** Song-video task value meaning "use the Scene animation model". */
 export const SAME_AS_SCENE_VIDEO = "same";
@@ -16,7 +18,7 @@ export interface ModelTaskDefinition {
   envVar: string;
 }
 
-export const MODEL_TASK_IDS = ["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "song_video", "channel_text", "channel_image", "plan_text"] as const;
+export const MODEL_TASK_IDS = ["poem", "scenes", "character", "character_image", "scene_image", "song", "narration", "scene_video", "song_video", "song_lipsync", "channel_text", "channel_image", "plan_text"] as const;
 export type ModelTask = (typeof MODEL_TASK_IDS)[number];
 
 /** Every task in the pipeline that calls an AI model, in pipeline order. */
@@ -30,6 +32,7 @@ export const MODEL_TASKS: readonly (ModelTaskDefinition & { task: ModelTask })[]
   { task: "narration", title: "Narration / TTS", description: "Reads each scene aloud (Narration mode).", capability: "tts", defaultModel: "gemini-3.8-flash-tts", envVar: "GEMINI_TTS_MODEL" },
   { task: "scene_video", title: "Scene animation", description: "Animates each scene (Visuals = Veo).", capability: "video", defaultModel: "gemini-omni-1.2-flash", envVar: "GEMINI_VIDEO_MODEL" },
   { task: "song_video", title: "Scene animation for songs", description: "Animates each scene of a song video (Audio = Song or Rhyme over music) to its part of the song. \"same\" = use Scene animation. Wan 3.0 (runway/wan3) keeps your exact song and syncs the mouth to it.", capability: "video", defaultModel: SAME_AS_SCENE_VIDEO, envVar: "SONG_VIDEO_MODEL" },
+  { task: "song_lipsync", title: "Lip-sync for songs", description: "Song videos: after each scene's video is made, its mouth is moved to the scene's part of the song. Kling Lip Sync costs about $0.014 per second. \"none\" = off. Works best on close-up singing shots (the song scene pictures are drawn as close-ups).", capability: "lipsync", defaultModel: "inference.sh/klingai/lip-sync", envVar: "SONG_LIPSYNC_MODEL" },
   { task: "channel_text", title: "Channel name & description", description: "Writes the YouTube channel name, handle, description and keywords (Channel page), and each finished video's title, description and tags.", capability: "text", defaultModel: "gemini-3.8-flash", envVar: "GEMINI_CHANNEL_TEXT_MODEL" },
   { task: "channel_image", title: "Channel art", description: "Draws the YouTube logo, banner and thumbnails (Channel page and each finished video).", capability: "image", defaultModel: "gemini-3.1-flash-image", envVar: "GEMINI_CHANNEL_IMAGE_MODEL" },
   { task: "plan_text", title: "Monthly ideas & schedule", description: "Plans a month of video ideas for the posting schedule (Ideas & schedule page).", capability: "text", defaultModel: "gemini-3.8-flash", envVar: "GEMINI_PLAN_MODEL" },
@@ -54,6 +57,8 @@ export function capabilityOf(modelId: string): ModelCapability | undefined {
   const id = modelId.toLowerCase().replace(/^free\//, "");
   // inference.sh apps ("inference.sh/bytedance/seedance-2-5", "inference.sh/klingai/avatar"): only these video apps are wired up.
   if (id === SAME_AS_SCENE_VIDEO) return "video";
+  if (id === LIPSYNC_OFF) return "lipsync";
+  if (/^inference\.sh\/(klingai\/lip-sync|pixverse\/lip-sync)$/.test(id)) return "lipsync";
   if (/^runway\/wan3(_prime)?$/.test(id)) return "video";
   if (id.startsWith("inference.sh/")) {
     return /\/seedance|^inference\.sh\/(klingai\/(avatar(-pro)?|video-v3)|bytedance\/omnihuman-1-5|alibaba\/wan-2-7-i2v|bfl\/flux-3-video|minimax\/h3|falai\/minimax-h3-max|google\/gemini-omni-flash|xai\/grok-imagine-video-1-5|pruna\/p-video|pixverse\/v6)$/.test(id) ? "video" : undefined;

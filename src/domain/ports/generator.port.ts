@@ -70,6 +70,8 @@ export interface Provider {
   speech(prompt: string, opts: { model: string; voice: string; label: string; ctx: GenContext }): Promise<Buffer>;
   /** One continuous song (optional; without it song mode falls back to per-scene sung TTS). */
   song?(prompt: string, opts: { model: string; label: string; durationSec: number; ctx: GenContext; /** Plain lyrics of this song (part), for models that take lyrics separately (Treblo). */ lyrics?: string; /** Music only, no singing (background music). */ instrumental?: boolean }): Promise<SongResult>;
+  /** Move the mouth in a finished video to an audio track (optional; song videos). Returns the new MP4. */
+  lipSync?(opts: { model: string; video: Buffer; audio: Buffer; videoSec: number; audioSec: number; label: string }): Promise<Buffer>;
   /** Animated MP4 seeded by a still (optional; used when videoMode === "veo"). */
   video?(
     prompt: string,
