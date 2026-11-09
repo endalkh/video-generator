@@ -232,12 +232,12 @@ function syllablesPerLine(input: ProjectInput, songSeconds?: number): number {
 
 /** How the music prompt describes the singer (music models have no voice setting). */
 const SINGER_TEXT: Record<Singer, string> = {
-  auto: "one clear, warm, friendly vocalist",
+  auto: "a bright, high-pitched, sweet young girl's voice (a child, not an adult), clear and joyful",
   woman: "one clear, warm, friendly female vocalist (a young woman)",
   man: "one clear, warm, friendly male vocalist (a young man)",
-  girl: "one young girl (about 8 years old) with a bright, sweet, natural child's voice",
+  girl: "one young girl (about 6–8 years old) with a very bright, high-pitched, sweet, natural child's voice",
   boy: "one young boy (about 8 years old) with a bright, cheerful, natural child's voice",
-  kids: "a small, joyful children's choir singing together in unison",
+  kids: "a young girl's bright, high-pitched lead voice with a small, joyful children's choir answering and singing the chorus together",
 };
 /** How the speech prompt describes the voice (on top of the chosen prebuilt voice). */
 const VOICE_STYLE: Record<Singer, string> = {
