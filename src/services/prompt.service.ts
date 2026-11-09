@@ -237,7 +237,8 @@ const SINGER_TEXT: Record<Singer, string> = {
   man: "one clear, warm, friendly male vocalist (a young man)",
   girl: "one young girl (about 6–8 years old) with a very bright, high-pitched, sweet, natural child's voice",
   boy: "one young boy (about 8 years old) with a bright, cheerful, natural child's voice",
-  kids: "a young girl's bright, high-pitched lead voice with a small, joyful children's choir answering and singing the chorus together",
+  kids: "a small, joyful group of young children singing together in unison, high and bright (children, not adults)",
+  girl_kids: "one young girl (about 6–8 years old) with a very bright, high-pitched, sweet child's voice who leads the song and sings the verses alone; on the chorus and the main repeated lines a small group of young children joins her and they all sing those words together with her, in unison, high and bright (children, not adults)",
 };
 /** How the speech prompt describes the voice (on top of the chosen prebuilt voice). */
 const VOICE_STYLE: Record<Singer, string> = {
@@ -247,6 +248,7 @@ const VOICE_STYLE: Record<Singer, string> = {
   girl: "a cheerful little girl, bright and childlike",
   boy: "a cheerful little boy, bright and childlike",
   kids: "a cheerful, playful child",
+  girl_kids: "a cheerful little girl, bright and childlike",
 };
 
 /** Target video length: the chosen length, else the song length (song) or ~12 s per scene (narration). */

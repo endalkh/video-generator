@@ -21,13 +21,15 @@ const SINGERS: Record<string, string> = {
   girl: "a little girl about 4 years old: a tiny, high, sweet child's voice, singing simply and a little imperfectly like a real preschooler (not an adult woman, no vibrato, no pop-star style)",
   boy: "a little boy about 4 years old: a small, high, cheerful child's voice, singing simply like a real preschooler (not an adult man, no vibrato)",
   kids: "a small group of preschool children singing together, high and cheerful, like a nursery class (not adults)",
+  girl_kids: "a little girl about 4–6 years old leads with a tiny, high, sweet child's voice and sings the verses alone; on the chorus a small group of preschool children joins her and they sing together (not adults, no vibrato)",
 };
 
 /** Style tags from Treblo's tag list (https://sonauto.ai/tag-explorer) that steer the singer; others are avoided. */
 export function trebloTags(singer: string | undefined): { tags: string[]; negative_tags: string[] } {
-  const kid = singer === "girl" || singer === "boy" || singer === "kids";
-  const tags = ["children", "playful", "happy", ...(singer === "girl" || singer === "woman" ? ["female vocalist"] : singer === "man" ? ["male vocalist"] : [])];
-  const negative_tags = ["opera", "aggressive", "heavy", ...(singer === "girl" ? ["male vocalist"] : []), ...(singer === "boy" || singer === "man" ? ["female vocalist"] : []), ...(kid ? ["soul", "r&b"] : [])];
+  const kid = singer === "girl" || singer === "boy" || singer === "kids" || singer === "girl_kids";
+  const girl = singer === "girl" || singer === "girl_kids";
+  const tags = ["children", "playful", "happy", ...(girl || singer === "woman" ? ["female vocalist"] : singer === "man" ? ["male vocalist"] : [])];
+  const negative_tags = ["opera", "aggressive", "heavy", ...(girl ? ["male vocalist"] : []), ...(singer === "boy" || singer === "man" ? ["female vocalist"] : []), ...(kid ? ["soul", "r&b"] : [])];
   return { tags, negative_tags };
 }
 

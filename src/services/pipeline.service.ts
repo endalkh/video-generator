@@ -178,7 +178,7 @@ export function songStyleLock(projectId: string, language: string, parentInstrum
   const instruments = parentInstruments
     ? "the instruments the parent asks for below"
     : language === "am" ? "krar, masinko, kebero and light hand percussion" : "acoustic guitar, bright piano, light drums and claps";
-  return `STYLE LOCK (the same in every part, overriding any other tempo or style choice): tempo exactly ${bpm} BPM, a bouncy, relaxed groove; key of ${key}; instruments: ${instruments}; the same one high, bright child's voice.`;
+  return `STYLE LOCK (the same in every part, overriding any other tempo or style choice): tempo exactly ${bpm} BPM, a bouncy, relaxed groove; key of ${key}; instruments: ${instruments}; the same singer(s) as described above, in every part (a child's voice, high and bright).`;
 }
 
 /** Seconds of cross-dissolve between moving-video scenes in the final video. */

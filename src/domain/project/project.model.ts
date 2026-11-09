@@ -48,7 +48,7 @@ export const MAX_SCENES = 40;
 export const SECONDS_PER_SCENE = { song: 10, narration: 12, music_voice: 12, character: 8, dialogue: 12 } as const;
 
 /** Who sings or speaks. Songs describe the singer in the music prompt; speech also picks a matching voice. */
-export const SingerSchema = z.enum(["auto", "woman", "man", "girl", "boy", "kids"]);
+export const SingerSchema = z.enum(["auto", "woman", "man", "girl", "boy", "kids", "girl_kids"]);
 export type Singer = z.infer<typeof SingerSchema>;
 
 /** Gemini TTS prebuilt voices (name → character), for the "exact voice" picker. */
@@ -64,7 +64,7 @@ export type TtsVoice = keyof typeof TTS_VOICES;
 
 /** Speech voice used when no exact voice is chosen. */
 export function defaultVoice(singer: Singer, audioMode: AudioMode): TtsVoice {
-  const bySinger: Record<Singer, TtsVoice> = { auto: audioMode === "narration" ? "Kore" : "Leda", woman: "Sulafat", man: "Achird", girl: "Leda", boy: "Puck", kids: "Laomedeia" };
+  const bySinger: Record<Singer, TtsVoice> = { auto: audioMode === "narration" ? "Kore" : "Leda", woman: "Sulafat", man: "Achird", girl: "Leda", boy: "Puck", kids: "Laomedeia", girl_kids: "Leda" };
   return bySinger[singer];
 }
 

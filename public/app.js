@@ -287,7 +287,7 @@ const AUDIO_MODES = [
   ["character", "The character speaks — she says the words herself in the video (lip-sync; needs Veo)"],
   ["dialogue", "Dialogue story — characters talk to each other, each in its own voice"],
 ];
-const SINGERS = [["auto", "Any (let the AI choose)"], ["woman", "Woman"], ["man", "Man"], ["girl", "Girl (child)"], ["boy", "Boy (child)"], ["kids", "Group of children"]];
+const SINGERS = [["auto", "Any (let the AI choose)"], ["woman", "Woman"], ["man", "Man"], ["girl", "Girl (child)"], ["boy", "Boy (child)"], ["kids", "Group of children"], ["girl_kids", "Girl leads, children join on the chorus"]];
 const TTS_VOICES = {
   Zephyr: "female, bright", Kore: "female, firm", Leda: "female, youthful", Aoede: "female, breezy", Callirrhoe: "female, easy-going",
   Autonoe: "female, bright", Despina: "female, smooth", Erinome: "female, clear", Laomedeia: "female, upbeat", Achernar: "female, soft",
