@@ -467,3 +467,23 @@ describe("separate video models for songs and movies", () => {
     expect(await run("dialogue")).toEqual(["gemini-omni-1.2-flash", "gemini-omni-1.2-flash"]);
   }, 180_000);
 });
+
+describe("song video clips play with sound", () => {
+  it("each clip carries its own piece of the song (the final still gets the whole song)", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const mock = mockProvider();
+    c = await makeTestContainer({ provider: () => mock });
+    const ps = c.projectService;
+    const { id } = await ps.create({ topic: "a little train", sceneCount: 2, audioMode: "song", videoMode: "veo", reviewMode: "manual" }, "mock");
+    for (const st of ["poem", "scenes", "character", "audio"]) { await ps.generateStep(id, st); await ps.idle(); }
+    await ps.drawScenePictures(id);
+    await ps.idle();
+    await ps.makeVideoFromScratch(id);
+    await ps.idle();
+    const m = media(id);
+    // Loudest point of each clip's sound: silence is -91 dB.
+    const peak = (file: string) => Number(execFileSync("sh", ["-c", `ffmpeg -hide_banner -i "${file}" -vn -af volumedetect -f null - 2>&1 | sed -n "s/.*max_volume: \\([-0-9.]*\\) dB.*/\\1/p"`], { encoding: "utf8" }).trim());
+    for (const i of [0, 1]) expect(peak(m.sceneClip(i))).toBeGreaterThan(-60);
+    expect((await ps.get(id)).status).toBe("done");
+  }, 120_000);
+});

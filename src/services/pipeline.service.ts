@@ -973,12 +973,17 @@ export class PipelineService {
           await abortable(renderOneAtATime(async () => {
             checkCancel(); // Stop pressed while waiting for its turn: don't render
             report(`scene ${i + 1}: putting the clip together`);
+            // One song across the scenes: the clip carries its own piece of the song, so it plays with sound on the
+            // Clips page (the final video still lays the whole, seamless song over the joined clips).
+            const t = timing(i);
+            const sound = t.duration !== undefined ? await ensureScenePiece(p, project, i) : null;
+            const clipTiming = sound ? { ...t, soundtrack: sound } : t;
             if (inVideo) {
               await videoToClip({ video: p.sceneVideo(i), out: tmpClip, fmt, keepAudio: true });
             } else if (useVeo) {
-              await videoToClip({ ...timing(i), video: p.sceneVideo(i), out: tmpClip, fmt });
+              await videoToClip({ ...clipTiming, video: p.sceneVideo(i), out: tmpClip, fmt });
             } else {
-              await stillToClip({ ...timing(i), image: p.sceneImage(i), out: tmpClip, motion: s.motion, fmt });
+              await stillToClip({ ...clipTiming, image: p.sceneImage(i), out: tmpClip, motion: s.motion, fmt });
             }
           }), signal);
           await rename(tmpClip, p.sceneClip(i));

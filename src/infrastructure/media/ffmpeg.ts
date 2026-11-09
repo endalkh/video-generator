@@ -228,6 +228,9 @@ export interface ClipTiming {
   audio?: string;
   /** Fixed clip length with a silent track (used when one song spans all scenes). */
   duration?: number;
+  /** With `duration`: this scene's own piece of the song as the clip's sound (instead of silence), so the clip can be
+   *  played on its own. The final video still lays the whole song over the joined clips. */
+  soundtrack?: string;
 }
 
 async function timingArgs(t: ClipTiming): Promise<{ dur: number; audioInput: string[]; audioFilter: string }> {
@@ -236,6 +239,7 @@ async function timingArgs(t: ClipTiming): Promise<{ dur: number; audioInput: str
     return { dur, audioInput: ["-i", t.audio], audioFilter: "[1:a]apad[a]" };
   }
   if (!t.duration || t.duration <= 0) throw new Error("clip needs either audio or a positive duration");
+  if (t.soundtrack) return { dur: t.duration, audioInput: ["-i", t.soundtrack], audioFilter: `[1:a]aresample=48000,apad,atrim=0:${t.duration.toFixed(3)}[a]` };
   return { dur: t.duration, audioInput: ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"], audioFilter: "[1:a]anull[a]" };
 }
 
