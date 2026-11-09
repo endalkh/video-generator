@@ -294,7 +294,7 @@ describe("ModelSettingsService", () => {
     await expect(c.modelSettingsService.update("poem", "lyria-3.5")).rejects.toBeInstanceOf(ValidationError);
     expect((await c.modelSettingsService.reset("poem")).model).toBe("gemini-3.8-flash");
     const avail = await c.modelSettingsService.availableModels("mock");
-    expect(avail.byCapability.music.map((m) => m.id)).toEqual(["lyria-3.5"]);
+    expect(avail.byCapability.music.map((m) => m.id)).toEqual(["lyria-3-clip-preview"]);
     expect(avail.warning).toBeNull();
   });
 });
@@ -310,7 +310,7 @@ describe("pipeline (mock provider, real ffmpeg)", () => {
     expect(byKey("poem")).toEqual(["gemini-3.1-pro-preview"]);
     expect(byKey("scenes")).toEqual(["gemini-3.8-flash"]);
     expect(byKey("scene_image")).toEqual(["gemini-3-pro-image", "gemini-3-pro-image"]);
-    expect(byKey("song")).toEqual(["lyria-3.5"]);
+    expect(new Set(byKey("song"))).toEqual(new Set(["lyria-3-clip-preview"])); // the default: best Amharic
   }, 60_000);
 
   it("renders a song video using DB prompts, then resumes from checkpoints", async () => {
