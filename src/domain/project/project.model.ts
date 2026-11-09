@@ -61,8 +61,9 @@ export const SingerSchema = z.enum(SINGER_IDS);
 export type Singer = z.infer<typeof SingerSchema>;
 
 /** A singer id split into its lead and its backing group (either may be missing). */
-export function singerParts(singer: Singer): { lead?: SingerLead; group?: SingerGroup } {
-  if (singer === "auto") return {};
+export function singerParts(singer: Singer | undefined): { lead?: SingerLead; group?: SingerGroup } {
+  // Partial input (e.g. a prompt preview) may have no singer: same as "auto".
+  if (!singer || singer === "auto" || !(SINGER_IDS as readonly string[]).includes(singer)) return {};
   const [a, b] = singer.split("_") as [string, string | undefined];
   if ((SINGER_GROUPS as readonly string[]).includes(a)) return { group: a as SingerGroup };
   return { lead: a as SingerLead, group: b as SingerGroup | undefined };

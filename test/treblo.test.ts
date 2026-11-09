@@ -40,7 +40,7 @@ describe("Treblo (Sonauto) music", () => {
     const song = TrebloMusic.body("ignored Lyria prompt", { model: "treblo/v3", label: "song", durationSec: 180, ctx, lyrics: "  verse one\n\nverse two " });
     expect(song).toMatchObject({ lyrics: "verse one\n\nverse two", output_format: "mp3", length_range: [150, 210] });
     expect(song.prompt).toBe(songStylePrompt(ctx));
-    expect(song.prompt).toMatch(/sung in Amharic by a little girl about 4 years old.*not an adult woman.*"Beach Day".*Swimming at the beach/);
+    expect(song.prompt).toMatch(/sung in Amharic by a little girl about 4–6 years old.*not an adult woman.*"Beach Day".*Swimming at the beach/);
     // Never tags + lyrics + prompt together: Treblo answers 422 "cannot provide all three tags, lyrics, and prompt".
     expect(song.tags).toBeUndefined();
     expect(song.negative_tags).toEqual(["opera", "aggressive", "heavy", "male vocalist", "soul", "r&b"]);
