@@ -79,7 +79,7 @@ describe("Amharic ግጥም", () => {
     await c.projectService.idle();
     const enPoem = mock.prompts.filter((x) => x.kind === "poem").at(-1)!.prompt;
     expect(enPoem).not.toContain("ግጥም");
-    expect(enPoem).toContain("Each line has at most 12 syllables.");
+    expect(enPoem).toContain("Each line has at most 8 syllables."); // sung lines stay short phrases
   }, 60_000);
 });
 
