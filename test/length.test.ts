@@ -125,3 +125,15 @@ describe("built-in prompt upgrades", () => {
     expect((await service.get("scenes")).isDefault).toBe(true); // upgraded to the current default
   });
 });
+
+describe("songs made in parts", () => {
+  it("every part gets the same fixed tempo, key, instruments and voice", async () => {
+    const { songStyleLock } = await import("../src/services/pipeline.service.js");
+    const a = songStyleLock("milcah-song", "am", false);
+    expect(a).toBe(songStyleLock("milcah-song", "am", false)); // same for every part of a video
+    expect(a).toMatch(/tempo exactly (100|104|108|112) BPM/);
+    expect(a).toMatch(/key of [DEFG] major/);
+    expect(a).toContain("krar, masinko, kebero");
+    expect(songStyleLock("x", "en", true)).toContain("the instruments the parent asks for");
+  });
+});

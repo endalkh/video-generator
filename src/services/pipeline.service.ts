@@ -164,6 +164,23 @@ export async function wipeMediaFrom(p: MediaPaths, from: StepName): Promise<void
   if (at("character")) await rm(p.castDir, { recursive: true, force: true });
 }
 
+/**
+ * One fixed style for every part of a song made in parts: tempo, key, instruments and voice spelled out, the same in
+ * each request (otherwise each part picks its own beat and pitch). Chosen once per video, from its id.
+ */
+export function songStyleLock(projectId: string, language: string, parentInstruments: boolean): string {
+  const tempos = [100, 104, 108, 112];
+  const keys = ["D major", "E major", "F major", "G major"];
+  let h = 0;
+  for (const ch of projectId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const bpm = tempos[h % tempos.length]!;
+  const key = keys[(h >>> 8) % keys.length]!;
+  const instruments = parentInstruments
+    ? "the instruments the parent asks for below"
+    : language === "am" ? "krar, masinko, kebero and light hand percussion" : "acoustic guitar, bright piano, light drums and claps";
+  return `STYLE LOCK (the same in every part, overriding any other tempo or style choice): tempo exactly ${bpm} BPM, a bouncy, relaxed groove; key of ${key}; instruments: ${instruments}; the same one high, bright child's voice.`;
+}
+
 /** Seconds of cross-dissolve between moving-video scenes in the final video. */
 export const SCENE_TRANSITION_SEC = 0.4;
 
@@ -736,8 +753,10 @@ export class PipelineService {
             }
             emit({ type: "progress", step: "audio", done: j, total: parts.length, message: `composing song part ${j + 1} of ${parts.length}` });
             const first = j === 0, last = j === parts.length - 1;
-            const note = `This is part ${j + 1} of ${parts.length} of one long song; the parts are joined back to back. `
-              + (first ? "Start with a short instrumental intro and set a catchy melody and chorus." : "Continue the same song: exactly the same melody, chorus, tempo, key, instruments and singer as before, with no intro.")
+            // Each part is made on its own, so "the same as before" isn't enough: every part gets the same fixed
+            // tempo, key, instruments and voice, so the joined song keeps one beat and pitch.
+            const note = `This is part ${j + 1} of ${parts.length} of one long song; the parts are joined back to back, so every part must sound exactly alike. ${songStyleLock(project.id, input.language, Boolean(input.audioRequest))} `
+              + (first ? "Start with a short instrumental intro and set a catchy melody and chorus." : "Continue the same song with the same melody and chorus, with no intro.")
               + (last ? " End with a happy, clear ending." : " Do not end or fade out: stop on the beat, ready for the next part.");
             const r = await prompt("audio", "song", "song", { title, timed_lyrics: timedLyrics(part.scenes, part.seconds, first), song_seconds: part.seconds, part_note: note });
             const song = await provider.song!(r.text, { model: r.model, label: `song part ${j + 1}`, durationSec: part.seconds, ctx: ctx(), lyrics: plainLyrics(part.scenes) });
