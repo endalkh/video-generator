@@ -68,7 +68,7 @@ describe("Amharic ግጥም", () => {
     expect(poem).toContain("one complete sentence or thought");
     expect(poem).toContain("verbs agree with the subject");
     // Sung lines stay short phrases (at most 8 syllables ≈ 10 Ge'ez letters), however long the song: extra time is music.
-    expect(poem).toContain("about 10 Ge'ez letters (fidel)");
+    expect(poem).toContain("about 14 Ge'ez letters (fidel)");
     expect(poem).not.toContain("syllables.");
 
     await c.projectService.rewriteStanza(am.id, 0, { provider: "mock" });
@@ -79,7 +79,7 @@ describe("Amharic ግጥም", () => {
     await c.projectService.idle();
     const enPoem = mock.prompts.filter((x) => x.kind === "poem").at(-1)!.prompt;
     expect(enPoem).not.toContain("ግጥም");
-    expect(enPoem).toContain("Each line has at most 8 syllables."); // sung lines stay short phrases
+    expect(enPoem).toContain("Each line has at most 11 syllables."); // sung lines: 3–4 words
   }, 60_000);
 });
 

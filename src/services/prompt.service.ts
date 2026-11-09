@@ -216,8 +216,8 @@ export class PromptService {
  * Longest line that can still be sung / read clearly in the time: song = 2 lines per stanza at a kids' pace;
  * narration and rhyme over music = 4 lines per stanza with a short pause after each scene.
  */
-/** Longest sung line: about 2–4 short words (≈ 2 bars at 130–140 BPM). */
-const SONG_MAX_SYLLABLES_PER_LINE = 8;
+/** Longest sung line: about 3–4 words (≈ 12–14 Ge'ez letters), like "ጠዋት ፀሐይ ፈክታ ወጣች" in ውቧ ከተማችን. */
+const SONG_MAX_SYLLABLES_PER_LINE = 11;
 
 function syllablesPerLine(input: ProjectInput, songSeconds?: number): number {
   // Sound inside the clips: 2 lines per ~8-second clip, like "The character speaks".
