@@ -416,8 +416,9 @@ describe("dialogue spoken inside the video", () => {
     expect(videos).toHaveLength(2);
     const p = await ps.get(id);
     const first = p.scenes!.scenes[0]!;
-    expect(videos[0]!.prompt).toContain(first.dialogue?.[0]?.line ?? first.text);
-    expect(videos[0]!.prompt).toMatch(/TALK in this shot/);
+    // Scenes are made two at a time, so the order of the video requests can vary.
+    expect(videos.some((v) => v.prompt.includes(first.dialogue?.[0]?.line ?? first.text))).toBe(true);
+    expect(videos.every((v) => /TALK in this shot/.test(v.prompt))).toBe(true);
     expect(mock.prompts.some((x) => x.kind === "speech")).toBe(true); // only from the first (speech-model) audio
     expect([p.status, p.media.final]).toEqual(["done", "final.mp4"]);
   }, 120_000);
