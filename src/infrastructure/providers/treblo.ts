@@ -1,4 +1,5 @@
 import type { GenContext, SongResult } from "../../domain/ports/generator.port.js";
+import { singerParts, type Singer } from "../../domain/project/project.model.js";
 import { log } from "../../util/log.js";
 import { isTransientError, sleep, withRetry } from "../../util/retry.js";
 
@@ -15,21 +16,34 @@ export const TREBLO_MAX_SONG_SEC = 270;
 
 const LANGUAGE_NAMES: Record<string, string> = { am: "Amharic", en: "English" };
 /** How each singer is described to Treblo. Kids' voices are spelled out: music models drift to adult singers otherwise. */
-const SINGERS: Record<string, string> = {
+const LEADS: Record<string, string> = {
   woman: "a warm, gentle female singer",
   man: "a friendly male singer",
-  girl: "a little girl about 4 years old: a tiny, high, sweet child's voice, singing simply and a little imperfectly like a real preschooler (not an adult woman, no vibrato, no pop-star style)",
-  boy: "a little boy about 4 years old: a small, high, cheerful child's voice, singing simply like a real preschooler (not an adult man, no vibrato)",
-  kids: "a small group of preschool children singing together, high and cheerful, like a nursery class (not adults)",
-  girl_kids: "a little girl about 4–6 years old leads with a tiny, high, sweet child's voice and sings the verses alone; on the chorus a small group of preschool children joins her and they sing together (not adults, no vibrato)",
+  girl: "a little girl about 4–6 years old: a tiny, high, sweet child's voice, singing simply and a little imperfectly like a real preschooler (not an adult woman, no vibrato, no pop-star style)",
+  boy: "a little boy about 4–6 years old: a small, high, cheerful child's voice, singing simply like a real preschooler (not an adult man, no vibrato)",
 };
+const GROUPS: Record<string, string> = {
+  kids: "a small group of preschool boys and girls",
+  girls: "a small group of preschool girls",
+  boys: "a small group of preschool boys",
+};
+/** How each singer (lead and/or group) is described to Treblo. */
+function singerDescription(singer: string | undefined): string | undefined {
+  const { lead, group } = singerParts((singer ?? "auto") as Singer);
+  if (lead && group) return `${LEADS[lead]} leads and sings the verses alone; on the chorus ${GROUPS[group]} joins and they sing together (children, not adults)`;
+  if (lead) return LEADS[lead];
+  if (group) return `${GROUPS[group]} singing together, high and cheerful, like a nursery class (not adults)`;
+  return undefined;
+}
 
 /** Style tags from Treblo's tag list (https://sonauto.ai/tag-explorer) that steer the singer; others are avoided. */
 export function trebloTags(singer: string | undefined): { tags: string[]; negative_tags: string[] } {
-  const kid = singer === "girl" || singer === "boy" || singer === "kids" || singer === "girl_kids";
-  const girl = singer === "girl" || singer === "girl_kids";
-  const tags = ["children", "playful", "happy", ...(girl || singer === "woman" ? ["female vocalist"] : singer === "man" ? ["male vocalist"] : [])];
-  const negative_tags = ["opera", "aggressive", "heavy", ...(girl ? ["male vocalist"] : []), ...(singer === "boy" || singer === "man" ? ["female vocalist"] : []), ...(kid ? ["soul", "r&b"] : [])];
+  const { lead, group } = singerParts((singer ?? "auto") as Singer);
+  const kid = lead === "girl" || lead === "boy" || group !== undefined;
+  const girl = lead === "girl" || (!lead && group === "girls");
+  const boyish = lead === "boy" || (!lead && group === "boys");
+  const tags = ["children", "playful", "happy", ...(girl || lead === "woman" ? ["female vocalist"] : lead === "man" ? ["male vocalist"] : [])];
+  const negative_tags = ["opera", "aggressive", "heavy", ...(girl ? ["male vocalist"] : []), ...(boyish || lead === "man" ? ["female vocalist"] : []), ...(kid ? ["soul", "r&b"] : [])];
   return { tags, negative_tags };
 }
 
@@ -54,7 +68,7 @@ export function lengthRange(seconds: number): [number, number] {
 export function songStylePrompt(ctx: GenContext): string {
   const i = ctx.input;
   const language = LANGUAGE_NAMES[i.language] ?? i.language;
-  const singer = SINGERS[i.singer ?? ""] ?? "a warm, clear singer";
+  const singer = singerDescription(i.singer) ?? "a warm, clear singer";
   return [
     `A catchy children's song sung in ${language} by ${singer}, for young children (age range: ${i.ageRange}).`,
     ctx.poem?.title ? `Title: "${ctx.poem.title}".` : "",

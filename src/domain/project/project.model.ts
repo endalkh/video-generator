@@ -48,8 +48,25 @@ export const MAX_SCENES = 40;
 export const SECONDS_PER_SCENE = { song: 10, narration: 12, music_voice: 12, character: 8, dialogue: 12 } as const;
 
 /** Who sings or speaks. Songs describe the singer in the music prompt; speech also picks a matching voice. */
-export const SingerSchema = z.enum(["auto", "woman", "man", "girl", "boy", "kids", "girl_kids"]);
+export const SINGER_LEADS = ["girl", "boy", "woman", "man"] as const;
+export const SINGER_GROUPS = ["kids", "girls", "boys"] as const;
+export type SingerLead = (typeof SINGER_LEADS)[number];
+export type SingerGroup = (typeof SINGER_GROUPS)[number];
+/**
+ * Who sings: a lead alone ("girl"), a group alone ("kids" = boys and girls, "girls", "boys"), or a lead who sings the
+ * verses with a group joining on the chorus ("girl_kids", "man_girls", …). "auto" lets the AI choose.
+ */
+export const SINGER_IDS = ["auto", ...SINGER_LEADS, ...SINGER_GROUPS, ...SINGER_LEADS.flatMap((l) => SINGER_GROUPS.map((g) => `${l}_${g}` as const))] as const;
+export const SingerSchema = z.enum(SINGER_IDS);
 export type Singer = z.infer<typeof SingerSchema>;
+
+/** A singer id split into its lead and its backing group (either may be missing). */
+export function singerParts(singer: Singer): { lead?: SingerLead; group?: SingerGroup } {
+  if (singer === "auto") return {};
+  const [a, b] = singer.split("_") as [string, string | undefined];
+  if ((SINGER_GROUPS as readonly string[]).includes(a)) return { group: a as SingerGroup };
+  return { lead: a as SingerLead, group: b as SingerGroup | undefined };
+}
 
 /** Gemini TTS prebuilt voices (name → character), for the "exact voice" picker. */
 export const TTS_VOICES = {
@@ -64,8 +81,13 @@ export type TtsVoice = keyof typeof TTS_VOICES;
 
 /** Speech voice used when no exact voice is chosen. */
 export function defaultVoice(singer: Singer, audioMode: AudioMode): TtsVoice {
-  const bySinger: Record<Singer, TtsVoice> = { auto: audioMode === "narration" ? "Kore" : "Leda", woman: "Sulafat", man: "Achird", girl: "Leda", boy: "Puck", kids: "Laomedeia", girl_kids: "Leda" };
-  return bySinger[singer];
+  // Speech has one voice: the lead's, or the group's when there's no lead.
+  const { lead, group } = singerParts(singer);
+  const byLead: Record<SingerLead, TtsVoice> = { woman: "Sulafat", man: "Achird", girl: "Leda", boy: "Puck" };
+  const byGroup: Record<SingerGroup, TtsVoice> = { kids: "Laomedeia", girls: "Leda", boys: "Puck" };
+  if (lead) return byLead[lead];
+  if (group) return byGroup[group];
+  return audioMode === "narration" ? "Kore" : "Leda";
 }
 
 /** The narrator's voice in dialogue mode (a calm, clear storyteller). */

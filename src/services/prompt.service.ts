@@ -1,6 +1,6 @@
 import { ConflictError, NotFoundError } from "../domain/errors.js";
 import { kidsSyllablesPerSec, LANGUAGE_NAMES, SONG_FRAME_SEC } from "../domain/ports/generator.port.js";
-import { pacingMode, SECONDS_PER_SCENE, soundInVideo, type ProjectInput, type Singer } from "../domain/project/project.model.js";
+import { pacingMode, SECONDS_PER_SCENE, singerParts, soundInVideo, type ProjectInput, type Singer, type SingerGroup, type SingerLead } from "../domain/project/project.model.js";
 import { SCENE_TAIL_SEC } from "../infrastructure/media/ffmpeg.js";
 import { DEFAULT_PROMPTS, promptDefinition } from "../domain/prompt/prompt.defaults.js";
 import { Prompt, PromptSet, SHARED } from "../domain/prompt/prompt.entity.js";
@@ -169,8 +169,8 @@ export class PromptService {
         video_seconds: videoSeconds(input, extra.songSeconds),
         // Ge'ez: one letter (fidel) is ~0.8 syllable (see estimateSyllables), so a line can have a few more letters.
         letters_per_line: Math.round(syllablesPerLine(input, extra.songSeconds) / 0.8),
-        singer: SINGER_TEXT[input.singer],
-        voice_style: VOICE_STYLE[input.singer],
+        singer: singerText(input.singer),
+        voice_style: voiceStyle(input.singer),
         audio_request: input.audioRequest ?? "",
         // Per-scene block listing the secondary cast present in a shot; the pipeline fills it in per scene (empty by default).
         cast_in_scene: "",
@@ -230,26 +230,39 @@ function syllablesPerLine(input: ProjectInput, songSeconds?: number): number {
     : Math.max(4, Math.min(14, Math.floor((videoSeconds(input) - input.sceneCount * SCENE_TAIL_SEC) * pace / (input.sceneCount * (mode === "character" ? 2 : 4)))));
 }
 
-/** How the music prompt describes the singer (music models have no voice setting). */
-const SINGER_TEXT: Record<Singer, string> = {
-  auto: "a bright, high-pitched, sweet young girl's voice (a child, not an adult), clear and joyful",
+const LEAD_TEXT: Record<SingerLead, string> = {
+  girl: "one young girl (about 6–8 years old) with a very bright, high-pitched, sweet, natural child's voice",
+  boy: "one young boy (about 6–8 years old) with a bright, high, cheerful, natural child's voice",
   woman: "one clear, warm, friendly female vocalist (a young woman)",
   man: "one clear, warm, friendly male vocalist (a young man)",
-  girl: "one young girl (about 6–8 years old) with a very bright, high-pitched, sweet, natural child's voice",
-  boy: "one young boy (about 8 years old) with a bright, cheerful, natural child's voice",
-  kids: "a small, joyful group of young children singing together in unison, high and bright (children, not adults)",
-  girl_kids: "one young girl (about 6–8 years old) with a very bright, high-pitched, sweet child's voice who leads the song and sings the verses alone; on the chorus and the main repeated lines a small group of young children joins her and they all sing those words together with her, in unison, high and bright (children, not adults)",
 };
-/** How the speech prompt describes the voice (on top of the chosen prebuilt voice). */
-const VOICE_STYLE: Record<Singer, string> = {
-  auto: "a warm, friendly storyteller",
-  woman: "a warm, friendly young woman",
-  man: "a warm, friendly young man",
+const GROUP_TEXT: Record<SingerGroup, string> = {
+  kids: "a small, joyful group of young children, boys and girls together",
+  girls: "a small, joyful group of young girls",
+  boys: "a small, joyful group of young boys",
+};
+/** How the music prompt describes the singer(s) (music models have no voice setting). */
+export function singerText(singer: Singer): string {
+  const { lead, group } = singerParts(singer);
+  if (lead && group) return `${LEAD_TEXT[lead]} who leads the song and sings the verses alone; on the chorus and the main repeated lines ${GROUP_TEXT[group]} joins in and they all sing those words together with the lead, in unison (the group are children, high and bright)`;
+  if (lead) return LEAD_TEXT[lead];
+  if (group) return `${GROUP_TEXT[group]} singing together in unison, high and bright (children, not adults)`;
+  return "a bright, high-pitched, sweet young girl's voice (a child, not an adult), clear and joyful";
+}
+const LEAD_VOICE: Record<SingerLead, string> = {
   girl: "a cheerful little girl, bright and childlike",
   boy: "a cheerful little boy, bright and childlike",
-  kids: "a cheerful, playful child",
-  girl_kids: "a cheerful little girl, bright and childlike",
+  woman: "a warm, friendly young woman",
+  man: "a warm, friendly young man",
 };
+/** How the speech prompt describes the voice (on top of the chosen prebuilt voice): the lead, else a child. */
+function voiceStyle(singer: Singer): string {
+  const { lead, group } = singerParts(singer);
+  if (lead) return LEAD_VOICE[lead];
+  if (group === "boys") return "a cheerful little boy, bright and childlike";
+  if (group) return "a cheerful, playful child";
+  return "a warm, friendly storyteller";
+}
 
 /** Target video length: the chosen length, else the song length (song) or ~12 s per scene (narration). */
 function videoSeconds(input: ProjectInput, songSeconds?: number): number {

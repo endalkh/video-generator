@@ -61,15 +61,15 @@ describe("singer / voice", () => {
     const song = await c.projectService.create({ topic: "Counting stars", singer: "kids", sceneCount: 2, reviewMode: "auto" }, "mock");
     await c.projectService.start(song.id);
     await c.projectService.idle();
-    expect(mock.prompts.find((x) => x.kind === "song")!.prompt).toContain("a small, joyful group of young children singing together in unison");
+    expect(mock.prompts.find((x) => x.kind === "song")!.prompt).toContain("a small, joyful group of young children, boys and girls together singing together in unison");
 
     // Girl leads, children join her on the chorus.
     const lead = await c.projectService.create({ topic: "Counting moons", singer: "girl_kids", sceneCount: 2, reviewMode: "auto" }, "mock");
     await c.projectService.start(lead.id);
     await c.projectService.idle();
     const leadPrompt = mock.prompts.filter((x) => x.kind === "song").at(-1)!.prompt;
-    expect(leadPrompt).toContain("leads the song and sings the verses alone");
-    expect(leadPrompt).toContain("joins her and they all sing those words together with her");
+    expect(leadPrompt).toContain("one young girl (about 6–8 years old)");
+    expect(leadPrompt).toContain("leads the song and sings the verses alone; on the chorus and the main repeated lines a small, joyful group of young children, boys and girls together joins in");
 
     const story = await c.projectService.create({ topic: "A goat finds a friend", audioMode: "narration", singer: "man", voice: "Puck", sceneCount: 2, reviewMode: "auto" }, "mock");
     await c.projectService.start(story.id);
@@ -170,4 +170,21 @@ describe("channel audio defaults", () => {
     await c.projectService.idle();
     expect((await c.projectService.get(projectId)).input).toMatchObject({ audioMode: "music_voice", singer: "girl", voice: "Zephyr" });
   }, 60_000);
+});
+
+describe("singer options", () => {
+  it("covers every lead alone, every group alone, and every lead with every group", async () => {
+    const { SINGER_IDS, singerParts, defaultVoice } = await import("../src/domain/project/project.model.js");
+    const { singerText } = await import("../src/services/prompt.service.js");
+    expect(SINGER_IDS).toHaveLength(20);
+    expect(singerParts("man_girls")).toEqual({ lead: "man", group: "girls" });
+    expect(singerParts("boys")).toEqual({ group: "boys" });
+    expect(singerParts("woman")).toEqual({ lead: "woman" });
+    expect(singerText("boy_kids")).toMatch(/young boy[\s\S]*leads the song[\s\S]*boys and girls together joins in/);
+    expect(singerText("woman_boys")).toMatch(/young woman[\s\S]*group of young boys joins in/);
+    expect(singerText("girls")).toMatch(/^a small, joyful group of young girls singing together/);
+    expect(singerText("man")).toBe("one clear, warm, friendly male vocalist (a young man)");
+    // Speech has one voice: the lead's, else the group's.
+    expect([defaultVoice("man_kids", "narration"), defaultVoice("boys", "narration"), defaultVoice("girl_boys", "narration")]).toEqual(["Achird", "Puck", "Leda"]);
+  });
 });
