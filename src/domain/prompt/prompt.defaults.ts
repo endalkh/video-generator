@@ -10,8 +10,10 @@ import { NotFoundError } from "../errors.js";
  * Flags available to every prompt. The has_channel_name / has_title flags are only set on the Channel page;
  * has_reference when a picture of yours is attached (Channel page, character from your picture);
  * has_samples when the video has sample pictures (e.g. a food or a house) that the scenes should show.
+ * verse_poem = a rhyming poem (not a song, not the character talking); am_verse / am_spoken = Amharic verse vs. Amharic
+ * talk (The character speaks: natural speech, no rhyme).
  */
-export const PROMPT_FLAGS = ["am", "en", "song", "narration", "music_voice", "character_voice", "video_sings", "video_sound", "video_dialogue", "veo", "dialogue", "has_character_hint", "has_reference", "has_samples", "has_channel_name", "has_title", "has_audio_request"] as const;
+export const PROMPT_FLAGS = ["am", "en", "song", "narration", "music_voice", "character_voice", "verse_poem", "am_verse", "am_spoken", "video_sings", "video_sound", "video_dialogue", "veo", "dialogue", "has_character_hint", "has_reference", "has_samples", "has_channel_name", "has_title", "has_audio_request"] as const;
 
 /** Variables available to every prompt. */
 export const COMMON_VARS = ["topic", "language_name", "age_range", "style", "scene_count", "character_hint", "safety", "local_look", "syllables_per_line", "letters_per_line", "video_seconds", "singer", "voice_style", "audio_request", "cast_in_scene"] as const;
@@ -62,7 +64,30 @@ Show it warmly and respectfully, bright and cheerful.`],
     title: "Poem / lyrics",
     description: "Writes the poem (song lyrics or story verses). Must return JSON {title, stanzas:[{lines}], moral}.",
     vars: ["song_seconds"],
-    template: `Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for young children (age range: {{age_range}}).
+    template: `{{#if character_voice}}Write a short spoken script (what the main character says out loud to the children watching; natural talk, NOT a poem or a song){{/if}}{{#if song}}Write a rhythmic children's song{{/if}}{{#if verse_poem}}Write a rhythmic rhyming children's poem{{/if}} in {{language_name}} for young children (age range: {{age_range}}).
+Topic: {{topic}}.
+{{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short and punchy so they can be sung at a lively, upbeat tempo while staying clear. Repeat a simple chorus line every few stanzas.{{/if}}{{#if video_sings}} The main character sings each stanza herself, looking at the camera, in one 8-second shot, so each stanza must be easy to sing clearly at an upbeat tempo within 8 seconds.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if character_voice}}Exactly {{scene_count}} stanzas of 2 short lines each. The main character says each stanza herself, looking at the camera, in one 8-second shot, so each stanza is something she says out loud (talking to the children watching), slowly and clearly, like natural friendly talk: no rhyme, no chorus, nothing sung. Go from beginning to end, one idea per stanza.{{/if}}{{#if dialogue}}This is a fun animated MOVIE, not a lesson. Write a short story outline in {{scene_count}} beats (one per scene), as {{scene_count}} plain stanzas of 1-2 lines each describing what HAPPENS in that beat — an exciting little adventure with a beginning, a middle and a happy ending. Keep it playful and cinematic; do NOT teach a lesson or moral, do not force rhymes, and do not write it as something to read aloud (characters will speak their own lines later).{{/if}}
+{{#if en}}Each line has at most {{syllables_per_line}} syllables.{{/if}}{{#if am}}Each line has about {{letters_per_line}} Ge'ez letters (fidel), never more than {{letters_per_line}} + 2.{{/if}}
+Simple, clear vocabulary and a warm, fun tone.
+{{#if song}}SINGABLE SONG LYRICS. If the topic above gives its own lyric rules (words per line, how many verses, how often the chorus repeats, tempo), follow those exactly; they come first. Otherwise:
+- Each line is a short, complete phrase of about 3–4 words, in natural word order: no long descriptive sentences or complicated grammar, and not just 1–2 words either (too little for a melody).
+- Simple everyday words a young child knows; the two lines of a stanza rhyme and say one clear thing.
+- A short, catchy chorus that comes back a few times (not most of the song): the verses tell the story with new lines.
+- Prefer natural pronunciation, rhythm and a memorable tune over poetic complexity, and keep one clear story from the first stanza to the last.{{/if}}
+{{#if am_spoken}}Write natural, everyday SPOKEN Amharic, natively in Ge'ez script (not transliteration, not a translation from English), the way a friendly Ethiopian child or kids' YouTuber really talks to the camera:
+- This is talk, NOT a ግጥም or a song: no ቤት (rhyme), no refrain, no chorus, no sing-song rhythm, no poetic or bookish words.
+- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is said in its own 8-second clip. Never let a sentence run on into the next stanza.
+- Correct grammar: verbs agree with the speaker (a girl about herself: ነኝ, መጣሁ; to the viewers: ኑ, ግቡ, አድርጉ).
+- Keep names, links and app words the way people say them (ዩቲዩብ, ቲክቶክ, ሰብስክራይብ).{{/if}}
+{{#if am_verse}}Write a real Amharic children's ግጥም, natively in Ge'ez script (not transliteration, not a translation from English):
+- ቤት (rhyme): the lines of each stanza end on the same sound, the same last syllable (for example ተነሳች / ታጠበች, ሳሙና / ጤና), like traditional Amharic poems and children's songs.
+- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is shown on its own picture. Never let a sentence run on into the next stanza.
+- Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
+- All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.
+- For a song, a line like "ጠዋት ፀሐይ ፈክታ ወጣች፣ / ከተማችን ደምቃ ታየች።" is the right size: about 3–4 words, 12–14 Ge'ez letters.{{/if}}
+{{safety}}`,
+    /** Earlier built-in versions: a prompt still on one of these (never edited) is upgraded automatically. */
+    previousTemplates: [`Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for young children (age range: {{age_range}}).
 Topic: {{topic}}.
 {{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short and punchy so they can be sung at a lively, upbeat tempo while staying clear. Repeat a simple chorus line every few stanzas.{{/if}}{{#if video_sings}} The main character sings each stanza herself, looking at the camera, in one 8-second shot, so each stanza must be easy to sing clearly at an upbeat tempo within 8 seconds.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if character_voice}}Exactly {{scene_count}} stanzas of 2 short lines each. The main character says each stanza herself, looking at the camera, in one 8-second shot, so each stanza is something she says out loud (talking to the children watching), slowly and clearly. Tell one story from beginning to end, one step per stanza.{{/if}}{{#if dialogue}}This is a fun animated MOVIE, not a lesson. Write a short story outline in {{scene_count}} beats (one per scene), as {{scene_count}} plain stanzas of 1-2 lines each describing what HAPPENS in that beat — an exciting little adventure with a beginning, a middle and a happy ending. Keep it playful and cinematic; do NOT teach a lesson or moral, do not force rhymes, and do not write it as something to read aloud (characters will speak their own lines later).{{/if}}
 {{#if en}}Each line has at most {{syllables_per_line}} syllables.{{/if}}{{#if am}}Each line has about {{letters_per_line}} Ge'ez letters (fidel), never more than {{letters_per_line}} + 2.{{/if}}
@@ -78,9 +103,7 @@ Simple, clear vocabulary and a warm, fun tone.
 - Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
 - All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.
 - For a song, a line like "ጠዋት ፀሐይ ፈክታ ወጣች፣ / ከተማችን ደምቃ ታየች።" is the right size: about 3–4 words, 12–14 Ge'ez letters.{{/if}}
-{{safety}}`,
-    /** Earlier built-in versions: a prompt still on one of these (never edited) is upgraded automatically. */
-    previousTemplates: [`Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for young children (age range: {{age_range}}).
+{{safety}}`, `Write a rhythmic {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for young children (age range: {{age_range}}).
 Topic: {{topic}}.
 {{#if song}}Exactly {{scene_count}} stanzas of 2 short lines each (the whole song is sung in about {{song_seconds}} seconds), short and punchy so they can be sung at a lively, upbeat tempo while staying clear. Repeat a simple chorus line every few stanzas.{{/if}}{{#if video_sings}} The main character sings each stanza herself, looking at the camera, in one 8-second shot, so each stanza must be easy to sing clearly at an upbeat tempo within 8 seconds.{{/if}}{{#if narration}}Exactly {{scene_count}} stanzas of 4 short lines each (the whole story is read aloud slowly in about {{video_seconds}} seconds). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if music_voice}}Exactly {{scene_count}} stanzas of 4 short lines each, chanted like a nursery rhyme with a steady, bouncy beat over music (about {{video_seconds}} seconds in all). Tell one story from beginning to end, one step per stanza.{{/if}}{{#if character_voice}}Exactly {{scene_count}} stanzas of 2 short lines each. The main character says each stanza herself, looking at the camera, in one 8-second shot, so each stanza is something she says out loud (talking to the children watching), slowly and clearly. Tell one story from beginning to end, one step per stanza.{{/if}}{{#if dialogue}}This is a fun animated MOVIE, not a lesson. Write a short story outline in {{scene_count}} beats (one per scene), as {{scene_count}} plain stanzas of 1-2 lines each describing what HAPPENS in that beat — an exciting little adventure with a beginning, a middle and a happy ending. Keep it playful and cinematic; do NOT teach a lesson or moral, do not force rhymes, and do not write it as something to read aloud (characters will speak their own lines later).{{/if}}
 {{#if en}}Each line has at most {{syllables_per_line}} syllables.{{/if}}{{#if am}}Each line has about {{letters_per_line}} Ge'ez letters (fidel), never more than {{letters_per_line}} + 2.{{/if}}
@@ -161,7 +184,30 @@ Topic: {{topic}}.
     title: "Rewrite one stanza",
     description: "Poem and Scenes pages: writes ONE stanza (scene) again, keeping the rest of the poem. {{poem_text}} is the whole poem with numbered stanzas, {{hint}} what the parent wants changed. Must return JSON {lines}.",
     vars: ["title", "poem_text", "stanza_number", "stanza_text", "line_count", "hint"],
-    template: `Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+    template: `Rewrite ONE stanza of this {{#if character_voice}}spoken script (what the main character says to the camera; natural talk, NOT a poem or a song){{/if}}{{#if song}}children's song{{/if}}{{#if verse_poem}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+Topic: {{topic}}. Title: "{{title}}".
+
+The whole poem (stanza {{stanza_number}} is the one to rewrite):
+{{poem_text}}
+
+Write a new stanza {{stanza_number}} to replace:
+{{stanza_text}}
+
+It must fit between the stanzas around it: the same rhythm and tone, and the story keeps going in the same order. Exactly {{line_count}} short lines{{#if en}}, each with at most {{syllables_per_line}} syllables{{/if}}{{#if am}}, each with about {{letters_per_line}} Ge'ez letters (fidel){{/if}}{{#if song}}, easy to sing slowly and clearly{{/if}}. If the poem has a chorus line and this stanza had it, keep it.
+What the parent wants changed: {{hint}}
+{{#if am_spoken}}Write natural, everyday SPOKEN Amharic, natively in Ge'ez script (not transliteration, not a translation from English), the way a friendly Ethiopian child or kids' YouTuber really talks to the camera:
+- This is talk, NOT a ግጥም or a song: no ቤት (rhyme), no refrain, no chorus, no sing-song rhythm, no poetic or bookish words.
+- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is said in its own 8-second clip. Never let a sentence run on into the next stanza.
+- Correct grammar: verbs agree with the speaker (a girl about herself: ነኝ, መጣሁ; to the viewers: ኑ, ግቡ, አድርጉ).
+- Keep names, links and app words the way people say them (ዩቲዩብ, ቲክቶክ, ሰብስክራይብ).{{/if}}
+{{#if am_verse}}Write a real Amharic children's ግጥም, natively in Ge'ez script (not transliteration, not a translation from English):
+- ቤት (rhyme): the lines of each stanza end on the same sound, the same last syllable (for example ተነሳች / ታጠበች, ሳሙና / ጤና), like traditional Amharic poems and children's songs.
+- Every stanza is one complete sentence or thought that makes sense on its own, because each stanza is shown on its own picture. Never let a sentence run on into the next stanza.
+- Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
+- All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
+Return only the new stanza's lines; don't repeat the old one.
+{{safety}}`,
+    previousTemplates: [`Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming children's poem{{/if}} in {{language_name}} for children aged {{age_range}}.
 Topic: {{topic}}. Title: "{{title}}".
 
 The whole poem (stanza {{stanza_number}} is the one to rewrite):
@@ -178,8 +224,7 @@ What the parent wants changed: {{hint}}
 - Everyday spoken Amharic a small child understands, with correct grammar: verbs agree with the subject (a girl: ተነሳች, ታጠበች; a boy: ተነሳ, ታጠበ). No old Ge'ez, church or bookish words.
 - All lines about the same length, so the rhythm is steady and easy to clap to. A short አዝማች (refrain) that comes back is welcome.{{/if}}
 Return only the new stanza's lines; don't repeat the old one.
-{{safety}}`,
-    previousTemplates: [`Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
+{{safety}}`, `Rewrite ONE stanza of this {{#if song}}children's song{{else}}rhyming story poem{{/if}} in {{language_name}} for children aged {{age_range}}.
 Topic: {{topic}}. Title: "{{title}}".
 
 The whole poem (stanza {{stanza_number}} is the one to rewrite):
@@ -199,7 +244,7 @@ Return only the new stanza's lines; don't repeat the old one.
     title: "Scene plan",
     description: "Splits the poem into scenes with English visual descriptions. Must return JSON {scenes:[{index,text,visualPrompt,motion}]}.",
     vars: ["poem_json", "stanza_count"],
-    template: `Turn this children's song into {{stanza_count}} animated film shots, one per stanza, in order, like a modern 3D kids' animated movie.
+    template: `Turn this {{#if character_voice}}spoken video script{{else}}children's song{{/if}} into {{stanza_count}} animated film shots, one per stanza, in order, like a modern 3D kids' animated movie.
 For each shot: "index" (0-based), "text" = the stanza lines verbatim (joined with newlines, keep the original language),
 {{#if has_samples}}The attached sample pictures show things the parent wants in the video (for example a food, a house, a place, an object or clothes). Show them in the shots where they fit the words, and in "visualPrompt" describe them exactly as they look in the pictures (shape, colours, materials, patterns, how the food is served or the house is built). A shot may be indoors when a sample picture shows an inside place; otherwise it takes place outdoors in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky).{{else}}By default every shot takes place OUTDOORS in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky), and the action is adapted to the outdoors (e.g. washing hands at an outdoor basin or water jug, not a kitchen sink). Only when the topic clearly belongs in a specific outdoor place should you set the shots there instead and keep that setting consistent across the video: e.g. a lion or zebra on the open savanna, a train on its tracks through the hills, a plane in the blue sky among fluffy clouds, a car or bus on a country road, a boat on a calm river. Keep it bright, sunny, gentle and never scary.{{/if}}
 How the place looks:
@@ -212,6 +257,17 @@ Art style: {{style}}.
 
 {{poem_json}}`,
     previousTemplates: [`Turn this children's song into {{stanza_count}} animated film shots, one per stanza, in order, like a modern 3D kids' animated movie.
+For each shot: "index" (0-based), "text" = the stanza lines verbatim (joined with newlines, keep the original language),
+{{#if has_samples}}The attached sample pictures show things the parent wants in the video (for example a food, a house, a place, an object or clothes). Show them in the shots where they fit the words, and in "visualPrompt" describe them exactly as they look in the pictures (shape, colours, materials, patterns, how the food is served or the house is built). A shot may be indoors when a sample picture shows an inside place; otherwise it takes place outdoors in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky).{{else}}By default every shot takes place OUTDOORS in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky), and the action is adapted to the outdoors (e.g. washing hands at an outdoor basin or water jug, not a kitchen sink). Only when the topic clearly belongs in a specific outdoor place should you set the shots there instead and keep that setting consistent across the video: e.g. a lion or zebra on the open savanna, a train on its tracks through the hills, a plane in the blue sky among fluffy clouds, a car or bus on a country road, a boat on a calm river. Keep it bright, sunny, gentle and never scary.{{/if}}
+How the place looks:
+{{local_look}}
+"visualPrompt" = a vivid ENGLISH shot description (name the homes, food and clothes it shows the way described above, e.g. "a round gojo house with a thatched roof", never just "a house"): where exactly we are in that setting, ONE clear, lively action the main character is doing with her hands and body (e.g. sweeping the yard, running up the hill, hugging a baby goat, carrying a basket of fruit), her facial expression, and what the animals do. Bubbles, butterflies, sparkles, petals and other floating or flying things are rare: put them in a shot only when its words are about them (e.g. washing with soap, a song about butterflies); most videos have none. Prefer medium shots where the character is clearly visible and plenty of the setting around her shows too; use a close-up only for a big feeling; vary the shots. Do not describe the main character's appearance (it is added separately); no text in the image.
+"motion" = one of zoom-in, zoom-out, pan-left, pan-right, static.
+"characters" = OPTIONAL list of short lowercase slug ids of the recurring supporting characters (talking animals, the sun, etc.) that appear in THIS shot, matching the ids you would give them (e.g. "rabbit", "lion-cub", "sun"); omit it or use an empty list for shots with only the main character.
+Art style: {{style}}.
+{{safety}}
+
+{{poem_json}}`, `Turn this children's song into {{stanza_count}} animated film shots, one per stanza, in order, like a modern 3D kids' animated movie.
 For each shot: "index" (0-based), "text" = the stanza lines verbatim (joined with newlines, keep the original language),
 {{#if has_samples}}The attached sample pictures show things the parent wants in the video (for example a food, a house, a place, an object or clothes). Show them in the shots where they fit the words, and in "visualPrompt" describe them exactly as they look in the pictures (shape, colours, materials, patterns, how the food is served or the house is built). A shot may be indoors when a sample picture shows an inside place; otherwise it takes place outdoors in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky).{{else}}By default every shot takes place OUTDOORS in a sunny, lush green countryside (soft grass, leafy trees, flowers, blue sky), and the action is adapted to the outdoors (e.g. washing hands at an outdoor basin or water jug, not a kitchen sink). Only when the topic clearly belongs in a specific outdoor place should you set the shots there instead and keep that setting consistent across the video: e.g. a lion or zebra on the open savanna, a train on its tracks through the hills, a plane in the blue sky among fluffy clouds, a car or bus on a country road, a boat on a calm river. Keep it bright, sunny, gentle and never scary.{{/if}}
 How the place looks:

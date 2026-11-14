@@ -306,6 +306,8 @@ const TTS_VOICES = {
 };
 const VOICE_OPTIONS = [["", "Matching the singer (recommended)"], ...Object.entries(TTS_VOICES).map(([v, d]) => [v, `${v} — ${d}`])];
 const AUDIO_LABEL = { song: "song", music_voice: "rhyme over music", narration: "narrated story", character: "the character speaks", dialogue: "dialogue story" };
+/** What the Scenes page calls each scene's words, by audio mode. */
+const WORDS_LABEL = { song: "Sung (song lyrics)", video_sings: "Sung by the character in the clip", music_voice: "Chanted over music", narration: "Read by the narrator", character: "Spoken by the character in the clip (not sung)", dialogue: "Spoken" };
 const CONCURRENCY_OPTIONS = [["", "Auto — 4 on inference.sh, 2 on Google Veo"], ...[1, 2, 3, 4, 5, 6, 8, 10].map((n) => [String(n), n === 1 ? "1 — one at a time (safest for rate limits)" : `${n} at a time`])];
 const CONCURRENCY_HINT = "How many scene videos are made at once. More is faster; Google Veo may answer \"too many requests\" (the app waits and retries).";
 const VISUALS_OPTIONS = [["veo", "Moving video clips — AI video per scene (Veo, Seedance, Kling, Wan, FLUX, MiniMax, Omni or Grok on the Models page; paid)"], ["still", "Animated pictures — still images with camera motion (fast, free)"]];
@@ -735,7 +737,7 @@ function stepPage(p, step, keepVideo, videoKey) {
         const rw = rewriteControl(p, r.sc.index, r.text, draft, "scene");
         return h("div", { class: "rounded-xl border border-orange-100 p-3" },
         h("div", { class: "mb-2 flex items-center gap-2" }, h("p", { class: "flex-1 font-semibold", text: `Scene ${r.sc.index + 1}` }), rw.toggle),
-        h("p", { class: "label", text: "Sung / spoken" }), r.text, rw.box, rw.note,
+        h("p", { class: "label", text: WORDS_LABEL[p.input.audioMode === "song" && p.input.videoAudio ? "video_sings" : p.input.audioMode] ?? "Sung / spoken" }), r.text, rw.box, rw.note,
         h("p", { class: "label mt-2", text: noPicture(r.sc) ? "What the video shows (English, sent to the video AI)" : "What the picture shows (English)" }), r.visual,
         h("div", { class: "mt-2" }, scenePictureToggle(p, r.sc, act)));
       }));

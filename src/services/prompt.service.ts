@@ -187,6 +187,10 @@ export class PromptService {
         narration: input.audioMode === "narration" && !inVideo,
         music_voice: input.audioMode === "music_voice" && !inVideo,
         character_voice: inVideo === "speaks",
+        // Rhyming poem: not a song, and not the character talking to the camera (that is plain speech).
+        verse_poem: input.audioMode !== "song" && inVideo !== "speaks",
+        am_verse: input.language === "am" && inVideo !== "speaks",
+        am_spoken: input.language === "am" && inVideo === "speaks",
         video_sings: inVideo === "sings",
         video_sound: inVideo !== null,
         video_dialogue: inVideo === "dialogue",
